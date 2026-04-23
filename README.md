@@ -1,6 +1,92 @@
 # aura-tracker-gcp
 
-A model-agnostic MCP (Model Context Protocol) server that exposes Google Cloud Platform infrastructure operations as structured tools callable by any LLM — Claude, Gemini, or any other model that supports MCP.
+<!-- Add your social preview image here: -->
+<!-- ![aura-tracker-gcp banner](docs/banner.png) -->
+
+**Talk to your GCP infrastructure in plain English.**
+
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes 12 GCP operations as structured tools — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
+
+<!-- Add a demo GIF or screenshot here showing Claude Desktop calling a tool: -->
+<!-- ![Demo: Claude Desktop calling gcp_gke_get_cluster_bottlenecks](docs/demo.gif) -->
+
+---
+
+## Quick Start
+
+### Step 1 — Install
+
+**Homebrew (macOS / Linux) — recommended**
+
+```bash
+brew install asbrodova/tap/aura-tracker-gcp
+```
+
+**Direct binary download (all platforms)**
+
+Download the archive for your platform from the [latest release](https://github.com/asbrodova/aura-tracker-gcp/releases/latest), extract, and place the binary on your `PATH`.
+
+```bash
+# macOS Apple Silicon example
+curl -L https://github.com/asbrodova/aura-tracker-gcp/releases/latest/download/aura-tracker-gcp_darwin_arm64.tar.gz \
+  | tar xz
+sudo mv aura-tracker-gcp /usr/local/bin/
+```
+
+**Go toolchain**
+
+```bash
+go install github.com/asbrodova/aura-tracker-gcp/cmd/aura-tracker-gcp@latest
+```
+
+**Docker (Raspberry Pi, hosted environments, or anywhere with a container runtime)**
+
+```bash
+docker run --rm \
+  -e GCP_PROJECT_ID=my-project \
+  -v "$HOME/.config/gcloud/application_default_credentials.json:/creds.json:ro" \
+  -e GOOGLE_APPLICATION_CREDENTIALS=/creds.json \
+  ghcr.io/asbrodova/aura-tracker-gcp:latest
+```
+
+### Step 2 — Authenticate with GCP
+
+```bash
+gcloud auth application-default login
+```
+
+If credentials are missing the server prints a clear error on startup with the exact command to run:
+
+```
+aura-tracker-gcp: no GCP credentials found.
+
+Run:  gcloud auth application-default login
+
+Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.
+```
+
+### Step 3 — Wire it into Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "env": {
+        "GCP_PROJECT_ID": "my-project"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop. The tools appear automatically. Now ask:
+
+> "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."
+
+---
 
 ## Tools
 
@@ -19,27 +105,7 @@ A model-agnostic MCP (Model Context Protocol) server that exposes Google Cloud P
 | `gcp_monitoring_get_metrics` | Fetch Cloud Monitoring time-series metrics | No | — |
 | `gcp_iam_test_permissions` | Test which IAM permissions the caller has on a project | No | — |
 
-## Prerequisites
-
-- Go 1.26+
-- A GCP project with Application Default Credentials configured
-- The service account must have appropriate IAM roles (use `gcp_iam_test_permissions` to verify)
-
-```bash
-gcloud auth application-default login
-```
-
-## Usage
-
-```bash
-# Build
-go build -o aura-tracker-gcp ./cmd/aura-tracker-gcp
-
-# Run (requires GCP_PROJECT_ID)
-GCP_PROJECT_ID=my-project ./aura-tracker-gcp
-```
-
-The server reads JSON-RPC from stdin and writes responses to stdout. Logs go to stderr as structured JSON.
+---
 
 ## Using with MCP Clients
 
@@ -51,7 +117,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 {
   "mcpServers": {
     "aura-tracker-gcp": {
-      "command": "/path/to/aura-tracker-gcp",
+      "command": "aura-tracker-gcp",
       "env": {
         "GCP_PROJECT_ID": "my-project"
       }
@@ -70,7 +136,7 @@ Add to your project's `.claude/settings.json` or global `~/.claude/settings.json
 {
   "mcpServers": {
     "aura-tracker-gcp": {
-      "command": "/path/to/aura-tracker-gcp",
+      "command": "aura-tracker-gcp",
       "env": {
         "GCP_PROJECT_ID": "my-project"
       }
@@ -79,7 +145,7 @@ Add to your project's `.claude/settings.json` or global `~/.claude/settings.json
 }
 ```
 
-Or run inline from the repo:
+Or run inline from the repo (no install needed):
 
 ```json
 {
@@ -102,8 +168,6 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 
 ### Example prompts
 
-Once connected, you can ask the LLM things like:
-
 > "List all GKE clusters in project my-project across all locations."
 
 > "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."
@@ -113,6 +177,14 @@ Once connected, you can ask the LLM things like:
 > "Scale the default-pool node pool in my-cluster to 5 nodes — dry run first."
 
 > "Show me the last 50 ERROR logs from the my-service Cloud Run service."
+
+---
+
+## Prerequisites
+
+- Go 1.26+
+- A GCP project with Application Default Credentials configured
+- The service account must have appropriate IAM roles (use `gcp_iam_test_permissions` to verify)
 
 ## Environment Variables
 
@@ -129,6 +201,8 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Mutation tools** (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) always support `dry_run: true`
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without issuing an API call
+
+---
 
 ## Architecture
 

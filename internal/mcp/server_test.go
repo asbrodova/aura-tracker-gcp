@@ -49,7 +49,7 @@ func (m *mockSvc) TestPermissions(_ context.Context, _ models.TestPermissionsReq
 }
 
 func TestServerRegistersAllTools(t *testing.T) {
-	s := New(&mockSvc{}, slog.Default())
+	s := New(&mockSvc{}, slog.Default(), "test")
 
 	expected := []string{
 		"gcp_gke_list_clusters",
