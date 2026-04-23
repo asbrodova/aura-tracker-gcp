@@ -29,6 +29,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string) *server.MCPServ
 	lg := tools.NewLoggingTools(svc, log)
 	mon := tools.NewMonitoringTools(svc, log)
 	iam := tools.NewIAMTools(svc, log)
+	topo := tools.NewTopologyTools(svc, log)
 
 	s.AddTools(
 		gke.ListClusters(),
@@ -43,6 +44,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string) *server.MCPServ
 		lg.QueryRecent(),
 		mon.GetMetrics(),
 		iam.TestPermissions(),
+		topo.GetServiceTopology(),
 	)
 
 	return s

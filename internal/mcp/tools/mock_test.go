@@ -71,3 +71,6 @@ func (m *mockGCPService) GetMetrics(_ context.Context, _ models.GetMetricsReques
 func (m *mockGCPService) TestPermissions(_ context.Context, _ models.TestPermissionsRequest) (models.TestPermissionsResponse, error) {
 	return m.returnTestPermissions, m.returnTestPermissionsErr
 }
+func (m *mockGCPService) GetServiceTopology(_ context.Context, _ models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
+	return models.ServiceTopologyReport{}, nil
+}
