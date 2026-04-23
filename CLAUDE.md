@@ -43,6 +43,14 @@ internal/mcp/  NEVER imports internal/gcp/
 | `GCP_PROJECT_ID` | Yes | GCP project for SDK client init |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Service account key path (optional with ADC) |
 
+## README Hygiene
+
+Always check `README.md` is up to date **before committing**. Update it whenever you:
+- Add, remove, or rename a tool (update the count in the intro, the Tools table, the architecture diagram, the Project Layout section, and example prompts)
+- Change environment variables, prerequisites, or architecture
+
+Stage README changes in the same commit as the code that required them.
+
 ## Adding a New Tool
 
 1. Add input/output structs to `pkg/models/<domain>.go`

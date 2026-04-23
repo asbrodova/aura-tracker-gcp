@@ -5,7 +5,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes 12 GCP operations as structured tools — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes 13 GCP operations as structured tools — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
 
 <!-- Add a demo GIF or screenshot here showing Claude Desktop calling a tool: -->
 <!-- ![Demo: Claude Desktop calling gcp_gke_get_cluster_bottlenecks](docs/demo.gif) -->
@@ -104,6 +104,7 @@ Restart Claude Desktop. The tools appear automatically. Now ask:
 | `gcp_logging_query_recent` | Fetch recent Cloud Logging entries by severity and resource | No | — |
 | `gcp_monitoring_get_metrics` | Fetch Cloud Monitoring time-series metrics | No | — |
 | `gcp_iam_test_permissions` | Test which IAM permissions the caller has on a project | No | — |
+| `gcp_get_service_topology` | Infer the dependency graph of a Cloud Run service: Cloud SQL, Pub/Sub, VPC, secrets, and more. Supports `depth=1` (direct deps) and `depth=2` (deps-of-deps) | No | — |
 
 ---
 
@@ -178,6 +179,8 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 
 > "Show me the last 50 ERROR logs from the my-service Cloud Run service."
 
+> "What does my-api depend on? Show me its full dependency graph at depth 2."
+
 ---
 
 ## Prerequisites
@@ -217,7 +220,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 ┌─────────────────────────────▼───────────────────────────────────┐
 │              internal/mcp/   (MCP Protocol Layer)                │
 │   server.go — tool registration                                  │
-│   tools/  gke · cloudrun · pubsub · logging · monitoring · iam  │
+│   tools/  gke · cloudrun · pubsub · logging · monitoring · iam · topology  │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ calls only ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
@@ -229,7 +232,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 │              internal/gcp/   (GCP Adapter Layer)                 │
 │   client.go — SDK factory, rate limiter (10 rps), 30s timeout    │
 │   gke · gke_bottleneck · cloudrun · pubsub                       │
-│   logging · monitoring · iam · errors                            │
+│   logging · monitoring · iam · topology · errors                 │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ Google Cloud Go SDK (gRPC)
                           GCP APIs
@@ -273,6 +276,7 @@ aura-tracker-gcp/
 │   │   ├── logging.go             # Cloud Logging adapter
 │   │   ├── monitoring.go          # Cloud Monitoring adapter
 │   │   ├── iam.go                 # IAM adapter
+│   │   ├── topology.go            # GetServiceTopology (dependency graph inference)
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool registration
