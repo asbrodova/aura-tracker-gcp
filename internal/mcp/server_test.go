@@ -47,6 +47,9 @@ func (m *mockSvc) GetMetrics(_ context.Context, _ models.GetMetricsRequest) (mod
 func (m *mockSvc) TestPermissions(_ context.Context, _ models.TestPermissionsRequest) (models.TestPermissionsResponse, error) {
 	return models.TestPermissionsResponse{}, nil
 }
+func (m *mockSvc) GetServiceTopology(_ context.Context, _ models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
+	return models.ServiceTopologyReport{}, nil
+}
 
 func TestServerRegistersAllTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
@@ -64,6 +67,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_logging_query_recent",
 		"gcp_monitoring_get_metrics",
 		"gcp_iam_test_permissions",
+		"gcp_get_service_topology",
 	}
 
 	registered := s.ListTools()

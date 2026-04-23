@@ -38,4 +38,7 @@ type GCPService interface {
 
 	// --- IAM ---
 	TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error)
+
+	// --- Topology ---
+	GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error)
 }
