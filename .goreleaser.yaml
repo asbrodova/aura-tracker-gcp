@@ -1,0 +1,75 @@
+version: 2
+
+project_name: aura-tracker-gcp
+
+before:
+  hooks:
+    - go mod tidy
+    - go vet ./...
+
+builds:
+  - id: aura-tracker-gcp
+    main: ./cmd/aura-tracker-gcp
+    binary: aura-tracker-gcp
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: default
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+release:
+  github:
+    owner: asbrodova
+    name: aura-tracker-gcp
+  draft: false
+  prerelease: auto
+
+brews:
+  - name: aura-tracker-gcp
+    repository:
+      owner: asbrodova
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    homepage: https://github.com/asbrodova/aura-tracker-gcp
+    description: "MCP server exposing GCP infrastructure operations as LLM-callable tools."
+    license: MIT
+    install: |
+      bin.install "aura-tracker-gcp"
+    test: |
+      system "#{bin}/aura-tracker-gcp", "--version"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
