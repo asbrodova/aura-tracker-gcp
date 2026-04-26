@@ -195,6 +195,8 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 |----------|----------|-------------|
 | `GCP_PROJECT_ID` | Yes | Default GCP project used when initialising SDK clients |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON key (optional if ADC is configured via `gcloud`) |
+| `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
+| `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 
 ## Security Model
 
@@ -204,6 +206,139 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Mutation tools** (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) always support `dry_run: true`
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without issuing an API call
+- **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
+
+---
+
+## PII Anonymization
+
+Tool outputs can contain IPs, emails, service account names, and API keys. The anonymization engine scrubs them before the LLM sees the response. It is **off by default** and adds zero overhead when disabled.
+
+### Running with defaults
+
+```bash
+ANONYMIZE_ENABLED=true GCP_PROJECT_ID=my-project aura-tracker-gcp
+```
+
+**Defaults when enabled:**
+- Mode: `local` — fast, regex-based, no extra GCP API calls
+- Patterns: `internal_ip`, `public_ip`, `email`, `service_account`, `gcp_api_key`
+- Masking on (not audit-only)
+- No JSON key whitelist
+
+Matched values are replaced with stable indexed tokens — the same raw value always gets the same token within one tool call, so the LLM can still correlate occurrences:
+
+```
+10.0.0.1      →  [INTERNAL_IP_1]
+admin@corp.com →  [EMAIL_1]
+10.0.0.1      →  [INTERNAL_IP_1]   ← same token, same value
+```
+
+To persist the setting in Claude Desktop / Claude Code, add to the `env` block in your MCP config:
+
+```json
+"env": {
+  "GCP_PROJECT_ID": "my-project",
+  "ANONYMIZE_ENABLED": "true"
+}
+```
+
+### Configuring with a YAML file
+
+```bash
+ANONYMIZE_ENABLED=true ANONYMIZE_CONFIG_PATH=/path/to/anonymize.yaml \
+  GCP_PROJECT_ID=my-project aura-tracker-gcp
+```
+
+> `ANONYMIZE_ENABLED=true` in the environment always overrides the `enabled` field in the file.
+
+### Layer 1 — Local scrubber (default)
+
+Regex patterns walk the JSON tree. No extra API calls, no latency.
+
+```yaml
+enabled: true
+mode: local            # default
+
+# JSON key names whose values are never masked (exact match)
+json_key_whitelist:
+  - cluster_name
+  - region
+
+# Append custom patterns after the built-ins
+patterns:
+  - name: ticket_id
+    regex: 'TICKET-[0-9]+'
+    replacement_template: '[TICKET]'   # fixed string; omit for indexed tokens like [TICKET_ID_1]
+```
+
+Built-in patterns (always active in local mode):
+
+| Pattern name | Matches |
+|---|---|
+| `internal_ip` | RFC-1918 ranges: 10.x, 172.16–31.x, 192.168.x |
+| `public_ip` | Any IPv4 address |
+| `email` | Email addresses |
+| `service_account` | `*@*.iam.gserviceaccount.com` |
+| `gcp_api_key` | `AIza…` (35-char GCP API keys) |
+
+### Layer 2 — GCP DLP (higher recall, billed)
+
+Sends each tool result to the [GCP Data Loss Prevention API](https://cloud.google.com/dlp). Catches types the regex layer misses (phone numbers, credit cards, SSNs, etc.). Requires the DLP API to be enabled in your project.
+
+```yaml
+enabled: true
+mode: dlp
+
+dlp:
+  project_id: my-billing-project   # defaults to GCP_PROJECT_ID
+  info_types:                       # defaults: EMAIL_ADDRESS, IP_ADDRESS, PHONE_NUMBER,
+    - EMAIL_ADDRESS                 #           CREDIT_CARD_NUMBER, US_SOCIAL_SECURITY_NUMBER
+    - PHONE_NUMBER
+    - CREDIT_CARD_NUMBER
+```
+
+### Layer 3 — Both (local first, then DLP)
+
+Local runs first (no extra latency for what regex can catch), then DLP scrubs the already-clean output for anything that slipped through.
+
+```yaml
+enabled: true
+mode: both
+
+json_key_whitelist:
+  - cluster_name
+
+dlp:
+  info_types:
+    - PHONE_NUMBER
+    - CREDIT_CARD_NUMBER
+```
+
+> **Note:** In `mode: both` with `audit_only: true`, the audit report reflects only what DLP finds on the already-locally-scrubbed content.
+
+### Audit / dry-run mode
+
+Set `audit_only: true` to see exactly what *would* be masked — no output is modified. Use this to tune patterns and the whitelist before enabling real scrubbing.
+
+```yaml
+enabled: true
+mode: local    # or dlp / both
+audit_only: true
+```
+
+Every tool result becomes an `AuditReport` JSON instead of the real output:
+
+```json
+{
+  "total_matches": 3,
+  "patterns_seen": ["email", "internal_ip"],
+  "findings": [
+    { "pattern_name": "email", "json_path": "pods[0].owner", "content_index": 0, "match_count": 1 },
+    { "pattern_name": "internal_ip", "json_path": "endpoint", "content_index": 0, "match_count": 2 }
+  ]
+}
+```
 
 ---
 
@@ -266,6 +401,13 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
 aura-tracker-gcp/
 ├── cmd/aura-tracker-gcp/main.go   # entry point: wires adapter + server
 ├── internal/
+│   ├── anonymize/                 # PII/credential scrubbing middleware (opt-in)
+│   │   ├── anonymize.go           # Anonymizer interface, AuditReport, buildAuditResult
+│   │   ├── config.go              # Config struct, LoadConfig() (YAML + env-var)
+│   │   ├── local.go               # LocalScrubber: regex patterns, JSON walker, token registry
+│   │   ├── dlp.go                 # DLPAnonymizer: GCP DLP API backend + maskByOffsets
+│   │   ├── chain.go               # ChainedAnonymizer: local → DLP pipeline (mode: both)
+│   │   └── middleware.go          # WrapHandler() — wraps any tool handler
 │   ├── gcp/                       # GCP SDK adapter (secondary port)
 │   │   ├── client.go              # gcpAdapter, New(), rate limiter, timeout
 │   │   ├── errors.go              # PermissionDeniedError, NotFoundError
@@ -277,10 +419,13 @@ aura-tracker-gcp/
 │   │   ├── monitoring.go          # Cloud Monitoring adapter
 │   │   ├── iam.go                 # IAM adapter
 │   │   ├── topology.go            # GetServiceTopology (dependency graph inference)
+│   │   ├── dlp.go                 # DLPAdapter: GCP DLP client, InspectText
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers
 │   └── mcp/                       # MCP protocol layer (primary port)
-│       ├── server.go              # tool registration
+│       ├── server.go              # tool registration + anonymizer wiring
 │       └── tools/                 # one file per GCP domain
 ├── pkg/models/                    # shared input/output structs (no GCP deps)
-└── ports/gcp_service.go           # GCPService interface (hexagon boundary)
+└── ports/
+    ├── gcp_service.go             # GCPService interface (hexagon boundary)
+    └── dlp_service.go             # DLPService interface (secondary hexagon port)
 ```
