@@ -42,6 +42,8 @@ internal/mcp/  NEVER imports internal/gcp/
 |----------|----------|-------------|
 | `GCP_PROJECT_ID` | Yes | GCP project for SDK client init |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Service account key path (optional with ADC) |
+| `ANONYMIZE_ENABLED` | No | Set `true` to enable PII scrubbing on all tool outputs (overrides YAML `enabled`) |
+| `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
 
 ## README Hygiene
 
@@ -84,6 +86,49 @@ Stage README changes in the same commit as the code that required them.
 Both mutation tools support `dry_run: true`:
 - Returns a description of what WOULD happen without executing
 - Idempotent: operation at current state → `no_change_needed: true`
+
+## Anonymization Engine
+
+PII/credential scrubbing runs as middleware on every tool result, applied before the LLM sees the output. Off by default.
+
+### Packages
+
+| File | Purpose |
+|------|---------|
+| `internal/anonymize/anonymize.go` | `Anonymizer` interface, `AuditReport`/`Finding` types, `NoopAnonymizer` |
+| `internal/anonymize/config.go` | `Config` struct, `LoadConfig()` (YAML + env-var override) |
+| `internal/anonymize/local.go` | `LocalScrubber`: built-in regexes, JSON walker, per-call token registry |
+| `internal/anonymize/middleware.go` | `WrapHandler(tool, a)` — wraps any `server.ServerTool` handler |
+| `internal/anonymize/dlp.go` | `DLPAnonymizer` skeleton (Phase 2; compile-time interface check only) |
+| `ports/dlp_service.go` | `DLPService` secondary port interface |
+| `internal/gcp/dlp.go` | `dlpAdapter` skeleton (Phase 2) |
+
+### Enabling
+
+```bash
+# Minimal: enable with defaults (local mode, masking on)
+ANONYMIZE_ENABLED=true GCP_PROJECT_ID=my-project go run ./cmd/aura-tracker-gcp
+
+# With config file
+ANONYMIZE_ENABLED=true ANONYMIZE_CONFIG_PATH=/path/to/anonymize.yaml \
+  GCP_PROJECT_ID=my-project go run ./cmd/aura-tracker-gcp
+```
+
+### Audit / Dry-Run Mode
+
+Set `audit_only: true` in the YAML config (or add it to the file and point `ANONYMIZE_CONFIG_PATH` at it). Every tool result is replaced with an `AuditReport` JSON showing matched patterns and JSON paths — no actual masking. Use this to tune patterns before turning on real scrubbing.
+
+### Built-in Patterns
+
+`internal_ip` · `public_ip` · `email` · `service_account` · `gcp_api_key`
+
+Custom patterns are appended via the `patterns:` list in the YAML config.
+
+### Adding a New Anonymizer Backend
+
+1. Implement `Anonymizer` in `internal/anonymize/<name>.go`
+2. If it needs a GCP service, add a port to `ports/<name>_service.go` and an adapter to `internal/gcp/<name>.go`
+3. Wire the constructor in the `switch anonCfg.Mode` block in `cmd/aura-tracker-gcp/main.go`
 
 ## Phase 2 Work (Not Yet Implemented)
 

@@ -195,6 +195,8 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 |----------|----------|-------------|
 | `GCP_PROJECT_ID` | Yes | Default GCP project used when initialising SDK clients |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON key (optional if ADC is configured via `gcloud`) |
+| `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
+| `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 
 ## Security Model
 
@@ -204,6 +206,7 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Mutation tools** (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) always support `dry_run: true`
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without issuing an API call
+- **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it. Point `ANONYMIZE_CONFIG_PATH` at a YAML file to add custom patterns, configure a per-key whitelist, or enable `audit_only` mode (dry-run that reports what would be masked without modifying output)
 
 ---
 
@@ -266,6 +269,12 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
 aura-tracker-gcp/
 ├── cmd/aura-tracker-gcp/main.go   # entry point: wires adapter + server
 ├── internal/
+│   ├── anonymize/                 # PII/credential scrubbing middleware (opt-in)
+│   │   ├── anonymize.go           # Anonymizer interface, AuditReport, NoopAnonymizer
+│   │   ├── config.go              # Config struct, LoadConfig() (YAML + env-var)
+│   │   ├── local.go               # LocalScrubber: regex patterns, JSON walker, token registry
+│   │   ├── middleware.go          # WrapHandler() — wraps any tool handler
+│   │   └── dlp.go                 # DLPAnonymizer skeleton (Phase 2)
 │   ├── gcp/                       # GCP SDK adapter (secondary port)
 │   │   ├── client.go              # gcpAdapter, New(), rate limiter, timeout
 │   │   ├── errors.go              # PermissionDeniedError, NotFoundError
@@ -277,10 +286,13 @@ aura-tracker-gcp/
 │   │   ├── monitoring.go          # Cloud Monitoring adapter
 │   │   ├── iam.go                 # IAM adapter
 │   │   ├── topology.go            # GetServiceTopology (dependency graph inference)
+│   │   ├── dlp.go                 # DLPAdapter skeleton (Phase 2)
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers
 │   └── mcp/                       # MCP protocol layer (primary port)
-│       ├── server.go              # tool registration
+│       ├── server.go              # tool registration + anonymizer wiring
 │       └── tools/                 # one file per GCP domain
 ├── pkg/models/                    # shared input/output structs (no GCP deps)
-└── ports/gcp_service.go           # GCPService interface (hexagon boundary)
+└── ports/
+    ├── gcp_service.go             # GCPService interface (hexagon boundary)
+    └── dlp_service.go             # DLPService interface (Phase 2)
 ```
