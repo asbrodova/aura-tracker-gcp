@@ -73,10 +73,42 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 	var anon anonymize.Anonymizer = anonymize.NoopAnonymizer{}
 	if anonCfg.Enabled {
 		switch anonCfg.Mode {
-		case anonymize.ModeDLP, anonymize.ModeBoth:
-			log.Warn("anonymization dlp mode not yet implemented (Phase 2); running local-only")
-			fallthrough
-		default:
+		case anonymize.ModeDLP:
+			dlpSvc, err := gcpadapter.NewDLPAdapter(ctx, log)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init dlp adapter: %v\n", err)
+				os.Exit(1)
+			}
+			defer func() {
+				if err := dlpSvc.Close(); err != nil {
+					log.Error("closing dlp adapter", "err", err)
+				}
+			}()
+			anon = anonymize.NewDLPAnonymizer(dlpSvc, anonCfg, projectID)
+
+		case anonymize.ModeBoth:
+			dlpSvc, err := gcpadapter.NewDLPAdapter(ctx, log)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init dlp adapter: %v\n", err)
+				os.Exit(1)
+			}
+			defer func() {
+				if err := dlpSvc.Close(); err != nil {
+					log.Error("closing dlp adapter", "err", err)
+				}
+			}()
+			// Local always masks (auditOnly=false) so its output feeds DLP cleanly.
+			localCfg := anonCfg
+			localCfg.AuditOnly = false
+			local, err := anonymize.NewLocalScrubber(localCfg)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init local scrubber: %v\n", err)
+				os.Exit(1)
+			}
+			dlpAnon := anonymize.NewDLPAnonymizer(dlpSvc, anonCfg, projectID)
+			anon = anonymize.NewChainedAnonymizer(local, dlpAnon)
+
+		default: // ModeLocal
 			scrubber, err := anonymize.NewLocalScrubber(anonCfg)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init scrubber: %v\n", err)

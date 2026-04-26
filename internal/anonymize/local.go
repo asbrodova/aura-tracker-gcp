@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -161,7 +160,7 @@ func (s *LocalScrubber) Scrub(_ context.Context, result *mcp.CallToolResult) (*m
 	}
 
 	if s.auditOnly {
-		return s.buildAuditResult(allFindings)
+		return buildAuditResult(allFindings)
 	}
 	return &out, nil
 }
@@ -237,26 +236,3 @@ func (s *LocalScrubber) scrubText(text string, reg *tokenRegistry, contentIdx in
 	return result, findings
 }
 
-func (s *LocalScrubber) buildAuditResult(findings []Finding) (*mcp.CallToolResult, error) {
-	seen := map[string]struct{}{}
-	for _, f := range findings {
-		seen[f.PatternName] = struct{}{}
-	}
-	names := make([]string, 0, len(seen))
-	for k := range seen {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-
-	total := 0
-	for _, f := range findings {
-		total += f.MatchCount
-	}
-
-	report := AuditReport{
-		TotalMatches: total,
-		Findings:     findings,
-		PatternsSeen: names,
-	}
-	return mcp.NewToolResultJSON(report)
-}

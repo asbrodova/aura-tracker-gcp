@@ -4,6 +4,7 @@ package anonymize
 
 import (
 	"context"
+	"sort"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -35,4 +36,30 @@ type NoopAnonymizer struct{}
 
 func (NoopAnonymizer) Scrub(_ context.Context, r *mcp.CallToolResult) (*mcp.CallToolResult, error) {
 	return r, nil
+}
+
+// buildAuditResult constructs a CallToolResult whose content is an AuditReport
+// JSON summary of the supplied findings. Shared by LocalScrubber and DLPAnonymizer.
+func buildAuditResult(findings []Finding) (*mcp.CallToolResult, error) {
+	seen := map[string]struct{}{}
+	for _, f := range findings {
+		seen[f.PatternName] = struct{}{}
+	}
+	names := make([]string, 0, len(seen))
+	for k := range seen {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+
+	total := 0
+	for _, f := range findings {
+		total += f.MatchCount
+	}
+
+	report := AuditReport{
+		TotalMatches: total,
+		Findings:     findings,
+		PatternsSeen: names,
+	}
+	return mcp.NewToolResultJSON(report)
 }
