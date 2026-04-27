@@ -49,11 +49,17 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		os.Exit(1)
 	}
 
-	svc, err := gcpadapter.New(ctx, projectID,
+	adapterOpts := []gcpadapter.Option{
 		gcpadapter.WithRateLimit(10, 20),
-		gcpadapter.WithCallTimeout(30*time.Second),
+		gcpadapter.WithCallTimeout(30 * time.Second),
 		gcpadapter.WithLogger(log),
-	)
+	}
+	if os.Getenv("RECOMMENDER_ENABLED") == "true" {
+		adapterOpts = append(adapterOpts, gcpadapter.WithRecommender())
+		log.Info("recommender integration enabled")
+	}
+
+	svc, err := gcpadapter.New(ctx, projectID, adapterOpts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init gcp adapter: %v\n", err)
 		os.Exit(1)

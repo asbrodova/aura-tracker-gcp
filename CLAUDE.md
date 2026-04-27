@@ -44,6 +44,7 @@ internal/mcp/  NEVER imports internal/gcp/
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Service account key path (optional with ADC) |
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII scrubbing on all tool outputs (overrides YAML `enabled`) |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
+| `RECOMMENDER_ENABLED` | No | Set `true` to enable Cloud Recommender API integration for Aura Score efficiency signals (requires Recommender Viewer role) |
 
 ## README Hygiene
 

@@ -12,10 +12,13 @@ import (
 	"cloud.google.com/go/logging/logadmin"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	"cloud.google.com/go/pubsub/v2"
+	recommender "cloud.google.com/go/recommender/apiv1"
 	run "cloud.google.com/go/run/apiv2"
 	"golang.org/x/time/rate"
 	"google.golang.org/api/cloudresourcemanager/v1"
 	"google.golang.org/api/option"
+
+	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
 // Option configures a gcpAdapter created by New.
@@ -46,6 +49,16 @@ func WithClientOptions(opts ...option.ClientOption) Option {
 	return func(a *gcpAdapter) { a.clientOpts = opts }
 }
 
+// WithRecommender enables the Cloud Recommender API integration used to enrich
+// Aura Score efficiency signals with GCP's pre-computed idle / over-provisioned
+// recommendations and their estimated monthly cost savings.
+//
+// Off by default. Requires the service account to have the Recommender Viewer
+// role (or the individual recommender.*.list permissions listed in the README).
+func WithRecommender() Option {
+	return func(a *gcpAdapter) { a.enableRecommender = true }
+}
+
 // gcpAdapter is the single concrete implementation of ports.GCPService.
 // All SDK clients are initialised once at construction time via New().
 type gcpAdapter struct {
@@ -55,10 +68,13 @@ type gcpAdapter struct {
 	logAdmin   *logadmin.Client
 	metric     *monitoring.MetricClient
 	crm        *cloudresourcemanager.Service
-	limiter     *rate.Limiter
+	rec               *recommender.Client
+	enableRecommender bool
+	limiter            *rate.Limiter
 	callTimeout time.Duration
 	log         *slog.Logger
 	clientOpts  []option.ClientOption
+	auraCache   *ttlCache[models.AuraReport]
 }
 
 // New creates a gcpAdapter, initialises all GCP SDK clients using Application
@@ -70,6 +86,7 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		limiter:     rate.NewLimiter(10, 20),
 		callTimeout: 30 * time.Second,
 		log:         slog.Default(),
+		auraCache:   newTTLCache[models.AuraReport](auraCacheTTL),
 	}
 	for _, o := range opts {
 		o(a)
@@ -102,6 +119,13 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		return nil, fmt.Errorf("gcp: create metric client: %w", err)
 	}
 
+	if a.enableRecommender {
+		a.rec, err = recommender.NewClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create recommender client: %w", err)
+		}
+	}
+
 	httpOpts := make([]option.ClientOption, len(a.clientOpts))
 	copy(httpOpts, a.clientOpts)
 	a.crm, err = cloudresourcemanager.NewService(ctx, httpOpts...)
@@ -129,6 +153,11 @@ func (a *gcpAdapter) Close() error {
 	}
 	if err := a.metric.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("close metric client: %w", err))
+	}
+	if a.rec != nil {
+		if err := a.rec.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close recommender client: %w", err))
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("gcp adapter close: %v", errs)

@@ -74,3 +74,9 @@ func (m *mockGCPService) TestPermissions(_ context.Context, _ models.TestPermiss
 func (m *mockGCPService) GetServiceTopology(_ context.Context, _ models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
 	return models.ServiceTopologyReport{}, nil
 }
+func (m *mockGCPService) GetAuraScore(_ context.Context, _ models.GetAuraScoreRequest) (models.AuraReport, error) {
+	return models.AuraReport{}, nil
+}
+func (m *mockGCPService) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
+	return models.ProjectAuraSummaryResponse{}, nil
+}
