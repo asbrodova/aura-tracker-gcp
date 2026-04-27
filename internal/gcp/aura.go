@@ -29,7 +29,6 @@ func cacheKey(projectID string, kind models.ResourceKind, region, name string) s
 func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRequest) (models.AuraReport, error) {
 	key := cacheKey(req.ProjectID, req.ResourceKind, req.Region, req.ResourceName)
 	if cached, ok := a.auraCache.get(key); ok {
-		cached.CachedAt = cached.CachedAt // already set; just return
 		return cached, nil
 	}
 
