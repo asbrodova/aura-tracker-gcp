@@ -45,4 +45,13 @@ type GCPService interface {
 	// --- Aura Score ---
 	GetAuraScore(ctx context.Context, req models.GetAuraScoreRequest) (models.AuraReport, error)
 	GetProjectAuraSummary(ctx context.Context, req models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error)
+
+	// --- BigQuery (Resources) ---
+	ListDatasets(ctx context.Context, req models.ListDatasetsRequest) (models.ListDatasetsResponse, error)
+	ListTables(ctx context.Context, req models.ListTablesRequest) (models.ListTablesResponse, error)
+	GetTableSchema(ctx context.Context, req models.GetTableSchemaRequest) (models.TableSchemaResponse, error)
+
+	// --- Cloud Storage (Resources) ---
+	ListBuckets(ctx context.Context, req models.ListBucketsRequest) (models.ListBucketsResponse, error)
+	GetBucketMetadata(ctx context.Context, req models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error)
 }

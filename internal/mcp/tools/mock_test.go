@@ -80,3 +80,18 @@ func (m *mockGCPService) GetAuraScore(_ context.Context, _ models.GetAuraScoreRe
 func (m *mockGCPService) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
 	return models.ProjectAuraSummaryResponse{}, nil
 }
+func (m *mockGCPService) ListDatasets(_ context.Context, _ models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
+	return models.ListDatasetsResponse{}, nil
+}
+func (m *mockGCPService) ListTables(_ context.Context, _ models.ListTablesRequest) (models.ListTablesResponse, error) {
+	return models.ListTablesResponse{}, nil
+}
+func (m *mockGCPService) GetTableSchema(_ context.Context, _ models.GetTableSchemaRequest) (models.TableSchemaResponse, error) {
+	return models.TableSchemaResponse{}, nil
+}
+func (m *mockGCPService) ListBuckets(_ context.Context, _ models.ListBucketsRequest) (models.ListBucketsResponse, error) {
+	return models.ListBucketsResponse{}, nil
+}
+func (m *mockGCPService) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
+	return models.BucketMetadataResponse{}, nil
+}
