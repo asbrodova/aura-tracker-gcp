@@ -5,10 +5,13 @@ package mcp
 
 import (
 	"log/slog"
+	"os"
 
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
+	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
+	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/resources"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/tools"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
@@ -28,9 +31,8 @@ func WithAnonymizer(a anonymize.Anonymizer) Option {
 	return func(o *serverOptions) { o.anonymizer = a }
 }
 
-// New creates and configures the MCP server, registering all tools.
+// New creates and configures the MCP server, registering all tools, resources, and prompts.
 // svc is the GCPService port — the only GCP dependency visible to this layer.
-// Existing callers passing only (svc, log, version) are unaffected.
 func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option) *server.MCPServer {
 	o := &serverOptions{anonymizer: anonymize.NoopAnonymizer{}}
 	for _, opt := range opts {
@@ -41,12 +43,15 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		serverName,
 		version,
 		server.WithToolCapabilities(false),
+		server.WithResourceCapabilities(false, true), // subscribe=false, listChanged=true
+		server.WithPromptCapabilities(true),           // listChanged=true
 	)
 
 	wrap := func(t server.ServerTool) server.ServerTool {
 		return anonymize.WrapHandler(t, o.anonymizer)
 	}
 
+	// --- Tools ---
 	gke := tools.NewGKETools(svc, log)
 	cr := tools.NewCloudRunTools(svc, log)
 	ps := tools.NewPubSubTools(svc, log)
@@ -72,6 +77,37 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		wrap(topo.GetServiceTopology()),
 		wrap(aura.GetAuraScore()),
 		wrap(aura.ProjectAuraSummary()),
+	)
+
+	// --- Resources ---
+	project := os.Getenv("GCP_PROJECT_ID")
+	bqRes := resources.NewBigQueryResources(svc, log)
+	crRes := resources.NewCloudRunResources(svc, log)
+	gcsRes := resources.NewStorageResources(svc, log)
+	iamRes := resources.NewIAMResources(svc, log)
+
+	s.AddResources(
+		bqRes.DatasetList(project),
+		crRes.ServiceList(project),
+		gcsRes.BucketList(project),
+		iamRes.MyPermissions(project),
+	)
+
+	s.AddResourceTemplates(
+		bqRes.TableListTemplate(),
+		bqRes.TableSchemaTemplate(),
+		crRes.ServiceSnapshotTemplate(),
+		crRes.RevisionsTemplate(),
+		gcsRes.BucketMetadataTemplate(),
+		gcsRes.ObjectListTemplate(),
+	)
+
+	// --- Prompts ---
+	prm := prompts.NewGCPPrompts(svc, log)
+	s.AddPrompts(
+		prm.AuditSecurityPosture(),
+		prm.OptimizeBigQueryCosts(),
+		prm.IncidentResponseHelper(),
 	)
 
 	return s

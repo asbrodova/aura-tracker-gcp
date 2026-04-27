@@ -1,11 +1,16 @@
 # aura-tracker-gcp
 
+[![CI](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml/badge.svg)](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml)
+[![Coverage](https://codecov.io/gh/asbrodova/aura-tracker-gcp/graph/badge.svg)](https://codecov.io/gh/asbrodova/aura-tracker-gcp)
+
 <!-- Add your social preview image here: -->
 <!-- ![aura-tracker-gcp banner](docs/banner.png) -->
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes 15 GCP operations as structured tools — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **15 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
+
+The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
 <!-- Add a demo GIF or screenshot here showing Claude Desktop calling a tool: -->
 <!-- ![Demo: Claude Desktop calling gcp_gke_get_cluster_bottlenecks](docs/demo.gif) -->
@@ -82,7 +87,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
-Restart Claude Desktop. The tools appear automatically. Now ask:
+Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
 > "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."
 
@@ -107,6 +112,64 @@ Restart Claude Desktop. The tools appear automatically. Now ask:
 | `gcp_get_service_topology` | Infer the dependency graph of a Cloud Run service: Cloud SQL, Pub/Sub, VPC, secrets, and more. Supports `depth=1` (direct deps) and `depth=2` (deps-of-deps) | No | — |
 | `gcp_get_aura_score` | Return a composite Aura Score (0-100) for a single Cloud Run service, Cloud SQL instance, or BigQuery dataset — combining golden-signal health metrics with utilization efficiency. Results are cached 5 min. | No | — |
 | `gcp_project_aura_summary` | Discover all Cloud Run, Cloud SQL, and BigQuery resources in the project, score each with an Aura Score, and return them sorted worst-first with a pre-formatted 🟢/🟡/🔴 summary block | No | — |
+
+---
+
+## Resources
+
+Resources expose GCP state as browsable context the AI reads *before* deciding which tool to call. All URIs follow `gcp://{project}/{service}/{resource-path}`.
+
+### Static resources (always listed)
+
+| URI | Name | Description |
+|-----|------|-------------|
+| `gcp://{project}/bigquery/datasets` | BigQuery Datasets | All datasets — start here before writing SQL |
+| `gcp://{project}/cloudrun/services` | Cloud Run Services | All services across all regions |
+| `gcp://{project}/storage/buckets` | Cloud Storage Buckets | All GCS buckets |
+| `gcp://{project}/iam/my-permissions` | My IAM Permissions | Granted vs denied permissions split — AI explains missing roles before attempting tool calls |
+
+### Resource templates (resolved at read time)
+
+| URI Template | Name | Description |
+|---|---|---|
+| `gcp://{project}/bigquery/{dataset}/tables` | BigQuery Tables | Table index with row counts and sizes |
+| `gcp://{project}/bigquery/{dataset}/{table}/schema` | BigQuery Table Schema | Full field definitions — **read before writing SQL** |
+| `gcp://{project}/cloudrun/{region}/{service}` | Cloud Run Service Snapshot | URL, traffic splits, latest revision, labels |
+| `gcp://{project}/cloudrun/{region}/{service}/revisions` | Cloud Run Service Revisions | Latest revision and traffic allocation |
+| `gcp://{project}/storage/{bucket}` | Cloud Storage Bucket Metadata | Versioning, lifecycle, uniform access, public access prevention |
+| `gcp://{project}/storage/{bucket}/objects` | Cloud Storage Objects | Bucket config summary for object browsing context |
+
+### Schema Discovery Workflow
+
+When an AI is asked to query a BigQuery table, it should:
+1. Read `gcp://{project}/bigquery/datasets` to discover dataset names
+2. Read `gcp://{project}/bigquery/{dataset}/tables` to find the target table
+3. Read `gcp://{project}/bigquery/{dataset}/{table}/schema` to learn column names and types
+4. **Then** call `gcp_monitoring_get_metrics` or generate a SQL query — with correct column types
+
+This prevents hallucinated column names and type errors that would otherwise require iterative correction.
+
+### Token budget
+
+Resources use three-tier lazy loading to stay within LLM context limits:
+
+| Tier | Content | Approx. tokens |
+|------|---------|---------------|
+| Dataset list | ID + location + labels | ~2K |
+| Table index | ID + type + row count + size GB | ~3K |
+| Table schema | Field definitions (hard cap: 500 fields) | ~5K |
+
+---
+
+## Prompts
+
+Prompt Templates pre-configure the AI for complex multi-step GCP workflows. Invoke via `prompts/get` in any MCP client, or by asking Claude to "use the incident-response-helper prompt".
+
+| Prompt | Arguments | What it does |
+|--------|-----------|-------------|
+| `audit-security-posture` | `project_id` (required), `focus` (iam\|network\|all) | Reads IAM permissions + Cloud Run ingress config; returns severity-ranked findings with gcloud remediation commands |
+| `optimize-bigquery-costs` | `project_id` (required), `dataset_id` (optional) | Reads schemas + slot usage metrics; recommends partitioning, clustering, expiration, and slot rightsizing |
+| `incident-response-helper` | `project_id`, `service_name`, `region` (all required) | Pulls error logs + request metrics + Aura score; synthesises a structured incident report with rollback commands |
 
 ---
 
@@ -342,6 +405,14 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 
 > "Show me the Aura Score summary for all resources in my-project — sorted by worst health first."
 
+> "What BigQuery datasets exist in my-project? Then show me the schema for the orders table in the analytics dataset."
+
+> "Check my IAM permissions and tell me which GCP tools you can and cannot use in this project."
+
+> "Use the incident-response-helper prompt for the api-gateway service in us-central1."
+
+> "Run the audit-security-posture prompt on my-project and focus on network exposure."
+
 ---
 
 ## Prerequisites
@@ -358,6 +429,17 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 | `run.services.list` | Cloud Run Viewer | `gcp_project_aura_summary` (already required) |
 | `cloudsql.instances.list` | Cloud SQL Viewer | `gcp_project_aura_summary` Cloud SQL discovery |
 | `bigquery.datasets.list` | BigQuery Data Viewer | `gcp_project_aura_summary` BigQuery discovery |
+
+**Permissions required for Resources:**
+
+| Permission | IAM Role | Used by |
+|-----------|----------|---------|
+| `bigquery.datasets.get` | BigQuery Metadata Viewer | `gcp://.../bigquery/datasets` |
+| `bigquery.tables.list` | BigQuery Metadata Viewer | `gcp://.../bigquery/{dataset}/tables` |
+| `bigquery.tables.get` | BigQuery Metadata Viewer | `gcp://.../bigquery/{dataset}/{table}/schema` |
+| `storage.buckets.list` | Storage Object Viewer | `gcp://.../storage/buckets` |
+| `storage.buckets.get` | Storage Object Viewer | `gcp://.../storage/{bucket}` |
+| `resourcemanager.projects.testIamPermissions` | (included in most roles) | `gcp://.../iam/my-permissions` |
 
 ## Environment Variables
 
@@ -520,27 +602,31 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                    LLM (Claude / any model)                      │
-│               calls tools via JSON-RPC over stdio                │
+│   reads Resources · invokes Prompts · calls Tools via stdio      │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ mcp-go StdioServer
 ┌─────────────────────────────▼───────────────────────────────────┐
 │              internal/mcp/   (MCP Protocol Layer)                │
-│   server.go — tool registration                                  │
-│   tools/  gke · cloudrun · pubsub · logging · monitoring · iam · topology  │
+│   server.go — tool + resource + prompt registration              │
+│   tools/     gke · cloudrun · pubsub · logging · monitoring      │
+│              iam · topology · aura                                │
+│   resources/ bigquery · cloudrun · storage · iam                 │
+│   prompts/   audit-security · optimize-bq · incident-response    │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ calls only ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
 │           ports/gcp_service.go   (Hexagon Boundary)              │
-│                    GCPService interface                           │
+│                    GCPService interface (20 methods)              │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ implements ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
 │              internal/gcp/   (GCP Adapter Layer)                 │
 │   client.go — SDK factory, rate limiter (10 rps), 30s timeout    │
 │   gke · gke_bottleneck · cloudrun · pubsub                       │
-│   logging · monitoring · iam · topology · errors                 │
+│   logging · monitoring · iam · topology · aura                   │
+│   bigquery · storage                                             │
 └─────────────────────────────┬───────────────────────────────────┘
-                              │ Google Cloud Go SDK (gRPC)
+                              │ Google Cloud Go SDK (gRPC / REST)
                           GCP APIs
 ```
 
@@ -591,14 +677,24 @@ aura-tracker-gcp/
 │   │   ├── iam.go                 # IAM adapter
 │   │   ├── topology.go            # GetServiceTopology (dependency graph inference)
 │   │   ├── aura.go                # GetAuraScore, GetProjectAuraSummary (health + efficiency scoring)
+│   │   ├── bigquery.go            # ListDatasets, ListTables, GetTableSchema
+│   │   ├── storage.go             # ListBuckets, GetBucketMetadata
 │   │   ├── cache.go               # Generic TTL cache (5-min default for aura scores)
 │   │   ├── dlp.go                 # DLPAdapter: GCP DLP client, InspectText
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers
 │   └── mcp/                       # MCP protocol layer (primary port)
-│       ├── server.go              # tool registration + anonymizer wiring
-│       └── tools/                 # one file per GCP domain
+│       ├── server.go              # tool + resource + prompt registration
+│       ├── tools/                 # one file per GCP domain (15 tools)
+│       ├── resources/             # MCP Resource handlers (10 resources)
+│       │   ├── resources.go       # constructor types
+│       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)
+│       │   ├── cloudrun.go        # gcp://{p}/cloudrun/... (services, snapshot, revisions)
+│       │   ├── storage.go         # gcp://{p}/storage/... (buckets, metadata, objects)
+│       │   └── iam.go             # gcp://{p}/iam/my-permissions
+│       └── prompts/               # MCP Prompt Templates (3 prompts)
+│           └── prompts.go         # audit-security · optimize-bq · incident-response
 ├── pkg/models/                    # shared input/output structs (no GCP deps)
 └── ports/
-    ├── gcp_service.go             # GCPService interface (hexagon boundary)
+    ├── gcp_service.go             # GCPService interface (hexagon boundary, 20 methods)
     └── dlp_service.go             # DLPService interface (secondary hexagon port)
 ```

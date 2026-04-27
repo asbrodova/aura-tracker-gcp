@@ -2,7 +2,9 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
@@ -56,6 +58,21 @@ func (m *mockSvc) GetAuraScore(_ context.Context, _ models.GetAuraScoreRequest) 
 func (m *mockSvc) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
 	return models.ProjectAuraSummaryResponse{}, nil
 }
+func (m *mockSvc) ListDatasets(_ context.Context, _ models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
+	return models.ListDatasetsResponse{}, nil
+}
+func (m *mockSvc) ListTables(_ context.Context, _ models.ListTablesRequest) (models.ListTablesResponse, error) {
+	return models.ListTablesResponse{}, nil
+}
+func (m *mockSvc) GetTableSchema(_ context.Context, _ models.GetTableSchemaRequest) (models.TableSchemaResponse, error) {
+	return models.TableSchemaResponse{}, nil
+}
+func (m *mockSvc) ListBuckets(_ context.Context, _ models.ListBucketsRequest) (models.ListBucketsResponse, error) {
+	return models.ListBucketsResponse{}, nil
+}
+func (m *mockSvc) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
+	return models.BucketMetadataResponse{}, nil
+}
 
 func TestServerRegistersAllTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
@@ -87,5 +104,70 @@ func TestServerRegistersAllTools(t *testing.T) {
 
 	if got := len(registered); got != len(expected) {
 		t.Errorf("expected %d tools, got %d", len(expected), got)
+	}
+}
+
+func TestServerRegistersResourcesAndPrompts(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test")
+
+	// Verify resources/list responds without error and returns the 4 static resources.
+	msg := json.RawMessage(`{"jsonrpc":"2.0","id":1,"method":"resources/list","params":{}}`)
+	resp := s.HandleMessage(context.Background(), msg)
+	raw, _ := json.Marshal(resp)
+	rawStr := string(raw)
+	if strings.Contains(rawStr, `"error"`) {
+		t.Errorf("resources/list returned error: %s", rawStr)
+	}
+	for _, uri := range []string{"bigquery/datasets", "cloudrun/services", "storage/buckets", "iam/my-permissions"} {
+		if !strings.Contains(rawStr, uri) {
+			t.Errorf("resources/list missing resource with URI containing %q", uri)
+		}
+	}
+
+	// Verify resources/templates/list returns the 6 templates.
+	msg = json.RawMessage(`{"jsonrpc":"2.0","id":2,"method":"resources/templates/list","params":{}}`)
+	resp = s.HandleMessage(context.Background(), msg)
+	raw, _ = json.Marshal(resp)
+	rawStr = string(raw)
+	if strings.Contains(rawStr, `"error"`) {
+		t.Errorf("resources/templates/list returned error: %s", rawStr)
+	}
+	for _, tmpl := range []string{
+		"bigquery/{dataset}/tables",
+		"bigquery/{dataset}/{table}/schema",
+		"cloudrun/{region}/{service}",
+		"cloudrun/{region}/{service}/revisions",
+		"storage/{bucket}",
+		"storage/{bucket}/objects",
+	} {
+		if !strings.Contains(rawStr, tmpl) {
+			t.Errorf("resources/templates/list missing template containing %q", tmpl)
+		}
+	}
+
+	// Verify prompts/list returns 3 prompts.
+	msg = json.RawMessage(`{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}`)
+	resp = s.HandleMessage(context.Background(), msg)
+	raw, _ = json.Marshal(resp)
+	rawStr = string(raw)
+	if strings.Contains(rawStr, `"error"`) {
+		t.Errorf("prompts/list returned error: %s", rawStr)
+	}
+	for _, name := range []string{"audit-security-posture", "optimize-bigquery-costs", "incident-response-helper"} {
+		if !strings.Contains(rawStr, name) {
+			t.Errorf("prompts/list missing prompt %q", name)
+		}
+	}
+}
+
+func TestPromptHandlerRequiresProjectID(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test")
+
+	// Calling audit-security-posture without project_id should return an error result.
+	msg := json.RawMessage(`{"jsonrpc":"2.0","id":4,"method":"prompts/get","params":{"name":"audit-security-posture","arguments":{}}}`)
+	resp := s.HandleMessage(context.Background(), msg)
+	raw, _ := json.Marshal(resp)
+	if !strings.Contains(string(raw), "error") {
+		t.Errorf("expected error for missing project_id, got: %s", string(raw))
 	}
 }
