@@ -1,7 +1,6 @@
 # aura-tracker-gcp
 
 [![CI](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml/badge.svg)](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml)
-[![Coverage](https://codecov.io/gh/asbrodova/aura-tracker-gcp/graph/badge.svg)](https://codecov.io/gh/asbrodova/aura-tracker-gcp)
 
 <!-- Add your social preview image here: -->
 <!-- ![aura-tracker-gcp banner](docs/banner.png) -->
