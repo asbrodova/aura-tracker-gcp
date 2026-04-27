@@ -41,4 +41,8 @@ type GCPService interface {
 
 	// --- Topology ---
 	GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error)
+
+	// --- Aura Score ---
+	GetAuraScore(ctx context.Context, req models.GetAuraScoreRequest) (models.AuraReport, error)
+	GetProjectAuraSummary(ctx context.Context, req models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error)
 }

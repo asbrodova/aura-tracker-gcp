@@ -8,6 +8,7 @@ require (
 	cloud.google.com/go/logging v1.16.0
 	cloud.google.com/go/monitoring v1.27.0
 	cloud.google.com/go/pubsub/v2 v2.4.0
+	cloud.google.com/go/recommender v1.13.6
 	cloud.google.com/go/run v1.19.0
 	github.com/mark3labs/mcp-go v0.48.0
 	golang.org/x/oauth2 v0.36.0

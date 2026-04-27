@@ -54,6 +54,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	mon := tools.NewMonitoringTools(svc, log)
 	iam := tools.NewIAMTools(svc, log)
 	topo := tools.NewTopologyTools(svc, log)
+	aura := tools.NewAuraTools(svc, log)
 
 	s.AddTools(
 		wrap(gke.ListClusters()),
@@ -69,6 +70,8 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		wrap(mon.GetMetrics()),
 		wrap(iam.TestPermissions()),
 		wrap(topo.GetServiceTopology()),
+		wrap(aura.GetAuraScore()),
+		wrap(aura.ProjectAuraSummary()),
 	)
 
 	return s

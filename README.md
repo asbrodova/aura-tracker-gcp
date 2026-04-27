@@ -5,7 +5,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes 13 GCP operations as structured tools — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes 15 GCP operations as structured tools — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
 
 <!-- Add a demo GIF or screenshot here showing Claude Desktop calling a tool: -->
 <!-- ![Demo: Claude Desktop calling gcp_gke_get_cluster_bottlenecks](docs/demo.gif) -->
@@ -105,6 +105,163 @@ Restart Claude Desktop. The tools appear automatically. Now ask:
 | `gcp_monitoring_get_metrics` | Fetch Cloud Monitoring time-series metrics | No | — |
 | `gcp_iam_test_permissions` | Test which IAM permissions the caller has on a project | No | — |
 | `gcp_get_service_topology` | Infer the dependency graph of a Cloud Run service: Cloud SQL, Pub/Sub, VPC, secrets, and more. Supports `depth=1` (direct deps) and `depth=2` (deps-of-deps) | No | — |
+| `gcp_get_aura_score` | Return a composite Aura Score (0-100) for a single Cloud Run service, Cloud SQL instance, or BigQuery dataset — combining golden-signal health metrics with utilization efficiency. Results are cached 5 min. | No | — |
+| `gcp_project_aura_summary` | Discover all Cloud Run, Cloud SQL, and BigQuery resources in the project, score each with an Aura Score, and return them sorted worst-first with a pre-formatted 🟢/🟡/🔴 summary block | No | — |
+
+---
+
+## Aura Score
+
+The Aura Score is a composite 0–100 metric that tells an LLM not just that a resource *exists*, but whether it is **healthy** and **cost-effective** — two things that previously required separate queries to Cloud Monitoring, the Recommender API, and manual judgment to combine.
+
+Two tools expose it:
+- **`gcp_get_aura_score`** — scores a single named resource on demand
+- **`gcp_project_aura_summary`** — auto-discovers all Cloud Run services, Cloud SQL instances, and BigQuery datasets in a project, scores each, and returns them sorted worst-first with a pre-formatted block the LLM can read at a glance
+
+### Example output
+
+```
+🔴 Cloud SQL: legacy-db     | Aura: 28  (Idle Resource (GCP Recommender))
+🟡 Cloud Run: api-gateway   | Aura: 62  (Healthy, Over-provisioned)
+🟢 Cloud Run: auth-service  | Aura: 91  (Healthy & Scaled)
+```
+
+Each resource also returns a `reasons` array the LLM uses to suggest concrete actions:
+
+```json
+{
+  "display": "🔴 Cloud SQL: legacy-db | Aura: 28 (Idle Resource (GCP Recommender))",
+  "score": 28,
+  "health_score": 62,
+  "efficiency_score": 20,
+  "health_signals": [
+    { "name": "cpu_util",    "value": 0.04, "score": 60, "label": "Warning" },
+    { "name": "memory_util", "value": 0.12, "score": 60, "label": "Warning" },
+    { "name": "disk_util",   "value": 0.31, "score": 100,"label": "OK"      },
+    { "name": "recommender_idle", "value": 43.20, "score": 20, "label": "Warning" }
+  ],
+  "reasons": [
+    "GCP Recommender: resource is idle — estimated $43.20/mo savings if deleted or stopped",
+    "CPU at 4% — instance may be idle; consider a smaller machine type"
+  ]
+}
+```
+
+### How the score is calculated
+
+The score combines two independent sub-scores with a fixed weighting:
+
+```
+Final score = (health_score × 0.6) + (efficiency_score × 0.4)
+```
+
+**Health score** is derived from Cloud Monitoring golden signals — the same API already used by `gcp_monitoring_get_metrics`. Signals and weights vary by resource type:
+
+| Resource | Signal | Weight | Thresholds (score) |
+|----------|--------|--------|--------------------|
+| Cloud Run | Error rate (5xx / total) | 50% | 0%→100, <1%→85, <3%→60, <5%→30, ≥5%→0 |
+| Cloud Run | CPU utilization | 30% | <5%→55⚠, 5–50%→100, 50–80%→80, 80–90%→50, ≥90%→20 |
+| Cloud Run | Latency p99 | 20% | <200ms→100, <500ms→80, <1s→60, <3s→30, ≥3s→0 |
+| Cloud SQL | CPU utilization | 40% | <10%→60⚠, 10–70%→100, 70–85%→75, 85–95%→40, ≥95%→0 |
+| Cloud SQL | Memory utilization | 30% | same thresholds as CPU |
+| Cloud SQL | Disk utilization | 30% | same thresholds as CPU |
+| BigQuery | Job failure rate | 60% | 0%→100, <2%→80, <5%→55, <10%→30, ≥10%→0 |
+| BigQuery | Slot utilization | 20% | <10 slots→60⚠, 10–500→100, ≥500→80 |
+| BigQuery | Billable storage | 20% | <10 GB→100, <100 GB→85, <1 TB→65, ≥1 TB→40 |
+
+⚠ A low value here indicates under-utilization (idle / over-provisioned), which also penalises the efficiency score.
+
+**Efficiency score** starts from the same metrics — e.g. Cloud Run CPU below 5% while receiving traffic flags over-provisioning — and is then overridden by the Cloud Recommender API when `RECOMMENDER_ENABLED=true` (see below).
+
+**Band mapping:**
+
+| Score | Band | Indicator |
+|-------|------|-----------|
+| 80–100 | Healthy | 🟢 |
+| 50–79 | Warning | 🟡 |
+| 0–49 | Critical | 🔴 |
+
+Scores are cached in-process for **5 minutes**. Repeated LLM calls within the cache window return in under 1 ms with no GCP API calls.
+
+---
+
+## Cloud Recommender Integration
+
+> **Opt-in.** Set `RECOMMENDER_ENABLED=true` to enable. Off by default.
+
+Without the Recommender, efficiency is estimated from Cloud Monitoring metrics alone — for example, a Cloud Run service with CPU below 5% is flagged as over-provisioned. This heuristic works, but metrics can't tell you that GCP itself has already analyzed the resource and concluded it should be deleted or right-sized.
+
+With `RECOMMENDER_ENABLED=true`, each Aura Score fetch also queries the [Cloud Recommender API](https://cloud.google.com/recommender) for pre-computed, GCP-authoritative recommendations:
+
+| Recommender | Target | What it detects |
+|-------------|--------|-----------------|
+| `google.run.service.IdentifyIdleService` | Cloud Run | Services receiving zero traffic for an extended period |
+| `google.cloudsql.instance.IdleRecommender` | Cloud SQL | Instances with no connections or queries |
+| `google.cloudsql.instance.OverprovisionedInstanceRecommender` | Cloud SQL | Instances with CPU/memory headroom that warrant a smaller tier |
+
+### What changes in the score
+
+When an active Recommender recommendation is found for a resource, the efficiency score is overridden — it no longer relies on the metric heuristic:
+
+| Recommendation type | Efficiency score override |
+|---------------------|--------------------------|
+| Idle | Capped at **20** (regardless of metrics) |
+| Over-provisioned | Capped at **45** (regardless of metrics) |
+
+The display label and reasons are also updated to surface the GCP-authoritative finding first:
+
+```
+Without Recommender:  🟡 Cloud SQL: main-db | Aura: 62  (Idle, Consider Downsize)
+With Recommender:     🔴 Cloud SQL: main-db | Aura: 28  (Idle Resource (GCP Recommender))
+```
+
+The `reasons` field includes the estimated monthly USD savings from GCP's cost projection, giving the LLM a concrete number to include in its recommendation:
+
+```
+"GCP Recommender: resource is idle — estimated $43.20/mo savings if deleted or stopped"
+```
+
+If the Recommender API is unavailable or returns a permission error, the Aura Score falls back silently to the metric-based efficiency — no error is surfaced, and the score is still computed from Cloud Monitoring data.
+
+### Enabling
+
+```bash
+RECOMMENDER_ENABLED=true GCP_PROJECT_ID=my-project aura-tracker-gcp
+```
+
+Or in your MCP client config:
+
+```json
+"env": {
+  "GCP_PROJECT_ID": "my-project",
+  "RECOMMENDER_ENABLED": "true"
+}
+```
+
+### Permissions
+
+Add these to your service account in addition to the base Aura Score permissions:
+
+| Permission | IAM Role |
+|-----------|----------|
+| `recommender.cloudsqlInstanceIdleRecommendations.list` | Recommender Viewer |
+| `recommender.cloudsqlInstanceOverprovisionedRecommendations.list` | Recommender Viewer |
+| `recommender.runServiceIdleRecommendations.list` | Recommender Viewer |
+
+The **Recommender Viewer** role (`roles/recommender.viewer`) grants all three at once.
+
+### Pricing
+
+The Cloud Recommender API is **free** for all three recommenders used here. Google Cloud generates recommendations at no charge; the only paid recommender is Firewall Insights, which is not used by this tool.
+
+The practical constraint is the default **API quota**:
+
+| Support plan | Reads/day |
+|---|---|
+| None / Basic | 100 |
+| Standard / Enhanced / Premium | 1,000,000 |
+
+On the default 100 reads/day quota, each `gcp_get_aura_score` call for Cloud Run consumes 1 read, and each Cloud SQL call consumes 2 (idle + over-provisioned). The 5-minute in-process cache means a cache miss per resource is the worst case. If you run `gcp_project_aura_summary` frequently against many resources on a basic support plan, you may hit this limit — in which case the Aura Score degrades gracefully to metric-only efficiency with no error.
 
 ---
 
@@ -181,6 +338,10 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 
 > "What does my-api depend on? Show me its full dependency graph at depth 2."
 
+> "Give me an Aura Score for the auth-service Cloud Run service in us-central1."
+
+> "Show me the Aura Score summary for all resources in my-project — sorted by worst health first."
+
 ---
 
 ## Prerequisites
@@ -188,6 +349,15 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 - Go 1.26+
 - A GCP project with Application Default Credentials configured
 - The service account must have appropriate IAM roles (use `gcp_iam_test_permissions` to verify)
+
+**Permissions required for Aura Score tools:**
+
+| Permission | IAM Role | Used by |
+|-----------|----------|---------|
+| `monitoring.timeSeries.list` | Monitoring Viewer | all aura tools (already required by `gcp_monitoring_get_metrics`) |
+| `run.services.list` | Cloud Run Viewer | `gcp_project_aura_summary` (already required) |
+| `cloudsql.instances.list` | Cloud SQL Viewer | `gcp_project_aura_summary` Cloud SQL discovery |
+| `bigquery.datasets.list` | BigQuery Data Viewer | `gcp_project_aura_summary` BigQuery discovery |
 
 ## Environment Variables
 
@@ -197,6 +367,7 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON key (optional if ADC is configured via `gcloud`) |
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
+| `RECOMMENDER_ENABLED` | No | Set `true` to enable the Cloud Recommender API integration. When enabled, Aura Scores include idle/over-provisioned flags with estimated monthly savings from GCP's pre-computed recommendations. Requires the Recommender Viewer role. Off by default. |
 
 ## Security Model
 
@@ -419,6 +590,8 @@ aura-tracker-gcp/
 │   │   ├── monitoring.go          # Cloud Monitoring adapter
 │   │   ├── iam.go                 # IAM adapter
 │   │   ├── topology.go            # GetServiceTopology (dependency graph inference)
+│   │   ├── aura.go                # GetAuraScore, GetProjectAuraSummary (health + efficiency scoring)
+│   │   ├── cache.go               # Generic TTL cache (5-min default for aura scores)
 │   │   ├── dlp.go                 # DLPAdapter: GCP DLP client, InspectText
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers
 │   └── mcp/                       # MCP protocol layer (primary port)

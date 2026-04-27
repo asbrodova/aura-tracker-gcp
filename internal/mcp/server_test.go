@@ -50,6 +50,12 @@ func (m *mockSvc) TestPermissions(_ context.Context, _ models.TestPermissionsReq
 func (m *mockSvc) GetServiceTopology(_ context.Context, _ models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
 	return models.ServiceTopologyReport{}, nil
 }
+func (m *mockSvc) GetAuraScore(_ context.Context, _ models.GetAuraScoreRequest) (models.AuraReport, error) {
+	return models.AuraReport{}, nil
+}
+func (m *mockSvc) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
+	return models.ProjectAuraSummaryResponse{}, nil
+}
 
 func TestServerRegistersAllTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
@@ -68,6 +74,8 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_monitoring_get_metrics",
 		"gcp_iam_test_permissions",
 		"gcp_get_service_topology",
+		"gcp_get_aura_score",
+		"gcp_project_aura_summary",
 	}
 
 	registered := s.ListTools()
