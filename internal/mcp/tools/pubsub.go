@@ -26,6 +26,13 @@ func (t *PubSubTools) ListTopics() server.ServerTool {
 	tool := mcp.NewTool("gcp_pubsub_list_topics",
 		mcp.WithDescription("List all Pub/Sub topics in a GCP project with their subscription counts"),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Pub/Sub Topics",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
@@ -51,6 +58,13 @@ func (t *PubSubTools) InspectTopicHealth() server.ServerTool {
 		mcp.WithDescription("Inspect a Pub/Sub topic for subscription lag, unacked messages, and health issues"),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("topic_name", mcp.Required(), mcp.Description("Pub/Sub topic short name (not the full resource path)")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Inspect Pub/Sub Topic Health",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,

@@ -38,6 +38,13 @@ func (t *TopologyTools) GetServiceTopology() server.ServerTool {
 			mcp.Min(1),
 			mcp.Max(2),
 		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Discover Service Topology",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,

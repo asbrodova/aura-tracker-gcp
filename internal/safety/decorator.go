@@ -1,0 +1,273 @@
+// Package safety implements a port-level safety decorator that enforces
+// two-step HITL confirmation for all mutation methods on ports.GCPService.
+// Read-only methods are transparent pass-throughs.
+package safety
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/google/uuid"
+
+	"github.com/asbrodova/aura-tracker-gcp/internal/gcp"
+	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
+)
+
+// scaleDeploymentPlan holds the dry-run state for a pending ScaleDeployment.
+type scaleDeploymentPlan struct {
+	OriginalRequest models.ScaleDeploymentRequest
+	DryRunResponse  models.ScaleDeploymentResponse
+}
+
+// updateTrafficPlan holds the dry-run state for a pending UpdateTraffic.
+type updateTrafficPlan struct {
+	OriginalRequest models.UpdateTrafficRequest
+	DryRunResponse  models.UpdateTrafficResponse
+}
+
+// SafetyDecorator wraps a ports.GCPService and enforces a two-step dry-run →
+// confirm flow for all mutation methods. Construct with NewSafetyDecorator.
+// Safe for concurrent use.
+type SafetyDecorator struct {
+	inner ports.GCPService
+	store *PlanStore
+	log   *slog.Logger
+}
+
+// Compile-time check: SafetyDecorator must implement ports.GCPService.
+var _ ports.GCPService = (*SafetyDecorator)(nil)
+
+// NewSafetyDecorator wraps inner with safety enforcement.
+func NewSafetyDecorator(inner ports.GCPService, log *slog.Logger) *SafetyDecorator {
+	return &SafetyDecorator{inner: inner, store: NewPlanStore(), log: log}
+}
+
+// --- Mutation methods ---
+
+func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
+	const op = "safety.ScaleDeployment"
+
+	// Path 1: dry-run — delegate to inner, store a plan, inject plan_id.
+	if req.DryRun {
+		preview, err := d.inner.ScaleDeployment(ctx, req)
+		if err != nil || preview.NoChangeNeeded {
+			return preview, err
+		}
+		planID := uuid.New().String()
+		d.store.put(planID, scaleDeploymentPlan{OriginalRequest: req, DryRunResponse: preview})
+		ttl := d.store.expiresIn(planID)
+		preview.PlanID = planID
+		preview.ExpiresIn = ttl.String()
+		preview.Description = fmt.Sprintf(
+			"DRY RUN: would resize node pool %q from %d to %d nodes. "+
+				"Confirm with confirm_plan_id=%q within %s.",
+			req.NodePoolName, preview.PreviousCount, req.NodeCount, planID, ttl,
+		)
+		d.log.InfoContext(ctx, "safety: plan created",
+			"op", "ScaleDeployment",
+			"plan_id", planID,
+			"node_pool", req.NodePoolName,
+			"from", preview.PreviousCount,
+			"to", req.NodeCount,
+			"expires_in", ttl,
+		)
+		return preview, nil
+	}
+
+	// Path 2: confirm — consume the stored plan and execute with original params.
+	if req.ConfirmPlanID != "" {
+		raw, ok := d.store.take(req.ConfirmPlanID)
+		if !ok {
+			return models.ScaleDeploymentResponse{}, &gcp.ConfirmationRequiredError{
+				Op: op,
+				Message: fmt.Sprintf(
+					"plan_id %q not found or expired (TTL=%s). Run with dry_run=true first.",
+					req.ConfirmPlanID, PlanTTL,
+				),
+			}
+		}
+		plan, ok := raw.(scaleDeploymentPlan)
+		if !ok {
+			return models.ScaleDeploymentResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
+		}
+		execReq := plan.OriginalRequest
+		execReq.DryRun = false
+		execReq.ConfirmPlanID = ""
+		resp, err := d.inner.ScaleDeployment(ctx, execReq)
+		if err != nil {
+			return models.ScaleDeploymentResponse{}, err
+		}
+		d.log.WarnContext(ctx, "safety: mutation confirmed",
+			"op", "ScaleDeployment",
+			"plan_id", req.ConfirmPlanID,
+			"project_id", execReq.ProjectID,
+			"location", execReq.Location,
+			"cluster_name", execReq.ClusterName,
+			"node_pool", execReq.NodePoolName,
+			"previous_count", resp.PreviousCount,
+			"requested_count", resp.RequestedCount,
+		)
+		return resp, nil
+	}
+
+	// Path 3: neither flag — block with actionable instructions.
+	return models.ScaleDeploymentResponse{}, &gcp.ConfirmationRequiredError{
+		Op: op,
+		Message: fmt.Sprintf(
+			"mutations require two-step confirmation. "+
+				"Step 1: call gcp_gke_scale_deployment with dry_run=true to receive a plan_id. "+
+				"Step 2: call again with confirm_plan_id=<plan_id> (within %s).",
+			PlanTTL,
+		),
+	}
+}
+
+func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
+	const op = "safety.UpdateTraffic"
+
+	if req.DryRun {
+		preview, err := d.inner.UpdateTraffic(ctx, req)
+		if err != nil {
+			return preview, err
+		}
+		planID := uuid.New().String()
+		d.store.put(planID, updateTrafficPlan{OriginalRequest: req, DryRunResponse: preview})
+		ttl := d.store.expiresIn(planID)
+		preview.PlanID = planID
+		preview.ExpiresIn = ttl.String()
+		preview.Description = fmt.Sprintf(
+			"DRY RUN: would update traffic split for service %q. "+
+				"Confirm with confirm_plan_id=%q within %s.",
+			req.ServiceName, planID, ttl,
+		)
+		d.log.InfoContext(ctx, "safety: plan created",
+			"op", "UpdateTraffic",
+			"plan_id", planID,
+			"service", req.ServiceName,
+			"before", preview.Before,
+			"after", preview.After,
+			"expires_in", ttl,
+		)
+		return preview, nil
+	}
+
+	if req.ConfirmPlanID != "" {
+		raw, ok := d.store.take(req.ConfirmPlanID)
+		if !ok {
+			return models.UpdateTrafficResponse{}, &gcp.ConfirmationRequiredError{
+				Op: op,
+				Message: fmt.Sprintf(
+					"plan_id %q not found or expired (TTL=%s). Run with dry_run=true first.",
+					req.ConfirmPlanID, PlanTTL,
+				),
+			}
+		}
+		plan, ok := raw.(updateTrafficPlan)
+		if !ok {
+			return models.UpdateTrafficResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
+		}
+		execReq := plan.OriginalRequest
+		execReq.DryRun = false
+		execReq.ConfirmPlanID = ""
+		resp, err := d.inner.UpdateTraffic(ctx, execReq)
+		if err != nil {
+			return models.UpdateTrafficResponse{}, err
+		}
+		d.log.WarnContext(ctx, "safety: mutation confirmed",
+			"op", "UpdateTraffic",
+			"plan_id", req.ConfirmPlanID,
+			"project_id", execReq.ProjectID,
+			"region", execReq.Region,
+			"service_name", execReq.ServiceName,
+			"traffic_before", resp.Before,
+			"traffic_after", resp.After,
+		)
+		return resp, nil
+	}
+
+	return models.UpdateTrafficResponse{}, &gcp.ConfirmationRequiredError{
+		Op: op,
+		Message: fmt.Sprintf(
+			"mutations require two-step confirmation. "+
+				"Step 1: call gcp_cloudrun_update_traffic with dry_run=true to receive a plan_id. "+
+				"Step 2: call again with confirm_plan_id=<plan_id> (within %s).",
+			PlanTTL,
+		),
+	}
+}
+
+// --- Read-only pass-throughs ---
+
+func (d *SafetyDecorator) ListClusters(ctx context.Context, req models.ListClustersRequest) (models.ListClustersResponse, error) {
+	return d.inner.ListClusters(ctx, req)
+}
+
+func (d *SafetyDecorator) GetClusterDetails(ctx context.Context, req models.GetClusterDetailsRequest) (models.ClusterDetails, error) {
+	return d.inner.GetClusterDetails(ctx, req)
+}
+
+func (d *SafetyDecorator) GetClusterBottlenecks(ctx context.Context, req models.GetClusterBottlenecksRequest) (models.ClusterBottleneckReport, error) {
+	return d.inner.GetClusterBottlenecks(ctx, req)
+}
+
+func (d *SafetyDecorator) ListServices(ctx context.Context, req models.ListServicesRequest) (models.ListServicesResponse, error) {
+	return d.inner.ListServices(ctx, req)
+}
+
+func (d *SafetyDecorator) GetServiceDetails(ctx context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
+	return d.inner.GetServiceDetails(ctx, req)
+}
+
+func (d *SafetyDecorator) ListTopics(ctx context.Context, req models.ListTopicsRequest) (models.ListTopicsResponse, error) {
+	return d.inner.ListTopics(ctx, req)
+}
+
+func (d *SafetyDecorator) InspectTopicHealth(ctx context.Context, req models.InspectTopicHealthRequest) (models.TopicHealthReport, error) {
+	return d.inner.InspectTopicHealth(ctx, req)
+}
+
+func (d *SafetyDecorator) QueryRecentLogs(ctx context.Context, req models.QueryRecentLogsRequest) (models.QueryRecentLogsResponse, error) {
+	return d.inner.QueryRecentLogs(ctx, req)
+}
+
+func (d *SafetyDecorator) GetMetrics(ctx context.Context, req models.GetMetricsRequest) (models.GetMetricsResponse, error) {
+	return d.inner.GetMetrics(ctx, req)
+}
+
+func (d *SafetyDecorator) TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error) {
+	return d.inner.TestPermissions(ctx, req)
+}
+
+func (d *SafetyDecorator) GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
+	return d.inner.GetServiceTopology(ctx, req)
+}
+
+func (d *SafetyDecorator) GetAuraScore(ctx context.Context, req models.GetAuraScoreRequest) (models.AuraReport, error) {
+	return d.inner.GetAuraScore(ctx, req)
+}
+
+func (d *SafetyDecorator) GetProjectAuraSummary(ctx context.Context, req models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
+	return d.inner.GetProjectAuraSummary(ctx, req)
+}
+
+func (d *SafetyDecorator) ListDatasets(ctx context.Context, req models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
+	return d.inner.ListDatasets(ctx, req)
+}
+
+func (d *SafetyDecorator) ListTables(ctx context.Context, req models.ListTablesRequest) (models.ListTablesResponse, error) {
+	return d.inner.ListTables(ctx, req)
+}
+
+func (d *SafetyDecorator) GetTableSchema(ctx context.Context, req models.GetTableSchemaRequest) (models.TableSchemaResponse, error) {
+	return d.inner.GetTableSchema(ctx, req)
+}
+
+func (d *SafetyDecorator) ListBuckets(ctx context.Context, req models.ListBucketsRequest) (models.ListBucketsResponse, error) {
+	return d.inner.ListBuckets(ctx, req)
+}
+
+func (d *SafetyDecorator) GetBucketMetadata(ctx context.Context, req models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
+	return d.inner.GetBucketMetadata(ctx, req)
+}

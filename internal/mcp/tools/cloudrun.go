@@ -27,6 +27,13 @@ func (t *CloudRunTools) ListServices() server.ServerTool {
 		mcp.WithDescription("List all Cloud Run services in a GCP project and region"),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region, e.g. us-central1")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Cloud Run Services",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
@@ -53,6 +60,13 @@ func (t *CloudRunTools) GetServiceDetails() server.ServerTool {
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("service_name", mcp.Required(), mcp.Description("Cloud Run service name")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Cloud Run Service Details",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
@@ -75,14 +89,29 @@ func (t *CloudRunTools) getServiceDetailsHandler(ctx context.Context, _ mcp.Call
 
 func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_update_traffic",
-		mcp.WithDescription("Update the traffic split for a Cloud Run service. Supports dry-run for safe previewing."),
+		mcp.WithDescription(
+			"Update the traffic split for a Cloud Run service. "+
+				"SAFETY: requires two-step confirmation. "+
+				"Step 1 — call with dry_run=true to receive a plan_id and preview the before/after traffic split. "+
+				"Step 2 — call with confirm_plan_id=<plan_id> to execute (plan expires after 10 minutes).",
+		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("service_name", mcp.Required(), mcp.Description("Cloud Run service name")),
 		mcp.WithBoolean("dry_run",
-			mcp.Description("If true, describe what would happen without executing. Default: false."),
+			mcp.Description("Step 1: return a plan_id and before/after preview without executing. Default: false."),
 			mcp.DefaultBool(false),
 		),
+		mcp.WithString("confirm_plan_id",
+			mcp.Description("Step 2: plan_id from a prior dry_run call. Providing this executes the traffic split change."),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Update Cloud Run Traffic Split",
+			ReadOnlyHint:    boolPtr(false),
+			DestructiveHint: boolPtr(true),
+			IdempotentHint:  boolPtr(false),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,

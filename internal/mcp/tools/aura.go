@@ -40,6 +40,13 @@ func (t *AuraTools) GetAuraScore() server.ServerTool {
 		mcp.WithString("region", mcp.Required(),
 			mcp.Description("GCP region (e.g. us-central1). Use empty string for BigQuery (global)."),
 		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Aura Score",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
@@ -77,6 +84,13 @@ func (t *AuraTools) ProjectAuraSummary() server.ServerTool {
 			mcp.Description("Limit discovery to a specific region (e.g. us-central1). Leave empty to cover all regions."),
 			mcp.DefaultString(""),
 		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Project Aura Summary",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,

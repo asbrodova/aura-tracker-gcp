@@ -41,6 +41,13 @@ func (t *LoggingTools) QueryRecent() server.ServerTool {
 			mcp.Min(1),
 			mcp.Max(1440),
 		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Query Recent Cloud Logs",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,

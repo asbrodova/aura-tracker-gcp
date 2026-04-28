@@ -36,11 +36,12 @@ type ServiceDetails struct {
 }
 
 type UpdateTrafficRequest struct {
-	ProjectID   string          `json:"project_id"`
-	Region      string          `json:"region"`
-	ServiceName string          `json:"service_name"`
-	Traffic     []TrafficTarget `json:"traffic"`
-	DryRun      bool            `json:"dry_run"`
+	ProjectID     string          `json:"project_id"`
+	Region        string          `json:"region"`
+	ServiceName   string          `json:"service_name"`
+	Traffic       []TrafficTarget `json:"traffic"`
+	DryRun        bool            `json:"dry_run"`
+	ConfirmPlanID string          `json:"confirm_plan_id,omitempty"`
 }
 
 type UpdateTrafficResponse struct {
@@ -49,4 +50,6 @@ type UpdateTrafficResponse struct {
 	Before      []TrafficTarget `json:"before"`
 	After       []TrafficTarget `json:"after"`
 	Description string          `json:"description"`
+	PlanID      string          `json:"plan_id,omitempty"`
+	ExpiresIn   string          `json:"expires_in,omitempty"`
 }

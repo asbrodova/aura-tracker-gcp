@@ -1,0 +1,317 @@
+package safety
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"testing"
+	"time"
+
+	"github.com/asbrodova/aura-tracker-gcp/internal/gcp"
+	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+)
+
+// stubService is a minimal fake ports.GCPService for safety tests.
+// Only the two mutation methods have meaningful implementations; all
+// read methods return zero values.
+type stubService struct {
+	scaleResp models.ScaleDeploymentResponse
+	scaleErr  error
+	trafficResp models.UpdateTrafficResponse
+	trafficErr  error
+}
+
+func (s *stubService) ScaleDeployment(_ context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
+	if s.scaleErr != nil {
+		return models.ScaleDeploymentResponse{}, s.scaleErr
+	}
+	if req.DryRun {
+		return models.ScaleDeploymentResponse{
+			DryRun:         true,
+			NodePoolName:   req.NodePoolName,
+			PreviousCount:  3,
+			RequestedCount: req.NodeCount,
+		}, nil
+	}
+	return s.scaleResp, nil
+}
+
+func (s *stubService) UpdateTraffic(_ context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
+	if s.trafficErr != nil {
+		return models.UpdateTrafficResponse{}, s.trafficErr
+	}
+	if req.DryRun {
+		return models.UpdateTrafficResponse{
+			DryRun:      true,
+			ServiceName: req.ServiceName,
+			Before:      []models.TrafficTarget{{Revision: "v1", Percent: 100}},
+			After:       req.Traffic,
+		}, nil
+	}
+	return s.trafficResp, nil
+}
+
+// Satisfy the full interface with zero-value returns.
+func (s *stubService) ListClusters(_ context.Context, _ models.ListClustersRequest) (models.ListClustersResponse, error) {
+	return models.ListClustersResponse{}, nil
+}
+func (s *stubService) GetClusterDetails(_ context.Context, _ models.GetClusterDetailsRequest) (models.ClusterDetails, error) {
+	return models.ClusterDetails{}, nil
+}
+func (s *stubService) GetClusterBottlenecks(_ context.Context, _ models.GetClusterBottlenecksRequest) (models.ClusterBottleneckReport, error) {
+	return models.ClusterBottleneckReport{}, nil
+}
+func (s *stubService) ListServices(_ context.Context, _ models.ListServicesRequest) (models.ListServicesResponse, error) {
+	return models.ListServicesResponse{}, nil
+}
+func (s *stubService) GetServiceDetails(_ context.Context, _ models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
+	return models.ServiceDetails{}, nil
+}
+func (s *stubService) ListTopics(_ context.Context, _ models.ListTopicsRequest) (models.ListTopicsResponse, error) {
+	return models.ListTopicsResponse{}, nil
+}
+func (s *stubService) InspectTopicHealth(_ context.Context, _ models.InspectTopicHealthRequest) (models.TopicHealthReport, error) {
+	return models.TopicHealthReport{}, nil
+}
+func (s *stubService) QueryRecentLogs(_ context.Context, _ models.QueryRecentLogsRequest) (models.QueryRecentLogsResponse, error) {
+	return models.QueryRecentLogsResponse{}, nil
+}
+func (s *stubService) GetMetrics(_ context.Context, _ models.GetMetricsRequest) (models.GetMetricsResponse, error) {
+	return models.GetMetricsResponse{}, nil
+}
+func (s *stubService) TestPermissions(_ context.Context, _ models.TestPermissionsRequest) (models.TestPermissionsResponse, error) {
+	return models.TestPermissionsResponse{}, nil
+}
+func (s *stubService) GetServiceTopology(_ context.Context, _ models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
+	return models.ServiceTopologyReport{}, nil
+}
+func (s *stubService) GetAuraScore(_ context.Context, _ models.GetAuraScoreRequest) (models.AuraReport, error) {
+	return models.AuraReport{}, nil
+}
+func (s *stubService) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
+	return models.ProjectAuraSummaryResponse{}, nil
+}
+func (s *stubService) ListDatasets(_ context.Context, _ models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
+	return models.ListDatasetsResponse{}, nil
+}
+func (s *stubService) ListTables(_ context.Context, _ models.ListTablesRequest) (models.ListTablesResponse, error) {
+	return models.ListTablesResponse{}, nil
+}
+func (s *stubService) GetTableSchema(_ context.Context, _ models.GetTableSchemaRequest) (models.TableSchemaResponse, error) {
+	return models.TableSchemaResponse{}, nil
+}
+func (s *stubService) ListBuckets(_ context.Context, _ models.ListBucketsRequest) (models.ListBucketsResponse, error) {
+	return models.ListBucketsResponse{}, nil
+}
+func (s *stubService) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
+	return models.BucketMetadataResponse{}, nil
+}
+
+func newTestDecorator(inner *stubService) *SafetyDecorator {
+	return NewSafetyDecorator(inner, slog.Default())
+}
+
+// --- ScaleDeployment tests ---
+
+func TestScaleDeployment_DryRun_StoresPlan(t *testing.T) {
+	d := newTestDecorator(&stubService{})
+
+	resp, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		NodePoolName: "pool-1",
+		NodeCount:    5,
+		DryRun:       true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.PlanID == "" {
+		t.Error("expected plan_id in dry-run response")
+	}
+	if resp.ExpiresIn == "" {
+		t.Error("expected expires_in in dry-run response")
+	}
+	if !resp.DryRun {
+		t.Error("expected DryRun=true in response")
+	}
+}
+
+func TestScaleDeployment_Confirm_ExecutesAndClearsPlan(t *testing.T) {
+	inner := &stubService{
+		scaleResp: models.ScaleDeploymentResponse{NodePoolName: "pool-1", RequestedCount: 5},
+	}
+	d := newTestDecorator(inner)
+
+	dryResp, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		NodePoolName: "pool-1",
+		NodeCount:    5,
+		DryRun:       true,
+	})
+	if err != nil {
+		t.Fatal("dry-run failed:", err)
+	}
+
+	resp, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		ConfirmPlanID: dryResp.PlanID,
+	})
+	if err != nil {
+		t.Fatal("confirm failed:", err)
+	}
+	if resp.NodePoolName != "pool-1" {
+		t.Errorf("unexpected node pool in response: %q", resp.NodePoolName)
+	}
+
+	// Plan must be gone — single-use.
+	_, stillThere := d.store.take(dryResp.PlanID)
+	if stillThere {
+		t.Error("plan still in store after confirmation — not single-use")
+	}
+}
+
+func TestScaleDeployment_NoFlags_Blocked(t *testing.T) {
+	d := newTestDecorator(&stubService{})
+
+	_, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		NodeCount: 5,
+	})
+	var cre *gcp.ConfirmationRequiredError
+	if !errors.As(err, &cre) {
+		t.Errorf("expected ConfirmationRequiredError, got %T: %v", err, err)
+	}
+}
+
+func TestScaleDeployment_ExpiredPlan_Blocked(t *testing.T) {
+	d := newTestDecorator(&stubService{})
+
+	// Inject an already-expired entry directly.
+	d.store.mu.Lock()
+	d.store.entries["expired-id"] = planEntry{
+		payload:   scaleDeploymentPlan{},
+		expiresAt: time.Now().Add(-1 * time.Second),
+	}
+	d.store.mu.Unlock()
+
+	_, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		ConfirmPlanID: "expired-id",
+	})
+	var cre *gcp.ConfirmationRequiredError
+	if !errors.As(err, &cre) {
+		t.Errorf("expected ConfirmationRequiredError for expired plan, got %T: %v", err, err)
+	}
+}
+
+func TestScaleDeployment_NoChangeNeeded_NoPlan(t *testing.T) {
+	inner := &stubService{}
+	// Override so DryRun returns NoChangeNeeded.
+	d := newTestDecorator(inner)
+	// Manually insert a response via a wrapped stub that returns NoChangeNeeded.
+	type ncStub struct{ stubService }
+	ncs := &ncStub{}
+	d2 := NewSafetyDecorator(&stubNoChange{}, slog.Default())
+
+	resp, err := d2.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		NodePoolName: "pool-1",
+		NodeCount:    3,
+		DryRun:       true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.PlanID != "" {
+		t.Error("expected no plan_id when no change is needed")
+	}
+	_ = d
+	_ = ncs
+}
+
+// stubNoChange returns NoChangeNeeded for dry-run ScaleDeployment.
+type stubNoChange struct{ stubService }
+
+func (s *stubNoChange) ScaleDeployment(_ context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
+	if req.DryRun {
+		return models.ScaleDeploymentResponse{DryRun: true, NoChangeNeeded: true, Description: "already at desired count"}, nil
+	}
+	return models.ScaleDeploymentResponse{}, nil
+}
+
+// --- UpdateTraffic tests ---
+
+func TestUpdateTraffic_DryRun_StoresPlan(t *testing.T) {
+	d := newTestDecorator(&stubService{})
+
+	resp, err := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{
+		ServiceName: "svc-a",
+		Traffic:     []models.TrafficTarget{{Revision: "v2", Percent: 100}},
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.PlanID == "" {
+		t.Error("expected plan_id in dry-run response")
+	}
+}
+
+func TestUpdateTraffic_Confirm_ExecutesAndClearsPlan(t *testing.T) {
+	inner := &stubService{
+		trafficResp: models.UpdateTrafficResponse{ServiceName: "svc-a"},
+	}
+	d := newTestDecorator(inner)
+
+	dryResp, _ := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{
+		ServiceName: "svc-a",
+		Traffic:     []models.TrafficTarget{{Revision: "v2", Percent: 100}},
+		DryRun:      true,
+	})
+
+	resp, err := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{
+		ConfirmPlanID: dryResp.PlanID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.ServiceName != "svc-a" {
+		t.Errorf("unexpected service name: %q", resp.ServiceName)
+	}
+}
+
+func TestUpdateTraffic_NoFlags_Blocked(t *testing.T) {
+	d := newTestDecorator(&stubService{})
+
+	_, err := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{
+		ServiceName: "svc-a",
+	})
+	var cre *gcp.ConfirmationRequiredError
+	if !errors.As(err, &cre) {
+		t.Errorf("expected ConfirmationRequiredError, got %T: %v", err, err)
+	}
+}
+
+// --- Plan replay prevention ---
+
+func TestScaleDeployment_PlanCannotBeConfirmedTwice(t *testing.T) {
+	inner := &stubService{
+		scaleResp: models.ScaleDeploymentResponse{NodePoolName: "pool-1", RequestedCount: 5},
+	}
+	d := newTestDecorator(inner)
+
+	dryResp, _ := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		NodePoolName: "pool-1", NodeCount: 5, DryRun: true,
+	})
+
+	// First confirm succeeds.
+	_, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		ConfirmPlanID: dryResp.PlanID,
+	})
+	if err != nil {
+		t.Fatal("first confirm failed:", err)
+	}
+
+	// Second confirm must fail.
+	_, err = d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
+		ConfirmPlanID: dryResp.PlanID,
+	})
+	var cre *gcp.ConfirmationRequiredError
+	if !errors.As(err, &cre) {
+		t.Errorf("expected ConfirmationRequiredError on replay, got %T: %v", err, err)
+	}
+}

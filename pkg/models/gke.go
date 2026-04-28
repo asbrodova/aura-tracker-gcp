@@ -84,19 +84,22 @@ type ClusterBottleneckReport struct {
 }
 
 type ScaleDeploymentRequest struct {
-	ProjectID      string `json:"project_id"`
-	Location       string `json:"location"`
-	ClusterName    string `json:"cluster_name"`
-	NodePoolName   string `json:"node_pool_name"`
-	NodeCount      int32  `json:"node_count"`
-	DryRun         bool   `json:"dry_run"`
+	ProjectID     string `json:"project_id"`
+	Location      string `json:"location"`
+	ClusterName   string `json:"cluster_name"`
+	NodePoolName  string `json:"node_pool_name"`
+	NodeCount     int32  `json:"node_count"`
+	DryRun        bool   `json:"dry_run"`
+	ConfirmPlanID string `json:"confirm_plan_id,omitempty"`
 }
 
 type ScaleDeploymentResponse struct {
-	DryRun           bool   `json:"dry_run"`
-	NodePoolName     string `json:"node_pool_name"`
-	PreviousCount    int32  `json:"previous_count"`
-	RequestedCount   int32  `json:"requested_count"`
-	NoChangeNeeded   bool   `json:"no_change_needed"`
-	Description      string `json:"description"`
+	DryRun         bool   `json:"dry_run"`
+	NodePoolName   string `json:"node_pool_name"`
+	PreviousCount  int32  `json:"previous_count"`
+	RequestedCount int32  `json:"requested_count"`
+	NoChangeNeeded bool   `json:"no_change_needed"`
+	Description    string `json:"description"`
+	PlanID         string `json:"plan_id,omitempty"`
+	ExpiresIn      string `json:"expires_in,omitempty"`
 }

@@ -26,6 +26,13 @@ func (t *IAMTools) TestPermissions() server.ServerTool {
 	tool := mcp.NewTool("gcp_iam_test_permissions",
 		mcp.WithDescription("Test which IAM permissions the caller service account has on a GCP project. Use this before attempting mutations to avoid permission errors."),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID to test permissions against")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Test IAM Permissions",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
