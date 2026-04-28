@@ -22,6 +22,17 @@ func NewGKETools(svc ports.GCPService, log *slog.Logger) *GKETools {
 	return &GKETools{svc: svc, log: log}
 }
 
+func (t *GKETools) Name() string { return "gke" }
+
+func (t *GKETools) GetTools() []server.ServerTool {
+	return []server.ServerTool{
+		t.ListClusters(),
+		t.GetClusterDetails(),
+		t.GetClusterBottlenecks(),
+		t.ScaleDeployment(),
+	}
+}
+
 func (t *GKETools) ListClusters() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_list_clusters",
 		mcp.WithDescription("List all GKE clusters in a GCP project and location"),
@@ -89,7 +100,7 @@ func (t *GKETools) getClusterDetailsHandler(ctx context.Context, _ mcp.CallToolR
 
 func (t *GKETools) GetClusterBottlenecks() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_get_cluster_bottlenecks",
-		mcp.WithDescription("Aggregate CPU/memory metrics and recent error logs to identify cluster bottlenecks and compute a severity rating"),
+		mcp.WithDescription("Identify GKE cluster bottlenecks from CPU/memory metrics and error logs; returns severity rating."),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
@@ -132,11 +143,9 @@ func (t *GKETools) getClusterBottlenecksHandler(ctx context.Context, _ mcp.CallT
 func (t *GKETools) ScaleDeployment() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_scale_deployment",
 		mcp.WithDescription(
-			"Scale a GKE node pool to the requested node count. "+
-				"SAFETY: requires two-step confirmation. "+
-				"Step 1 — call with dry_run=true to receive a plan_id and preview the change. "+
-				"Step 2 — call with confirm_plan_id=<plan_id> to execute (plan expires after 10 minutes). "+
-				"Idempotent: scaling to the current count returns no_change_needed=true.",
+			"Scale a GKE node pool. " +
+				"Mutation: dry_run=true → plan_id preview; confirm_plan_id=<id> executes (TTL 10 min). " +
+				"Idempotent: same count → no_change_needed=true.",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),

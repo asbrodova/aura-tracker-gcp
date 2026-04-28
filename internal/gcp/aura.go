@@ -332,9 +332,9 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 		return nil, err
 	}
 
-	cpuScore, cpuLabel := sqlSignalScore("cpu_util", cpuUtil)
-	memScore, memLabel := sqlSignalScore("memory_util", memUtil)
-	diskScore, diskLabel := sqlSignalScore("disk_util", diskUtil)
+	cpuScore, cpuLabel := sqlSignalScore(cpuUtil)
+	memScore, memLabel := sqlSignalScore(memUtil)
+	diskScore, diskLabel := sqlSignalScore(diskUtil)
 
 	signals := []models.AuraHealthSignal{
 		{Name: "cpu_util", Value: round4(cpuUtil), Score: cpuScore, Label: cpuLabel},
@@ -698,7 +698,7 @@ func cloudRunSignalScore(name string, value float64) (int, string) {
 	return 100, "OK"
 }
 
-func sqlSignalScore(name string, value float64) (int, string) {
+func sqlSignalScore(value float64) (int, string) {
 	// Symmetric thresholds for cpu/memory/disk.
 	switch {
 	case value < 0.10:

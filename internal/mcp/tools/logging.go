@@ -22,6 +22,12 @@ func NewLoggingTools(svc ports.GCPService, log *slog.Logger) *LoggingTools {
 	return &LoggingTools{svc: svc, log: log}
 }
 
+func (t *LoggingTools) Name() string { return "logging" }
+
+func (t *LoggingTools) GetTools() []server.ServerTool {
+	return []server.ServerTool{t.QueryRecent()}
+}
+
 func (t *LoggingTools) QueryRecent() server.ServerTool {
 	tool := mcp.NewTool("gcp_logging_query_recent",
 		mcp.WithDescription("Fetch recent Cloud Logging entries for a GCP resource, filtered by severity and time window"),

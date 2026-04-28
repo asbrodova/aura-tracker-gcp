@@ -22,12 +22,20 @@ func NewAuraTools(svc ports.GCPService, log *slog.Logger) *AuraTools {
 	return &AuraTools{svc: svc, log: log}
 }
 
+func (t *AuraTools) Name() string { return "aura" }
+
+func (t *AuraTools) GetTools() []server.ServerTool {
+	return []server.ServerTool{
+		t.GetAuraScore(),
+		t.ProjectAuraSummary(),
+	}
+}
+
 func (t *AuraTools) GetAuraScore() server.ServerTool {
 	tool := mcp.NewTool("gcp_get_aura_score",
 		mcp.WithDescription(
-			"Return a composite Aura Score (0-100) for a single GCP resource, combining "+
-				"Cloud Monitoring golden signals (health) with utilization-based efficiency. "+
-				"Results are cached for 5 minutes. Band: 🟢 green ≥80, 🟡 yellow 50-79, 🔴 red <50.",
+			"Return an Aura Score (0-100) combining Cloud Monitoring health signals and utilization " +
+				"efficiency for a resource. Cached 5 min. Bands: green ≥80, yellow 50-79, red <50.",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("resource_kind", mcp.Required(),
@@ -75,9 +83,8 @@ func (t *AuraTools) getAuraScoreHandler(ctx context.Context, _ mcp.CallToolReque
 func (t *AuraTools) ProjectAuraSummary() server.ServerTool {
 	tool := mcp.NewTool("gcp_project_aura_summary",
 		mcp.WithDescription(
-			"Discover all Cloud Run services, Cloud SQL instances, and BigQuery datasets in the project, "+
-				"score each with an Aura Score, and return them sorted worst-first. "+
-				"The 'summary' field contains a pre-formatted emoji block suitable for direct LLM display.",
+			"Score all Cloud Run, Cloud SQL, and BigQuery resources with Aura Scores, sorted worst-first. " +
+				"Includes a pre-formatted summary block.",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("region",

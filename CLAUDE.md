@@ -46,6 +46,13 @@ internal/mcp/  NEVER imports internal/gcp/
 | `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
 | `RECOMMENDER_ENABLED` | No | Set `true` to enable Cloud Recommender API integration for Aura Score efficiency signals (requires Recommender Viewer role) |
 
+## CLI Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--modules` | *(all)* | Comma-separated list of tool modules to enable: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`. Use `none` for zero tools (resources and prompts remain). Each excluded module also skips its GCP client connection at startup. |
+| `--version` | — | Print version and exit. |
+
 ## README Hygiene
 
 Always check `README.md` is up to date **before committing**. Update it whenever you:
@@ -65,7 +72,9 @@ Stage README changes in the same commit as the code that required them.
 4. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`
    - Use `mcp.NewTypedToolHandler(t.handlerFunc)` for automatic arg binding
    - Call `handleServiceError(toolName, err)` on service errors
-5. Register the tool in `internal/mcp/server.go`
+   - Declare `mcp.Required()` parameters before optional ones in `mcp.NewTool(...)` — the mcp-go library preserves declaration order in the JSON Schema, so required fields appear first in the LLM's context window
+5. Add the tool to `GetTools()` on the domain's `*Tools` struct (in the same file)
+6. If adding a new domain, also add it to `internal/gcp/modules.go` (`moduleClientDeps`) and `internal/mcp/registry.go` (`AllModules`)
 
 ## Error Handling Rules
 

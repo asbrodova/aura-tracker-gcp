@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -33,6 +34,13 @@ func main() {
 		}
 	}
 
+	modulesFlag := flag.String("modules", "",
+		"Comma-separated tool modules to enable: gke,cloudrun,pubsub,logging,monitoring,iam,topology,aura.\n"+
+			"Use 'none' for zero tools (resources and prompts remain available). Default: all modules.")
+	flag.Parse()
+
+	enabledModules := parseModulesFlag(*modulesFlag)
+
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -60,6 +68,7 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		gcpadapter.WithRateLimit(10, 20),
 		gcpadapter.WithCallTimeout(30 * time.Second),
 		gcpadapter.WithLogger(log),
+		gcpadapter.WithModules(enabledModules),
 	}
 	if os.Getenv("RECOMMENDER_ENABLED") == "true" {
 		adapterOpts = append(adapterOpts, gcpadapter.WithRecommender())
@@ -140,7 +149,7 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		log.Warn("safety enforcement DISABLED via SAFETY_ENABLED=false")
 	}
 
-	s := mcpserver.New(gcpSvc, log, version, mcpserver.WithAnonymizer(anon))
+	s := mcpserver.New(gcpSvc, log, version, mcpserver.WithAnonymizer(anon), mcpserver.WithModules(enabledModules))
 
 	switch os.Getenv("MCP_TRANSPORT") {
 	case "sse":
@@ -183,6 +192,25 @@ func logCredentialSource(log *slog.Logger, creds *google.Credentials) {
 	default:
 		log.Info("adc: workload identity / GCE metadata server")
 	}
+}
+
+// parseModulesFlag converts the --modules flag value to a map[string]bool.
+// Returns nil (all modules) when val is empty.
+// Returns an empty map (zero tools) when val is "none".
+func parseModulesFlag(val string) map[string]bool {
+	if val == "" {
+		return nil
+	}
+	if strings.EqualFold(val, "none") {
+		return map[string]bool{}
+	}
+	out := make(map[string]bool)
+	for _, m := range strings.Split(val, ",") {
+		if m = strings.TrimSpace(strings.ToLower(m)); m != "" {
+			out[m] = true
+		}
+	}
+	return out
 }
 
 // contextKeyCallerEmail is the context key for the authenticated caller's email,
