@@ -86,6 +86,33 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 }
 ```
 
+#### Optional: reduce context usage with `--modules`
+
+By default all 15 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=cloudrun,aura,monitoring,iam"],
+      "env": {
+        "GCP_PROJECT_ID": "my-project"
+      }
+    }
+  }
+}
+```
+
+Available module names: `gke` · `cloudrun` · `pubsub` · `logging` · `monitoring` · `iam` · `topology` · `aura`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
+
+| Workflow | Suggested `--modules` | Tools loaded |
+|---|---|---|
+| Cloud Run operations | `cloudrun,aura,monitoring,iam` | 7 |
+| GKE cluster health | `gke,monitoring,logging` | 6 |
+| Data / logging | `logging,monitoring,iam` | 3 |
+| Full toolkit | *(omit flag)* | 15 |
+
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
 > "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."

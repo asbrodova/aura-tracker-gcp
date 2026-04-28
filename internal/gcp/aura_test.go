@@ -115,9 +115,9 @@ func TestSQLSignalScore(t *testing.T) {
 		{0.97, 0, "Critical"},
 	}
 	for _, tt := range tests {
-		score, label := sqlSignalScore("cpu_util", tt.value)
+		score, label := sqlSignalScore(tt.value)
 		if score != tt.wantScore || label != tt.wantLabel {
-			t.Errorf("sqlSignalScore(cpu_util, %.2f) = (%d, %q), want (%d, %q)",
+			t.Errorf("sqlSignalScore(%.2f) = (%d, %q), want (%d, %q)",
 				tt.value, score, label, tt.wantScore, tt.wantLabel)
 		}
 	}

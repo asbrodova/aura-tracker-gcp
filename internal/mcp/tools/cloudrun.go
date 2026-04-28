@@ -22,6 +22,16 @@ func NewCloudRunTools(svc ports.GCPService, log *slog.Logger) *CloudRunTools {
 	return &CloudRunTools{svc: svc, log: log}
 }
 
+func (t *CloudRunTools) Name() string { return "cloudrun" }
+
+func (t *CloudRunTools) GetTools() []server.ServerTool {
+	return []server.ServerTool{
+		t.ListServices(),
+		t.GetServiceDetails(),
+		t.UpdateTraffic(),
+	}
+}
+
 func (t *CloudRunTools) ListServices() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_list_services",
 		mcp.WithDescription("List all Cloud Run services in a GCP project and region"),
@@ -90,10 +100,8 @@ func (t *CloudRunTools) getServiceDetailsHandler(ctx context.Context, _ mcp.Call
 func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_update_traffic",
 		mcp.WithDescription(
-			"Update the traffic split for a Cloud Run service. "+
-				"SAFETY: requires two-step confirmation. "+
-				"Step 1 — call with dry_run=true to receive a plan_id and preview the before/after traffic split. "+
-				"Step 2 — call with confirm_plan_id=<plan_id> to execute (plan expires after 10 minutes).",
+			"Update the traffic split for a Cloud Run service. " +
+				"Mutation: dry_run=true → plan_id + before/after preview; confirm_plan_id=<id> executes (TTL 10 min).",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),

@@ -22,13 +22,20 @@ const serverName = "aura-tracker-gcp"
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	anonymizer anonymize.Anonymizer
+	anonymizer     anonymize.Anonymizer
+	enabledModules map[string]bool // nil = all modules
 }
 
 // WithAnonymizer attaches an Anonymizer to every registered tool handler.
 // When not provided, NoopAnonymizer is used (pass-through, no overhead).
 func WithAnonymizer(a anonymize.Anonymizer) Option {
 	return func(o *serverOptions) { o.anonymizer = a }
+}
+
+// WithModules restricts which tool modules are registered.
+// A nil or empty map registers all modules (default behavior).
+func WithModules(modules map[string]bool) Option {
+	return func(o *serverOptions) { o.enabledModules = modules }
 }
 
 // New creates and configures the MCP server, registering all tools, resources, and prompts.
@@ -52,32 +59,19 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	}
 
 	// --- Tools ---
-	gke := tools.NewGKETools(svc, log)
-	cr := tools.NewCloudRunTools(svc, log)
-	ps := tools.NewPubSubTools(svc, log)
-	lg := tools.NewLoggingTools(svc, log)
-	mon := tools.NewMonitoringTools(svc, log)
-	iam := tools.NewIAMTools(svc, log)
-	topo := tools.NewTopologyTools(svc, log)
-	aura := tools.NewAuraTools(svc, log)
-
-	s.AddTools(
-		wrap(gke.ListClusters()),
-		wrap(gke.GetClusterDetails()),
-		wrap(gke.GetClusterBottlenecks()),
-		wrap(gke.ScaleDeployment()),
-		wrap(cr.ListServices()),
-		wrap(cr.GetServiceDetails()),
-		wrap(cr.UpdateTraffic()),
-		wrap(ps.ListTopics()),
-		wrap(ps.InspectTopicHealth()),
-		wrap(lg.QueryRecent()),
-		wrap(mon.GetMetrics()),
-		wrap(iam.TestPermissions()),
-		wrap(topo.GetServiceTopology()),
-		wrap(aura.GetAuraScore()),
-		wrap(aura.ProjectAuraSummary()),
-	)
+	allModules := []ToolModule{
+		tools.NewGKETools(svc, log),
+		tools.NewCloudRunTools(svc, log),
+		tools.NewPubSubTools(svc, log),
+		tools.NewLoggingTools(svc, log),
+		tools.NewMonitoringTools(svc, log),
+		tools.NewIAMTools(svc, log),
+		tools.NewTopologyTools(svc, log),
+		tools.NewAuraTools(svc, log),
+	}
+	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
+		s.AddTools(wrap(t))
+	}
 
 	// --- Resources ---
 	project := os.Getenv("GCP_PROJECT_ID")

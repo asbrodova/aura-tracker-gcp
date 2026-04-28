@@ -22,13 +22,17 @@ func NewTopologyTools(svc ports.GCPService, log *slog.Logger) *TopologyTools {
 	return &TopologyTools{svc: svc, log: log}
 }
 
+func (t *TopologyTools) Name() string { return "topology" }
+
+func (t *TopologyTools) GetTools() []server.ServerTool {
+	return []server.ServerTool{t.GetServiceTopology()}
+}
+
 func (t *TopologyTools) GetServiceTopology() server.ServerTool {
 	tool := mcp.NewTool("gcp_get_service_topology",
 		mcp.WithDescription(
-			"Infer the dependency graph of a Cloud Run service by scanning its Cloud SQL annotations, "+
-				"VPC connector, environment variables, Secret Manager references, and Pub/Sub push subscriptions. "+
-				"Returns both a structured node/edge graph and flat human-readable relationship statements. "+
-				"Use depth=2 to also resolve dependencies-of-dependencies.",
+			"Infer Cloud Run service dependencies from Cloud SQL annotations, VPC connector, env vars, " +
+				"Secret Manager refs, and Pub/Sub subscriptions. depth=2 resolves transitive deps.",
 		),
 		mcp.WithString("project", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("Cloud Run region, e.g. us-central1")),

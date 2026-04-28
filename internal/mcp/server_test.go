@@ -160,6 +160,38 @@ func TestServerRegistersResourcesAndPrompts(t *testing.T) {
 	}
 }
 
+func TestFilteredRegistration(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test",
+		WithModules(map[string]bool{"gke": true}),
+	)
+
+	registered := s.ListTools()
+	gkeTools := []string{
+		"gcp_gke_list_clusters",
+		"gcp_gke_get_cluster_details",
+		"gcp_gke_get_cluster_bottlenecks",
+		"gcp_gke_scale_deployment",
+	}
+	if got := len(registered); got != len(gkeTools) {
+		t.Errorf("expected %d tools with gke module, got %d", len(gkeTools), got)
+	}
+	for _, name := range gkeTools {
+		if _, ok := registered[name]; !ok {
+			t.Errorf("expected tool %q to be registered", name)
+		}
+	}
+}
+
+func TestNoneModulesRegistersZeroTools(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test",
+		WithModules(map[string]bool{}),
+	)
+
+	if got := len(s.ListTools()); got != 0 {
+		t.Errorf("expected 0 tools with empty module set, got %d", got)
+	}
+}
+
 func TestPromptHandlerRequiresProjectID(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
 

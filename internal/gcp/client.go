@@ -61,8 +61,14 @@ func WithRecommender() Option {
 	return func(a *gcpAdapter) { a.enableRecommender = true }
 }
 
+// WithModules restricts GCP client initialization to only the clients required
+// by the named modules. A nil or empty map initializes all clients (default behavior).
+func WithModules(modules map[string]bool) Option {
+	return func(a *gcpAdapter) { a.enabledModules = modules }
+}
+
 // gcpAdapter is the single concrete implementation of ports.GCPService.
-// All SDK clients are initialised once at construction time via New().
+// SDK clients are lazily initialised based on the enabledModules set.
 type gcpAdapter struct {
 	clusterMgr        *container.ClusterManagerClient
 	runSvc            *run.ServicesClient
@@ -74,6 +80,7 @@ type gcpAdapter struct {
 	gcs               *storage.Client
 	rec               *recommender.Client
 	enableRecommender bool
+	enabledModules    map[string]bool
 	limiter           *rate.Limiter
 	callTimeout       time.Duration
 	log               *slog.Logger
@@ -81,8 +88,9 @@ type gcpAdapter struct {
 	auraCache         *ttlCache[models.AuraReport]
 }
 
-// New creates a gcpAdapter, initialises all GCP SDK clients using Application
-// Default Credentials, and returns it as a ports.GCPService.
+// New creates a gcpAdapter, initialises the required GCP SDK clients using
+// Application Default Credentials, and returns it as a ports.GCPService.
+// When WithModules is provided, only the clients needed by those modules are opened.
 //
 // Call Close() when done to release gRPC connections.
 func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, error) {
@@ -96,31 +104,42 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		o(a)
 	}
 
+	needed := neededClients(a.enabledModules)
 	var err error
 
-	a.clusterMgr, err = container.NewClusterManagerClient(ctx, a.clientOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create container client: %w", err)
+	if needed[clientClusterMgr] {
+		a.clusterMgr, err = container.NewClusterManagerClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create container client: %w", err)
+		}
 	}
 
-	a.runSvc, err = run.NewServicesClient(ctx, a.clientOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create run services client: %w", err)
+	if needed[clientRunSvc] {
+		a.runSvc, err = run.NewServicesClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create run services client: %w", err)
+		}
 	}
 
-	a.pubsub, err = pubsub.NewClient(ctx, projectID, a.clientOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create pubsub client: %w", err)
+	if needed[clientPubSub] {
+		a.pubsub, err = pubsub.NewClient(ctx, projectID, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create pubsub client: %w", err)
+		}
 	}
 
-	a.logAdmin, err = logadmin.NewClient(ctx, projectID, a.clientOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create log admin client: %w", err)
+	if needed[clientLogAdmin] {
+		a.logAdmin, err = logadmin.NewClient(ctx, projectID, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create log admin client: %w", err)
+		}
 	}
 
-	a.metric, err = monitoring.NewMetricClient(ctx, a.clientOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create metric client: %w", err)
+	if needed[clientMetric] {
+		a.metric, err = monitoring.NewMetricClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create metric client: %w", err)
+		}
 	}
 
 	if a.enableRecommender {
@@ -130,54 +149,74 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		}
 	}
 
-	httpOpts := make([]option.ClientOption, len(a.clientOpts))
-	copy(httpOpts, a.clientOpts)
-	a.crm, err = cloudresourcemanager.NewService(ctx, httpOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create cloudresourcemanager client: %w", err)
+	if needed[clientCRM] {
+		httpOpts := make([]option.ClientOption, len(a.clientOpts))
+		copy(httpOpts, a.clientOpts)
+		a.crm, err = cloudresourcemanager.NewService(ctx, httpOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create cloudresourcemanager client: %w", err)
+		}
 	}
 
-	a.bq, err = bigquery.NewClient(ctx, projectID, a.clientOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create bigquery client: %w", err)
+	if needed[clientBQ] {
+		a.bq, err = bigquery.NewClient(ctx, projectID, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create bigquery client: %w", err)
+		}
 	}
 
-	a.gcs, err = storage.NewClient(ctx, a.clientOpts...)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: create storage client: %w", err)
+	if needed[clientGCS] {
+		a.gcs, err = storage.NewClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create storage client: %w", err)
+		}
 	}
 
 	return a, nil
 }
 
-// Close releases all underlying connections.
+// Close releases all underlying connections. Nil-safe: only closes clients that were initialized.
 func (a *gcpAdapter) Close() error {
 	var errs []error
-	if err := a.clusterMgr.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close container client: %w", err))
+	if a.clusterMgr != nil {
+		if err := a.clusterMgr.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close container client: %w", err))
+		}
 	}
-	if err := a.runSvc.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close run client: %w", err))
+	if a.runSvc != nil {
+		if err := a.runSvc.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close run client: %w", err))
+		}
 	}
-	if err := a.pubsub.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close pubsub client: %w", err))
+	if a.pubsub != nil {
+		if err := a.pubsub.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close pubsub client: %w", err))
+		}
 	}
-	if err := a.logAdmin.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close log admin client: %w", err))
+	if a.logAdmin != nil {
+		if err := a.logAdmin.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close log admin client: %w", err))
+		}
 	}
-	if err := a.metric.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close metric client: %w", err))
+	if a.metric != nil {
+		if err := a.metric.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close metric client: %w", err))
+		}
 	}
 	if a.rec != nil {
 		if err := a.rec.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close recommender client: %w", err))
 		}
 	}
-	if err := a.bq.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close bigquery client: %w", err))
+	if a.bq != nil {
+		if err := a.bq.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close bigquery client: %w", err))
+		}
 	}
-	if err := a.gcs.Close(); err != nil {
-		errs = append(errs, fmt.Errorf("close storage client: %w", err))
+	if a.gcs != nil {
+		if err := a.gcs.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close storage client: %w", err))
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("gcp adapter close: %v", errs)

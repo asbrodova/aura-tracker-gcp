@@ -22,6 +22,15 @@ func NewPubSubTools(svc ports.GCPService, log *slog.Logger) *PubSubTools {
 	return &PubSubTools{svc: svc, log: log}
 }
 
+func (t *PubSubTools) Name() string { return "pubsub" }
+
+func (t *PubSubTools) GetTools() []server.ServerTool {
+	return []server.ServerTool{
+		t.ListTopics(),
+		t.InspectTopicHealth(),
+	}
+}
+
 func (t *PubSubTools) ListTopics() server.ServerTool {
 	tool := mcp.NewTool("gcp_pubsub_list_topics",
 		mcp.WithDescription("List all Pub/Sub topics in a GCP project with their subscription counts"),

@@ -22,6 +22,12 @@ func NewMonitoringTools(svc ports.GCPService, log *slog.Logger) *MonitoringTools
 	return &MonitoringTools{svc: svc, log: log}
 }
 
+func (t *MonitoringTools) Name() string { return "monitoring" }
+
+func (t *MonitoringTools) GetTools() []server.ServerTool {
+	return []server.ServerTool{t.GetMetrics()}
+}
+
 func (t *MonitoringTools) GetMetrics() server.ServerTool {
 	tool := mcp.NewTool("gcp_monitoring_get_metrics",
 		mcp.WithDescription("Fetch Cloud Monitoring time-series metrics for a GCP resource over a specified time window"),
