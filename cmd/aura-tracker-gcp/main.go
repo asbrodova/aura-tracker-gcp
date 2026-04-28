@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -42,7 +45,8 @@ func main() {
 
 	ctx := context.Background()
 
-	if _, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform"); err != nil {
+	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
 		fmt.Fprintln(os.Stderr, `aura-tracker-gcp: no GCP credentials found.
 
 Run:  gcloud auth application-default login
@@ -50,6 +54,7 @@ Run:  gcloud auth application-default login
 Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		os.Exit(1)
 	}
+	logCredentialSource(log, creds)
 
 	adapterOpts := []gcpadapter.Option{
 		gcpadapter.WithRateLimit(10, 20),
@@ -137,9 +142,80 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 
 	s := mcpserver.New(gcpSvc, log, version, mcpserver.WithAnonymizer(anon))
 
-	log.Info("aura-tracker-gcp starting", "transport", "stdio", "version", version)
-	if err := server.ServeStdio(s); err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
-		os.Exit(1)
+	switch os.Getenv("MCP_TRANSPORT") {
+	case "sse":
+		port := os.Getenv("PORT") // Cloud Run sets PORT automatically
+		if port == "" {
+			port = "8080"
+		}
+		baseURL := os.Getenv("MCP_BASE_URL")
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("http://localhost:%s", port)
+			log.Warn("MCP_BASE_URL not set; using localhost — set to public Cloud Run URL in production")
+		}
+		sseServer := server.NewSSEServer(s,
+			server.WithBaseURL(baseURL),
+			server.WithSSEContextFunc(bearerAuthMiddleware(log)),
+		)
+		log.Info("aura-tracker-gcp starting", "transport", "sse", "version", version, "addr", ":"+port, "base_url", baseURL)
+		if err := sseServer.Start(":" + port); err != nil {
+			fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
+			os.Exit(1)
+		}
+	default: // "stdio" or unset — existing behavior preserved
+		log.Info("aura-tracker-gcp starting", "transport", "stdio", "version", version)
+		if err := server.ServeStdio(s); err != nil {
+			fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+}
+
+// logCredentialSource logs which ADC credential source was detected at startup.
+// creds.JSON is non-nil only when credentials were loaded from a file (SA key or
+// gcloud well-known file); it is nil when coming from the GCE metadata server.
+func logCredentialSource(log *slog.Logger, creds *google.Credentials) {
+	switch {
+	case os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "":
+		log.Info("adc: service account key file", "path", os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+	case len(creds.JSON) > 0:
+		log.Info("adc: user credentials (gcloud application-default login)")
+	default:
+		log.Info("adc: workload identity / GCE metadata server")
+	}
+}
+
+// contextKeyCallerEmail is the context key for the authenticated caller's email,
+// injected by bearerAuthMiddleware for audit logging in SSE mode.
+type contextKeyCallerEmail struct{}
+
+// bearerAuthMiddleware validates an optional Authorization: Bearer token on each
+// MCP request. If valid, it injects the caller's email into the context for audit
+// logging. GCP API calls always use the server's Workload Identity SA regardless.
+func bearerAuthMiddleware(log *slog.Logger) server.SSEContextFunc {
+	return func(ctx context.Context, r *http.Request) context.Context {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			return ctx
+		}
+		token := strings.TrimPrefix(auth, "Bearer ")
+		resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?access_token=" + token) //nolint:noctx
+		if err != nil {
+			log.Warn("bearer token validation failed", "err", err)
+			return ctx
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			log.Warn("bearer token rejected", "status", resp.StatusCode)
+			return ctx
+		}
+		var info struct {
+			Email string `json:"email"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&info); err == nil && info.Email != "" {
+			log.Info("authenticated mcp request", "user", info.Email)
+			return context.WithValue(ctx, contextKeyCallerEmail{}, info.Email)
+		}
+		return ctx
 	}
 }

@@ -456,6 +456,39 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 | `RECOMMENDER_ENABLED` | No | Set `true` to enable the Cloud Recommender API integration. When enabled, Aura Scores include idle/over-provisioned flags with estimated monthly savings from GCP's pre-computed recommendations. Requires the Recommender Viewer role. Off by default. |
 | `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
+| `MCP_TRANSPORT` | No | Transport mode: `stdio` (default, for Claude Desktop) or `sse` (for Cloud Run / web-based MCP clients) |
+| `PORT` | No | HTTP port when `MCP_TRANSPORT=sse`. Cloud Run sets this automatically. Defaults to `8080`. |
+| `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Required for correct SSE endpoint URLs when deployed to Cloud Run. Defaults to `http://localhost:PORT` for local testing. |
+
+## IAM Setup
+
+`scripts/setup-iam.sh` is a **one-time team-admin setup**. Run it once per GCP project to create the `aura-tracker-mcp` service account with least-privilege roles. If the SA already exists, the script prints onboarding instructions for other team members and exits without making any changes.
+
+```bash
+# First-time setup (team admin only)
+PROJECT_ID=my-project bash scripts/setup-iam.sh
+
+# With mutation tools (gcp_gke_scale_deployment, gcp_cloudrun_update_traffic)
+PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
+
+# With Recommender API
+PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+```
+
+**For developers joining the team:** the SA already exists. Either ask your admin for a key file (`GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa-key.json`) or use `gcloud auth application-default login` with your own account if it already has the required roles.
+
+**Why not `roles/owner`?** Primitive roles grant write access to every GCP service in the project — a compromised MCP session could delete databases, modify firewall rules, or exfiltrate secrets. The read-only set grants only `list`/`get` on the specific services this server calls. Mutation roles (`roles/container.admin`, `roles/run.admin`) are opt-in and always gated by the two-step HITL confirmation protocol.
+
+**Audit granted roles:**
+
+```bash
+gcloud projects get-iam-policy PROJECT_ID \
+  --flatten='bindings[].members' \
+  --filter="bindings.members:aura-tracker-mcp@PROJECT_ID.iam.gserviceaccount.com" \
+  --format='table(bindings.role)'
+```
+
+---
 
 ## Security Model
 
@@ -645,6 +678,32 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 ```
 
 **Dependency rule:** `internal/mcp` never imports `internal/gcp`. Both depend only on `ports/`. `internal/safety` sits at the port boundary — it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
+
+### Transport Flows
+
+Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. The MCP protocol layer is identical in both modes.
+
+```
+# Local (stdio — default, Claude Desktop)
+Claude Desktop ──stdio──► cmd/main.go ──► MCPServer ──► ports.GCPService
+                                                               │
+                                           gcpAdapter ◄────────┘
+                                                │ ADC: gcloud user creds / SA key file
+                                                ▼ GCP APIs
+
+# Cloud Run (MCP_TRANSPORT=sse)
+MCP Client ──HTTPS──► Cloud Run (PORT=$PORT)
+                           │
+           bearerAuthMiddleware: validates Bearer token → injects caller email into ctx (audit log)
+                           │
+                       MCPServer ──► ports.GCPService
+                                          │
+                          gcpAdapter ◄────┘
+                               │ ADC: Workload Identity (GCE metadata server)
+                               ▼ GCP APIs
+```
+
+> **Auth model for SSE:** GCP API calls always use the server's Workload Identity SA (or local ADC). The `Authorization: Bearer <token>` header is used only for MCP-layer audit logging — it identifies *who* made the request, not which GCP identity is used for API calls.
 
 ## Development
 
