@@ -32,6 +32,17 @@ func (e *NotFoundError) Error() string {
 
 func (e *NotFoundError) Unwrap() error { return e.Err }
 
+// ConfirmationRequiredError is returned by the SafetyDecorator when a mutation
+// is attempted without a valid plan confirmation.
+type ConfirmationRequiredError struct {
+	Op      string
+	Message string
+}
+
+func (e *ConfirmationRequiredError) Error() string {
+	return fmt.Sprintf("%s: confirmation required: %s", e.Op, e.Message)
+}
+
 // wrapGCPError maps gRPC status codes to typed errors.
 // op should be a dot-separated call path, e.g. "gke.ListClusters".
 func wrapGCPError(op string, err error) error {

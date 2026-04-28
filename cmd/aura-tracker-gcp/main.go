@@ -13,6 +13,8 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
 	gcpadapter "github.com/asbrodova/aura-tracker-gcp/internal/gcp"
 	mcpserver "github.com/asbrodova/aura-tracker-gcp/internal/mcp"
+	"github.com/asbrodova/aura-tracker-gcp/internal/safety"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 // version is overwritten at build time by GoReleaser:
@@ -125,7 +127,15 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		log.Info("anonymization enabled", "mode", anonCfg.Mode, "audit_only", anonCfg.AuditOnly)
 	}
 
-	s := mcpserver.New(svc, log, version, mcpserver.WithAnonymizer(anon))
+	var gcpSvc ports.GCPService = svc
+	if os.Getenv("SAFETY_ENABLED") != "false" {
+		gcpSvc = safety.NewSafetyDecorator(svc, log)
+		log.Info("safety enforcement enabled", "plan_ttl", safety.PlanTTL)
+	} else {
+		log.Warn("safety enforcement DISABLED via SAFETY_ENABLED=false")
+	}
+
+	s := mcpserver.New(gcpSvc, log, version, mcpserver.WithAnonymizer(anon))
 
 	log.Info("aura-tracker-gcp starting", "transport", "stdio", "version", version)
 	if err := server.ServeStdio(s); err != nil {

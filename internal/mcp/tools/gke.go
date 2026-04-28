@@ -27,6 +27,13 @@ func (t *GKETools) ListClusters() server.ServerTool {
 		mcp.WithDescription("List all GKE clusters in a GCP project and location"),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region, zone, or '-' for all locations")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List GKE Clusters",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
@@ -53,6 +60,13 @@ func (t *GKETools) GetClusterDetails() server.ServerTool {
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get GKE Cluster Details",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
@@ -84,6 +98,13 @@ func (t *GKETools) GetClusterBottlenecks() server.ServerTool {
 			mcp.Min(1),
 			mcp.Max(1440),
 		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Analyse GKE Cluster Bottlenecks",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,
@@ -110,16 +131,32 @@ func (t *GKETools) getClusterBottlenecksHandler(ctx context.Context, _ mcp.CallT
 
 func (t *GKETools) ScaleDeployment() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_scale_deployment",
-		mcp.WithDescription("Scale a GKE node pool to the requested node count. Supports dry-run for safe previewing. Idempotent: scaling to the current count returns no-change."),
+		mcp.WithDescription(
+			"Scale a GKE node pool to the requested node count. "+
+				"SAFETY: requires two-step confirmation. "+
+				"Step 1 — call with dry_run=true to receive a plan_id and preview the change. "+
+				"Step 2 — call with confirm_plan_id=<plan_id> to execute (plan expires after 10 minutes). "+
+				"Idempotent: scaling to the current count returns no_change_needed=true.",
+		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("node_pool_name", mcp.Required(), mcp.Description("Node pool name to resize")),
 		mcp.WithNumber("node_count", mcp.Required(), mcp.Description("Desired node count"), mcp.Min(0), mcp.Max(1000)),
 		mcp.WithBoolean("dry_run",
-			mcp.Description("If true, describe what would happen without executing. Default: false."),
+			mcp.Description("Step 1: return a plan_id and preview without executing. Default: false."),
 			mcp.DefaultBool(false),
 		),
+		mcp.WithString("confirm_plan_id",
+			mcp.Description("Step 2: plan_id from a prior dry_run call. Providing this executes the change."),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Scale GKE Node Pool",
+			ReadOnlyHint:    boolPtr(false),
+			DestructiveHint: boolPtr(true),
+			IdempotentHint:  boolPtr(false),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,

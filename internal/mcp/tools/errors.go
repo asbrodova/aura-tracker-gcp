@@ -33,5 +33,13 @@ func handleServiceError(op string, err error) (*mcp.CallToolResult, error) {
 		)), nil
 	}
 
+	var confirmReq *gcp.ConfirmationRequiredError
+	if errors.As(err, &confirmReq) {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"%s: confirmation required — %s",
+			op, confirmReq.Message,
+		)), nil
+	}
+
 	return nil, fmt.Errorf("%s: %w", op, err)
 }

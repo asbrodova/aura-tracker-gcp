@@ -37,6 +37,13 @@ func (t *MonitoringTools) GetMetrics() server.ServerTool {
 			mcp.Min(10),
 			mcp.Max(86400),
 		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Cloud Monitoring Metrics",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
 	)
 	return server.ServerTool{
 		Tool:    tool,

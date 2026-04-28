@@ -7,7 +7,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **15 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with full dry-run safety for mutations.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **15 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -94,15 +94,15 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 
 ## Tools
 
-| Tool | Description | Mutation | Dry-run |
-|------|-------------|----------|---------|
+| Tool | Description | Mutation | Confirmation |
+|------|-------------|----------|-------------|
 | `gcp_gke_list_clusters` | List GKE clusters in a project/location | No | — |
 | `gcp_gke_get_cluster_details` | Describe a cluster: node pools, endpoint, labels | No | — |
 | `gcp_gke_get_cluster_bottlenecks` | Aggregate CPU/memory metrics + error logs → severity rating | No | — |
-| `gcp_gke_scale_deployment` | Resize a GKE node pool | **Yes** | Yes |
+| `gcp_gke_scale_deployment` | Resize a GKE node pool | **Yes** | Two-step¹ |
 | `gcp_cloudrun_list_services` | List Cloud Run services in a region | No | — |
 | `gcp_cloudrun_get_service_details` | Describe a service: traffic, revision, labels | No | — |
-| `gcp_cloudrun_update_traffic` | Update traffic split percentages | **Yes** | Yes |
+| `gcp_cloudrun_update_traffic` | Update traffic split percentages | **Yes** | Two-step¹ |
 | `gcp_pubsub_list_topics` | List Pub/Sub topics with subscription counts | No | — |
 | `gcp_pubsub_inspect_topic_health` | Inspect topic for subscription lag and health issues | No | — |
 | `gcp_logging_query_recent` | Fetch recent Cloud Logging entries by severity and resource | No | — |
@@ -111,6 +111,12 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | `gcp_get_service_topology` | Infer the dependency graph of a Cloud Run service: Cloud SQL, Pub/Sub, VPC, secrets, and more. Supports `depth=1` (direct deps) and `depth=2` (deps-of-deps) | No | — |
 | `gcp_get_aura_score` | Return a composite Aura Score (0-100) for a single Cloud Run service, Cloud SQL instance, or BigQuery dataset — combining golden-signal health metrics with utilization efficiency. Results are cached 5 min. | No | — |
 | `gcp_project_aura_summary` | Discover all Cloud Run, Cloud SQL, and BigQuery resources in the project, score each with an Aura Score, and return them sorted worst-first with a pre-formatted 🟢/🟡/🔴 summary block | No | — |
+
+> ¹ **Two-step confirmation (HITL):** mutation tools require an explicit approval before any change is made.
+> 1. Call with `dry_run: true` → receive a `plan_id` and a before/after preview of the change (valid for 10 minutes).
+> 2. Call again with `confirm_plan_id: <plan_id>` → the change executes using the exact parameters from step 1. The plan is single-use; each confirmation is audit-logged to Cloud Logging.
+>
+> Attempting a mutation without first obtaining a `plan_id` returns a `confirmation required` error with instructions. Set `SAFETY_ENABLED=false` to bypass this protocol (development only).
 
 ---
 
@@ -394,7 +400,7 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 
 > "What IAM permissions does the current service account have on project my-project?"
 
-> "Scale the default-pool node pool in my-cluster to 5 nodes — dry run first."
+> "Scale the default-pool node pool in my-cluster to 5 nodes — show me a plan first, then I'll confirm."
 
 > "Show me the last 50 ERROR logs from the my-service Cloud Run service."
 
@@ -449,6 +455,7 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 | `RECOMMENDER_ENABLED` | No | Set `true` to enable the Cloud Recommender API integration. When enabled, Aura Scores include idle/over-provisioned flags with estimated monthly savings from GCP's pre-computed recommendations. Requires the Recommender Viewer role. Off by default. |
+| `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
 
 ## Security Model
 
@@ -456,8 +463,9 @@ The server runs under a specific service account (Application Default Credential
 
 - **Permission-denied errors** are surfaced to the LLM as tool errors with clear remediation guidance, not server crashes
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
-- **Mutation tools** (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) always support `dry_run: true`
-- **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without issuing an API call
+- **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
+- **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
+- **MCP annotations**: all 15 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -619,6 +627,13 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 └─────────────────────────────┬───────────────────────────────────┘
                               │ implements ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
+│              internal/safety/   (Safety Decorator)               │
+│   decorator.go — two-step HITL confirmation for mutations        │
+│   store.go     — TTL plan store, single-use UUID plan IDs        │
+│   (read-only methods pass through unchanged)                     │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ wraps ▼
+┌─────────────────────────────▼───────────────────────────────────┐
 │              internal/gcp/   (GCP Adapter Layer)                 │
 │   client.go — SDK factory, rate limiter (10 rps), 30s timeout    │
 │   gke · gke_bottleneck · cloudrun · pubsub                       │
@@ -629,7 +644,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
                           GCP APIs
 ```
 
-**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Both depend only on `ports/`. The model sees only tool names and JSON schemas.
+**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Both depend only on `ports/`. `internal/safety` sits at the port boundary — it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
 
 ## Development
 
@@ -664,9 +679,12 @@ aura-tracker-gcp/
 │   │   ├── dlp.go                 # DLPAnonymizer: GCP DLP API backend + maskByOffsets
 │   │   ├── chain.go               # ChainedAnonymizer: local → DLP pipeline (mode: both)
 │   │   └── middleware.go          # WrapHandler() — wraps any tool handler
+│   ├── safety/                    # Port-level safety decorator (HITL confirmation)
+│   │   ├── decorator.go           # SafetyDecorator: implements GCPService, enforces plan/confirm flow
+│   │   └── store.go               # PlanStore: sync.Mutex TTL map, single-use UUID plan IDs
 │   ├── gcp/                       # GCP SDK adapter (secondary port)
 │   │   ├── client.go              # gcpAdapter, New(), rate limiter, timeout
-│   │   ├── errors.go              # PermissionDeniedError, NotFoundError
+│   │   ├── errors.go              # PermissionDeniedError, NotFoundError, ConfirmationRequiredError
 │   │   ├── gke.go                 # ListClusters, GetClusterDetails, ScaleDeployment
 │   │   ├── gke_bottleneck.go      # GetClusterBottlenecks (errgroup fan-out)
 │   │   ├── cloudrun.go            # Cloud Run adapter
