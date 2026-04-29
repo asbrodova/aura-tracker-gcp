@@ -7,7 +7,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **15 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **17 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 15 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 17 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -104,14 +104,15 @@ By default all 15 tools are registered. Use the `--modules` flag to load only th
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `pubsub` · `logging` · `monitoring` · `iam` · `topology` · `aura`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `pubsub` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
 | Cloud Run operations | `cloudrun,aura,monitoring,iam` | 7 |
-| GKE cluster health | `gke,monitoring,logging` | 6 |
+| GKE cluster health | `gke,aura,monitoring,logging` | 8 |
+| Storage inspection | `storage` | 2 |
 | Data / logging | `logging,monitoring,iam` | 3 |
-| Full toolkit | *(omit flag)* | 15 |
+| Full toolkit | *(omit flag)* | 17 |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
@@ -136,8 +137,10 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | `gcp_monitoring_get_metrics` | Fetch Cloud Monitoring time-series metrics | No | — |
 | `gcp_iam_test_permissions` | Test which IAM permissions the caller has on a project | No | — |
 | `gcp_get_service_topology` | Infer the dependency graph of a Cloud Run service: Cloud SQL, Pub/Sub, VPC, secrets, and more. Supports `depth=1` (direct deps) and `depth=2` (deps-of-deps) | No | — |
-| `gcp_get_aura_score` | Return a composite Aura Score (0-100) for a single Cloud Run service, Cloud SQL instance, or BigQuery dataset — combining golden-signal health metrics with utilization efficiency. Results are cached 5 min. | No | — |
-| `gcp_project_aura_summary` | Discover all Cloud Run, Cloud SQL, and BigQuery resources in the project, score each with an Aura Score, and return them sorted worst-first with a pre-formatted 🟢/🟡/🔴 summary block | No | — |
+| `gcp_get_aura_score` | Return a composite Aura Score (0-100) for a single Cloud Run service, Cloud SQL instance, BigQuery dataset, or GKE cluster — combining golden-signal health metrics with utilization efficiency. Results are cached 5 min. | No | — |
+| `gcp_project_aura_summary` | Discover all Cloud Run, Cloud SQL, BigQuery, and GKE resources in the project, score each with an Aura Score, and return them sorted worst-first with a pre-formatted 🟢/🟡/🔴 summary block | No | — |
+| `gcp_storage_list_buckets` | List all Cloud Storage buckets in a project with location, storage class, labels, and creation time | No | — |
+| `gcp_storage_get_bucket_metadata` | Get detailed metadata for a GCS bucket: versioning, uniform bucket-level access, public access prevention, lifecycle rule count | No | — |
 
 > ¹ **Two-step confirmation (HITL):** mutation tools require an explicit approval before any change is made.
 > 1. Call with `dry_run: true` → receive a `plan_id` and a before/after preview of the change (valid for 10 minutes).
@@ -210,8 +213,8 @@ Prompt Templates pre-configure the AI for complex multi-step GCP workflows. Invo
 The Aura Score is a composite 0–100 metric that tells an LLM not just that a resource *exists*, but whether it is **healthy** and **cost-effective** — two things that previously required separate queries to Cloud Monitoring, the Recommender API, and manual judgment to combine.
 
 Two tools expose it:
-- **`gcp_get_aura_score`** — scores a single named resource on demand
-- **`gcp_project_aura_summary`** — auto-discovers all Cloud Run services, Cloud SQL instances, and BigQuery datasets in a project, scores each, and returns them sorted worst-first with a pre-formatted block the LLM can read at a glance
+- **`gcp_get_aura_score`** — scores a single named resource on demand (Cloud Run, Cloud SQL, BigQuery, or GKE cluster)
+- **`gcp_project_aura_summary`** — auto-discovers all Cloud Run services, Cloud SQL instances, BigQuery datasets, and GKE clusters in a project, scores each, and returns them sorted worst-first with a pre-formatted block the LLM can read at a glance
 
 ### Example output
 
@@ -263,6 +266,10 @@ Final score = (health_score × 0.6) + (efficiency_score × 0.4)
 | BigQuery | Job failure rate | 60% | 0%→100, <2%→80, <5%→55, <10%→30, ≥10%→0 |
 | BigQuery | Slot utilization | 20% | <10 slots→60⚠, 10–500→100, ≥500→80 |
 | BigQuery | Billable storage | 20% | <10 GB→100, <100 GB→85, <1 TB→65, ≥1 TB→40 |
+| GKE | Node CPU allocatable utilization | 35% | <10%→50⚠, 10–75%→100, 75–90%→70, 90–95%→40, ≥95%→10 |
+| GKE | Node memory allocatable utilization | 35% | same thresholds as node CPU |
+| GKE | Container restart rate (per second) | 20% | 0→100, <0.005→70, ≥0.005→20 |
+| GKE | Control plane health (GKE API) | 10% | RUNNING→100, RECONCILING→60, ERROR/DEGRADED→0 |
 
 ⚠ A low value here indicates under-utilization (idle / over-provisioned), which also penalises the efficiency score.
 
@@ -525,7 +532,7 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **MCP annotations**: all 15 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 17 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -676,7 +683,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 │              internal/mcp/   (MCP Protocol Layer)                │
 │   server.go — tool + resource + prompt registration              │
 │   tools/     gke · cloudrun · pubsub · logging · monitoring      │
-│              iam · topology · aura                                │
+│              iam · topology · aura · storage                     │
 │   resources/ bigquery · cloudrun · storage · iam                 │
 │   prompts/   audit-security · optimize-bq · incident-response    │
 └─────────────────────────────┬───────────────────────────────────┘
@@ -787,7 +794,7 @@ aura-tracker-gcp/
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool + resource + prompt registration
-│       ├── tools/                 # one file per GCP domain (15 tools)
+│       ├── tools/                 # one file per GCP domain (17 tools)
 │       ├── resources/             # MCP Resource handlers (10 resources)
 │       │   ├── resources.go       # constructor types
 │       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)

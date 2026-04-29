@@ -1,0 +1,95 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
+)
+
+// StorageTools provides MCP tool definitions and handlers for Cloud Storage operations.
+type StorageTools struct {
+	svc ports.GCPService
+	log *slog.Logger
+}
+
+func NewStorageTools(svc ports.GCPService, log *slog.Logger) *StorageTools {
+	return &StorageTools{svc: svc, log: log}
+}
+
+func (t *StorageTools) Name() string { return "storage" }
+
+func (t *StorageTools) GetTools() []server.ServerTool {
+	return []server.ServerTool{
+		t.ListBuckets(),
+		t.GetBucketMetadata(),
+	}
+}
+
+func (t *StorageTools) ListBuckets() server.ServerTool {
+	tool := mcp.NewTool("gcp_storage_list_buckets",
+		mcp.WithDescription("List all Cloud Storage buckets in a GCP project with location, storage class, labels, and creation time."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List GCS Buckets",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.listBucketsHandler),
+	}
+}
+
+func (t *StorageTools) listBucketsHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ListBucketsRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_storage_list_buckets", "project", args.ProjectID)
+	resp, err := t.svc.ListBuckets(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_storage_list_buckets", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_storage_list_buckets: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *StorageTools) GetBucketMetadata() server.ServerTool {
+	tool := mcp.NewTool("gcp_storage_get_bucket_metadata",
+		mcp.WithDescription("Get detailed metadata for a Cloud Storage bucket: versioning, uniform bucket-level access, public access prevention, and lifecycle rule count."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("bucket_name", mcp.Required(), mcp.Description("Globally unique bucket name")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get GCS Bucket Metadata",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.getBucketMetadataHandler),
+	}
+}
+
+func (t *StorageTools) getBucketMetadataHandler(ctx context.Context, _ mcp.CallToolRequest, args models.GetBucketMetadataRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_storage_get_bucket_metadata", "project", args.ProjectID, "bucket", args.BucketName)
+	resp, err := t.svc.GetBucketMetadata(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_storage_get_bucket_metadata", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_storage_get_bucket_metadata: marshal: %w", err)
+	}
+	return result, nil
+}

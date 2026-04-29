@@ -93,6 +93,8 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_get_service_topology",
 		"gcp_get_aura_score",
 		"gcp_project_aura_summary",
+		"gcp_storage_list_buckets",
+		"gcp_storage_get_bucket_metadata",
 	}
 
 	registered := s.ListTools()

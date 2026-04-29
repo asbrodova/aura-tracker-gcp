@@ -15,11 +15,13 @@ import (
 )
 
 var (
-	dbEnvPatterns  = []string{"DATABASE_URL", "DB_HOST", "POSTGRES_HOST", "MYSQL_HOST", "MONGODB_URI", "DB_NAME", "POSTGRES_DB", "MYSQL_DB"}
-	pubsubPatterns = []string{"PUBSUB_TOPIC", "TOPIC_NAME", "TOPIC_ID"}
-	gcsPatterns    = []string{"GCS_BUCKET", "STORAGE_BUCKET", "BUCKET_NAME", "GCS_BUCKET_NAME"}
-	secretSuffixes = []string{"_SECRET", "_KEY", "_PASSWORD", "_CREDENTIALS", "_TOKEN"}
-	pubsubValueRe  = regexp.MustCompile(`^projects/[^/]+/topics/[^/]+$`)
+	dbEnvPatterns              = []string{"DATABASE_URL", "DB_HOST", "POSTGRES_HOST", "MYSQL_HOST", "MONGODB_URI", "DB_NAME", "POSTGRES_DB", "MYSQL_DB", "DB_CONNECTION_STRING"}
+	pubsubPatterns             = []string{"PUBSUB_TOPIC", "TOPIC_NAME", "TOPIC_ID"}
+	pubsubSubscriptionPatterns = []string{"PUBSUB_SUBSCRIPTION", "SUBSCRIPTION_ID", "PUBSUB_SUB"}
+	gcsPatterns                = []string{"GCS_BUCKET", "STORAGE_BUCKET", "BUCKET_NAME", "GCS_BUCKET_NAME"}
+	cachePatterns              = []string{"REDIS_HOST", "REDIS_URL", "CACHE_URL", "CACHE_HOST"}
+	secretSuffixes             = []string{"_SECRET", "_KEY", "_PASSWORD", "_CREDENTIALS", "_TOKEN"}
+	pubsubValueRe              = regexp.MustCompile(`^projects/[^/]+/topics/[^/]+$`)
 )
 
 func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
@@ -183,6 +185,7 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 					Relationship: "publishes_to",
 					Evidence:     "env_var:" + env.Name,
 					Confidence:   "medium",
+					Inferred:     true,
 				})
 				continue
 			}
@@ -196,11 +199,12 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 					Relationship: "connects_to_db",
 					Evidence:     "env_var:" + env.Name,
 					Confidence:   "medium",
+					Inferred:     true,
 				})
 				continue
 			}
 
-			// 3d. Env var name suggests a Pub/Sub topic.
+			// 3d. Env var name suggests a Pub/Sub topic (publisher).
 			if containsAny(name, pubsubPatterns) {
 				topicPath := value
 				if !strings.HasPrefix(topicPath, "projects/") {
@@ -213,6 +217,25 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 					Relationship: "publishes_to",
 					Evidence:     "env_var:" + env.Name,
 					Confidence:   "medium",
+					Inferred:     true,
+				})
+				continue
+			}
+
+			// 3d-bis. Env var name suggests a Pub/Sub subscription (consumer).
+			if containsAny(name, pubsubSubscriptionPatterns) {
+				subPath := value
+				if !strings.HasPrefix(subPath, "projects/") {
+					subPath = fmt.Sprintf("projects/%s/subscriptions/%s", project, value)
+				}
+				nodeID := "pubsub_subscription:" + subPath
+				r.nodes = append(r.nodes, models.TopologyNode{ID: nodeID, Kind: "pubsub_subscription", Name: subPath})
+				r.edges = append(r.edges, models.TopologyEdge{
+					From: rootID, To: nodeID,
+					Relationship: "subscribes_to",
+					Evidence:     "env_var:" + env.Name,
+					Confidence:   "medium",
+					Inferred:     true,
 				})
 				continue
 			}
@@ -226,6 +249,21 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 					Relationship: "reads_writes_storage",
 					Evidence:     "env_var:" + env.Name,
 					Confidence:   "medium",
+					Inferred:     true,
+				})
+				continue
+			}
+
+			// 3e-bis. Env var name suggests a Redis/cache endpoint.
+			if containsAny(name, cachePatterns) {
+				nodeID := "redis_cache:" + value
+				r.nodes = append(r.nodes, models.TopologyNode{ID: nodeID, Kind: "redis_cache", Name: value})
+				r.edges = append(r.edges, models.TopologyEdge{
+					From: rootID, To: nodeID,
+					Relationship: "reads_writes_cache",
+					Evidence:     "env_var:" + env.Name,
+					Confidence:   "medium",
+					Inferred:     true,
 				})
 				continue
 			}
@@ -239,6 +277,7 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 					Relationship: "reads_secret",
 					Evidence:     "env_var:" + env.Name,
 					Confidence:   "low",
+					Inferred:     true,
 				})
 			}
 		}
