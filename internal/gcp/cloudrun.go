@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 
@@ -16,7 +17,11 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, req.Region)
+	loc := req.Region
+	if loc == "" {
+		loc = "-"
+	}
+	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, loc)
 	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent})
 
 	var services []models.ServiceSummary
@@ -32,9 +37,10 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 		if svc.UpdateTime != nil {
 			lastMod = svc.UpdateTime.AsTime().Format("2006-01-02T15:04:05Z")
 		}
+		region, name := parseSvcResourceName(svc.Name)
 		services = append(services, models.ServiceSummary{
-			Name:         svc.Name,
-			Region:       req.Region,
+			Name:         name,
+			Region:       region,
 			URL:          svc.Uri,
 			LastModified: lastMod,
 		})
@@ -43,6 +49,18 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 		services = []models.ServiceSummary{}
 	}
 	return models.ListServicesResponse{Services: services}, nil
+}
+
+// parseSvcResourceName extracts the region and bare service name from a Cloud Run v2
+// full resource name: "projects/P/locations/REGION/services/NAME".
+// Returns ("", fullName) if the format is unexpected.
+func parseSvcResourceName(fullName string) (region, name string) {
+	// Expected: projects/{project}/locations/{region}/services/{name}
+	parts := strings.Split(fullName, "/")
+	if len(parts) == 6 && parts[0] == "projects" && parts[2] == "locations" && parts[4] == "services" {
+		return parts[3], parts[5]
+	}
+	return "", fullName
 }
 
 func (a *gcpAdapter) GetServiceDetails(ctx context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
@@ -60,8 +78,16 @@ func (a *gcpAdapter) GetServiceDetails(ctx context.Context, req models.GetServic
 
 	traffic := make([]models.TrafficTarget, 0, len(svc.Traffic))
 	for _, t := range svc.Traffic {
+		revName := t.Revision
+		if revName == "" {
+			if svc.LatestReadyRevision != "" {
+				revName = svc.LatestReadyRevision
+			} else {
+				revName = "LATEST"
+			}
+		}
 		traffic = append(traffic, models.TrafficTarget{
-			Revision: t.Revision,
+			Revision: revName,
 			Percent:  int32(t.Percent),
 			Tag:      t.Tag,
 		})
@@ -72,10 +98,7 @@ func (a *gcpAdapter) GetServiceDetails(ctx context.Context, req models.GetServic
 		lastMod = svc.UpdateTime.AsTime().Format("2006-01-02T15:04:05Z")
 	}
 
-	latestRevision := ""
-	if svc.LatestCreatedRevision != "" {
-		latestRevision = svc.LatestCreatedRevision
-	}
+	latestRevision := svc.LatestReadyRevision
 
 	return models.ServiceDetails{
 		ServiceSummary: models.ServiceSummary{
