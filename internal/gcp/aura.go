@@ -187,7 +187,7 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		v, err := a.fetchRateMetric(gctx, projectID,
 			`run.googleapis.com/request_count`,
 			baseFilter+` AND metric.labels.response_code_class = "5xx"`, 60)
 		if err != nil {
@@ -197,7 +197,7 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		v, err := a.fetchRateMetric(gctx, projectID,
 			`run.googleapis.com/request_count`,
 			baseFilter, 60)
 		if err != nil {
@@ -422,6 +422,12 @@ func (a *gcpAdapter) fetchBigQuerySignals(ctx context.Context, projectID, datase
 // fetchMeanMetric returns the mean value of the most recent aligned point for a metric.
 func (a *gcpAdapter) fetchMeanMetric(ctx context.Context, projectID, metricType, filter string, lookbackMinutes int) (float64, error) {
 	return a.fetchMetricPoint(ctx, projectID, metricType, filter, lookbackMinutes, monitoringpb.Aggregation_ALIGN_MEAN)
+}
+
+// fetchRateMetric converts a CUMULATIVE/DELTA metric into a per-second rate before averaging.
+// Use this for request_count and similar counter metrics instead of ALIGN_MEAN.
+func (a *gcpAdapter) fetchRateMetric(ctx context.Context, projectID, metricType, filter string, lookbackMinutes int) (float64, error) {
+	return a.fetchMetricPoint(ctx, projectID, metricType, filter, lookbackMinutes, monitoringpb.Aggregation_ALIGN_RATE)
 }
 
 // fetchPercentileMetric returns a per-series percentile-aligned point. Only the p99
