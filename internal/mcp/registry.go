@@ -11,12 +11,13 @@ const (
 	ModuleIAM        = "iam"
 	ModuleTopology   = "topology"
 	ModuleAura       = "aura"
+	ModuleStorage    = "storage"
 )
 
 // AllModules is the default set used when --modules is absent.
 var AllModules = []string{
 	ModuleGKE, ModuleCloudRun, ModulePubSub, ModuleLogging,
-	ModuleMonitoring, ModuleIAM, ModuleTopology, ModuleAura,
+	ModuleMonitoring, ModuleIAM, ModuleTopology, ModuleAura, ModuleStorage,
 }
 
 // ToolModule is the interface every tool domain struct must satisfy.

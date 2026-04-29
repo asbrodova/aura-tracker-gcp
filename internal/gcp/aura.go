@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 	monitoringpb "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
@@ -48,6 +49,8 @@ func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRe
 		signals, err = a.fetchCloudSQLSignals(ctx, req.ProjectID, req.ResourceName, req.Region)
 	case models.ResourceKindBigQuery:
 		signals, err = a.fetchBigQuerySignals(ctx, req.ProjectID, req.ResourceName)
+	case models.ResourceKindGKE:
+		signals, err = a.fetchGKESignals(ctx, req.ProjectID, req.ResourceName, req.Region)
 	default:
 		return models.AuraReport{}, fmt.Errorf("aura.GetAuraScore: unsupported resource_kind %q", req.ResourceKind)
 	}
@@ -107,11 +110,18 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 		resources = append(resources, resource{models.ResourceKindBigQuery, ds, ""})
 	}
 
+	gkeClusters, err := a.listGKEClusters(ctx, req.ProjectID)
+	if err != nil {
+		a.log.WarnContext(ctx, "aura: could not list GKE clusters", "err", err)
+	}
+	for _, c := range gkeClusters {
+		resources = append(resources, resource{models.ResourceKindGKE, c.name, c.location})
+	}
+
 	// Fan-out: score every resource concurrently.
 	reports := make([]models.AuraReport, len(resources))
 	g, gctx := errgroup.WithContext(ctx)
 	for i, r := range resources {
-		i, r := i, r
 		g.Go(func() error {
 			rep, err := a.GetAuraScore(gctx, models.GetAuraScoreRequest{
 				ProjectID:    req.ProjectID,
@@ -415,6 +425,144 @@ func (a *gcpAdapter) fetchBigQuerySignals(ctx context.Context, projectID, datase
 	}, nil
 }
 
+func (a *gcpAdapter) fetchGKESignals(ctx context.Context, projectID, clusterName, location string) ([]models.AuraHealthSignal, error) {
+	clusterFilter := fmt.Sprintf(`resource.labels.cluster_name = "%s" AND resource.labels.location = "%s"`, clusterName, location)
+
+	var nodeCPU, nodeMem, restartRate, ctrlHealth float64
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		v, err := a.fetchMeanMetric(gctx, projectID,
+			`kubernetes.io/node/cpu/allocatable_utilization`,
+			clusterFilter, 60)
+		if err != nil {
+			return err
+		}
+		nodeCPU = v
+		return nil
+	})
+	g.Go(func() error {
+		v, err := a.fetchMeanMetric(gctx, projectID,
+			`kubernetes.io/node/memory/allocatable_utilization`,
+			clusterFilter, 60)
+		if err != nil {
+			return err
+		}
+		nodeMem = v
+		return nil
+	})
+	g.Go(func() error {
+		v, err := a.fetchRateMetric(gctx, projectID,
+			`kubernetes.io/container/restart_count`,
+			clusterFilter, 60)
+		if err != nil {
+			return err
+		}
+		restartRate = v
+		return nil
+	})
+	g.Go(func() error {
+		if a.clusterMgr == nil {
+			ctrlHealth = 1.0 // graceful: no client = assume healthy
+			return nil
+		}
+		clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", projectID, location, clusterName)
+		c, err := a.clusterMgr.GetCluster(gctx, &containerpb.GetClusterRequest{Name: clusterPath})
+		if err != nil {
+			// Non-fatal: treat as unknown health rather than failing the whole score.
+			a.log.WarnContext(gctx, "aura: GKE control-plane health check failed", "cluster", clusterName, "err", err)
+			ctrlHealth = 1.0
+			return nil
+		}
+		switch c.Status {
+		case containerpb.Cluster_RUNNING:
+			ctrlHealth = 1.0
+		case containerpb.Cluster_RECONCILING, containerpb.Cluster_PROVISIONING:
+			ctrlHealth = 0.5
+		default: // ERROR, DEGRADED, STOPPING, STATUS_UNSPECIFIED
+			ctrlHealth = 0.0
+		}
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	cpuScore, cpuLabel := gkeSignalScore("node_cpu_util", nodeCPU)
+	memScore, memLabel := gkeSignalScore("node_mem_util", nodeMem)
+	restartScore, restartLabel := gkeSignalScore("pod_restart_rate", restartRate)
+	ctrlScore, ctrlLabel := gkeSignalScore("control_plane_health", ctrlHealth)
+
+	return []models.AuraHealthSignal{
+		{Name: "node_cpu_util", Value: round4(nodeCPU), Score: cpuScore, Label: cpuLabel},
+		{Name: "node_mem_util", Value: round4(nodeMem), Score: memScore, Label: memLabel},
+		{Name: "pod_restart_rate", Value: round4(restartRate), Score: restartScore, Label: restartLabel},
+		{Name: "control_plane_health", Value: ctrlHealth, Score: ctrlScore, Label: ctrlLabel},
+	}, nil
+}
+
+// gkeSignalScore returns (score 0-100, label) for a single GKE health signal.
+func gkeSignalScore(name string, value float64) (int, string) {
+	switch name {
+	case "node_cpu_util", "node_mem_util":
+		switch {
+		case value < 0.10:
+			return 50, "Warning" // idle / over-provisioned nodes
+		case value < 0.75:
+			return 100, "OK"
+		case value < 0.90:
+			return 70, "OK"
+		case value < 0.95:
+			return 40, "Warning"
+		default:
+			return 10, "Critical"
+		}
+	case "pod_restart_rate": // restarts per second across the cluster
+		switch {
+		case value == 0:
+			return 100, "OK"
+		case value < 0.005:
+			return 70, "Warning"
+		default:
+			return 20, "Critical"
+		}
+	case "control_plane_health": // 1.0=healthy, 0.5=reconciling, 0.0=error
+		switch {
+		case value >= 1.0:
+			return 100, "OK"
+		case value >= 0.5:
+			return 60, "Warning"
+		default:
+			return 0, "Critical"
+		}
+	}
+	return 100, "OK"
+}
+
+// gkeCluster is a minimal cluster descriptor used for Aura discovery.
+type gkeCluster struct{ name, location string }
+
+// listGKEClusters enumerates all GKE clusters across all locations in a project.
+// Returns nil, nil when clusterMgr is not initialised (graceful degradation).
+func (a *gcpAdapter) listGKEClusters(ctx context.Context, projectID string) ([]gkeCluster, error) {
+	if a.clusterMgr == nil {
+		return nil, nil
+	}
+	resp, err := a.clusterMgr.ListClusters(ctx, &containerpb.ListClustersRequest{
+		Parent: fmt.Sprintf("projects/%s/locations/-", projectID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]gkeCluster, 0, len(resp.Clusters))
+	for _, c := range resp.Clusters {
+		out = append(out, gkeCluster{name: c.Name, location: c.Location})
+	}
+	return out, nil
+}
+
 // ---------------------------------------------------------------------------
 // Low-level metric helpers
 // ---------------------------------------------------------------------------
@@ -639,6 +787,24 @@ func weightedScores(kind models.ResourceKind, signals []models.AuraHealthSignal)
 		}
 		eff = applyRecommenderEfficiency(byName, eff)
 		return clamp(health), clamp(eff)
+
+	case models.ResourceKindGKE:
+		cpuScore := byName["node_cpu_util"]
+		memScore := byName["node_mem_util"]
+		restartScore := byName["pod_restart_rate"]
+		ctrlScore := byName["control_plane_health"]
+		health := int(math.Round(
+			float64(cpuScore)*0.35 +
+				float64(memScore)*0.35 +
+				float64(restartScore)*0.20 +
+				float64(ctrlScore)*0.10,
+		))
+
+		eff := 90
+		if signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
+			eff = 40 // cluster is idle / over-provisioned
+		}
+		return clamp(health), clamp(eff)
 	}
 
 	return 100, 100
@@ -803,6 +969,32 @@ func auraLabel(score int, signals []models.AuraHealthSignal, kind models.Resourc
 		}
 	}
 
+	// GKE-specific labels.
+	if kind == models.ResourceKindGKE {
+		if signalValue(signals, "control_plane_health") < 0.5 {
+			return "Control Plane Error"
+		}
+		if hasSignal(signals, "pod_restart_rate") {
+			if s := signalByName(signals, "pod_restart_rate"); s != nil && s.Label == "Critical" {
+				return "Pod Instability Detected"
+			}
+		}
+		switch band {
+		case models.AuraBandGreen:
+			if signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
+				return "Healthy, Over-provisioned"
+			}
+			return "Healthy Cluster"
+		case models.AuraBandYellow:
+			if signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
+				return "Idle Cluster, Consider Downsize"
+			}
+			return "Cluster Under Pressure"
+		default:
+			return "Cluster Stressed"
+		}
+	}
+
 	switch band {
 	case models.AuraBandGreen:
 		if kind == models.ResourceKindCloudRun && signalValue(signals, "cpu_util") < 0.05 {
@@ -892,6 +1084,29 @@ func buildReasons(kind models.ResourceKind, signals []models.AuraHealthSignal) [
 		if v := signalValue(signals, "storage_bytes"); v > 1<<40 { // > 1 TB
 			reasons = append(reasons, fmt.Sprintf("Storage at %.1f TB — review table expiration policies and partitioning strategy", v/float64(1<<40)))
 		}
+
+	case models.ResourceKindGKE:
+		if signalValue(signals, "control_plane_health") < 0.5 {
+			reasons = append(reasons, "Control plane is in an error or degraded state — check GKE console for active conditions")
+		} else if signalValue(signals, "control_plane_health") < 1.0 {
+			reasons = append(reasons, "Control plane is reconciling — avoid cluster mutations until it returns to RUNNING")
+		}
+		if v := signalValue(signals, "pod_restart_rate"); v >= 0.005 {
+			reasons = append(reasons, fmt.Sprintf("Container restart rate at %.4f/s — investigate crashing pods with `kubectl get pods --all-namespaces`", v))
+		} else if v > 0 {
+			reasons = append(reasons, fmt.Sprintf("Container restart rate at %.4f/s — monitor for increasing instability", v))
+		}
+		cpu := signalValue(signals, "node_cpu_util")
+		mem := signalValue(signals, "node_mem_util")
+		if cpu >= 0.90 {
+			reasons = append(reasons, fmt.Sprintf("Node CPU at %.0f%% — cluster is CPU-saturated; add node pool capacity or upgrade machine type", cpu*100))
+		}
+		if mem >= 0.90 {
+			reasons = append(reasons, fmt.Sprintf("Node memory at %.0f%% — cluster is memory-saturated; add nodes or use larger machine type", mem*100))
+		}
+		if cpu < 0.10 && mem < 0.10 {
+			reasons = append(reasons, fmt.Sprintf("Node CPU %.0f%% and memory %.0f%% — cluster is idle; consider scaling down node pools to reduce cost", cpu*100, mem*100))
+		}
 	}
 
 	if len(reasons) == 0 {
@@ -912,6 +1127,8 @@ func kindLabel(k models.ResourceKind) string {
 		return "Cloud SQL"
 	case models.ResourceKindBigQuery:
 		return "BigQuery"
+	case models.ResourceKindGKE:
+		return "GKE Cluster"
 	default:
 		return string(k)
 	}
@@ -941,6 +1158,15 @@ func hasSignal(signals []models.AuraHealthSignal, name string) bool {
 		}
 	}
 	return false
+}
+
+func signalByName(signals []models.AuraHealthSignal, name string) *models.AuraHealthSignal {
+	for i := range signals {
+		if signals[i].Name == name {
+			return &signals[i]
+		}
+	}
+	return nil
 }
 
 func clamp(v int) int {

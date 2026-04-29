@@ -24,7 +24,8 @@ var moduleClientDeps = map[string][]clientKey{
 	"monitoring": {clientMetric},
 	"iam":        {clientCRM},
 	"topology":   {clientRunSvc, clientPubSub}, // scans run annotations + pubsub push subscriptions
-	"aura":       {clientMetric, clientRunSvc},
+	"aura":       {clientMetric, clientRunSvc, clientClusterMgr}, // GKE cluster discovery + control-plane health
+	"storage":    {clientGCS},
 	"_resources": {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
 }
 

@@ -39,14 +39,14 @@ func (t *AuraTools) GetAuraScore() server.ServerTool {
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
 		mcp.WithString("resource_kind", mcp.Required(),
-			mcp.Description("Resource type: cloud_run | bigquery | cloud_sql"),
-			mcp.Enum("cloud_run", "bigquery", "cloud_sql"),
+			mcp.Description("Resource type: cloud_run | bigquery | cloud_sql | gke"),
+			mcp.Enum("cloud_run", "bigquery", "cloud_sql", "gke"),
 		),
 		mcp.WithString("resource_name", mcp.Required(),
-			mcp.Description("Resource name — Cloud Run service name, Cloud SQL instance name, or BigQuery dataset ID"),
+			mcp.Description("Resource name — Cloud Run service name, Cloud SQL instance name, BigQuery dataset ID, or GKE cluster name"),
 		),
 		mcp.WithString("region", mcp.Required(),
-			mcp.Description("GCP region (e.g. us-central1). Use empty string for BigQuery (global)."),
+			mcp.Description("GCP region (e.g. us-central1). Use empty string for BigQuery (global). For GKE, use the cluster location."),
 		),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Get Aura Score",
@@ -83,7 +83,7 @@ func (t *AuraTools) getAuraScoreHandler(ctx context.Context, _ mcp.CallToolReque
 func (t *AuraTools) ProjectAuraSummary() server.ServerTool {
 	tool := mcp.NewTool("gcp_project_aura_summary",
 		mcp.WithDescription(
-			"Score all Cloud Run, Cloud SQL, and BigQuery resources with Aura Scores, sorted worst-first. " +
+			"Score all Cloud Run, Cloud SQL, BigQuery, and GKE resources with Aura Scores, sorted worst-first. " +
 				"Includes a pre-formatted summary block.",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),

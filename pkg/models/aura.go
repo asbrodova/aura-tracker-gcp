@@ -9,6 +9,7 @@ const (
 	ResourceKindCloudRun ResourceKind = "cloud_run"
 	ResourceKindBigQuery ResourceKind = "bigquery"
 	ResourceKindCloudSQL ResourceKind = "cloud_sql"
+	ResourceKindGKE      ResourceKind = "gke"
 )
 
 // AuraBand is the categorical tier derived from the numeric Aura Score.
