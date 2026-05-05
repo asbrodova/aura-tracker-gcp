@@ -25,7 +25,11 @@ func NewMonitoringTools(svc ports.GCPService, log *slog.Logger) *MonitoringTools
 func (t *MonitoringTools) Name() string { return "monitoring" }
 
 func (t *MonitoringTools) GetTools() []server.ServerTool {
-	return []server.ServerTool{t.GetMetrics()}
+	return []server.ServerTool{
+		t.GetMetrics(),
+		t.ListMetricDescriptors(),
+		t.ListTraceServices(),
+	}
 }
 
 func (t *MonitoringTools) GetMetrics() server.ServerTool {
@@ -70,6 +74,69 @@ func (t *MonitoringTools) getMetricsHandler(ctx context.Context, _ mcp.CallToolR
 	result, err := mcp.NewToolResultJSON(resp)
 	if err != nil {
 		return nil, fmt.Errorf("gcp_monitoring_get_metrics: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *MonitoringTools) ListMetricDescriptors() server.ServerTool {
+	tool := mcp.NewTool("gcp_monitoring_list_metric_descriptors",
+		mcp.WithDescription("List Cloud Monitoring metric descriptors for a project, optionally filtered by a prefix"),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("filter", mcp.Description(`Optional filter expression, e.g. metric.type = starts_with("custom.")`)),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Metric Descriptors",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.listMetricDescriptorsHandler),
+	}
+}
+
+func (t *MonitoringTools) listMetricDescriptorsHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ListMetricDescriptorsRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_monitoring_list_metric_descriptors", "project", args.ProjectID)
+	resp, err := t.svc.ListMetricDescriptors(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_monitoring_list_metric_descriptors", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_monitoring_list_metric_descriptors: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *MonitoringTools) ListTraceServices() server.ServerTool {
+	tool := mcp.NewTool("gcp_trace_list_services",
+		mcp.WithDescription("List services that have sent traces to Cloud Trace. Uses the Cloud Trace API by default; set TRACE_BACKEND=monitoring to use the Monitoring metric proxy instead."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Trace Services",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.listTraceServicesHandler),
+	}
+}
+
+func (t *MonitoringTools) listTraceServicesHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ListTraceServicesRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_trace_list_services", "project", args.ProjectID)
+	resp, err := t.svc.ListTraceServices(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_trace_list_services", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_trace_list_services: marshal: %w", err)
 	}
 	return result, nil
 }

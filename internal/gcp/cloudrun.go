@@ -10,6 +10,8 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
+const tsFormat = "2006-01-02T15:04:05Z"
+
 func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRequest) (models.ListServicesResponse, error) {
 	if err := a.rateWait(ctx, "cloudrun.ListServices"); err != nil {
 		return models.ListServicesResponse{}, err
@@ -37,6 +39,11 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 		if svc.UpdateTime != nil {
 			lastMod = svc.UpdateTime.AsTime().Format("2006-01-02T15:04:05Z")
 		}
+		// Cloud Functions Gen 2 deploy on the Cloud Run runtime. Exclude them
+		// here; gcp_functions_list is the canonical tool for those resources.
+		if svc.Labels["goog-managed-by"] == "cloudfunctions" {
+			continue
+		}
 		region, name := parseSvcResourceName(svc.Name)
 		services = append(services, models.ServiceSummary{
 			Name:         name,
@@ -51,14 +58,195 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 	return models.ListServicesResponse{Services: services}, nil
 }
 
-// parseSvcResourceName extracts the region and bare service name from a Cloud Run v2
-// full resource name: "projects/P/locations/REGION/services/NAME".
-// Returns ("", fullName) if the format is unexpected.
+func (a *gcpAdapter) ListJobs(ctx context.Context, req models.ListJobsRequest) (models.ListJobsResponse, error) {
+	if err := a.rateWait(ctx, "cloudrun.ListJobs"); err != nil {
+		return models.ListJobsResponse{}, err
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	loc := req.Region
+	if loc == "" {
+		loc = "-"
+	}
+	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, loc)
+	it := a.runJobs.ListJobs(ctx, &runpb.ListJobsRequest{Parent: parent})
+
+	var jobs []models.JobSummary
+	for {
+		job, err := it.Next()
+		if err != nil {
+			if isIteratorDone(err) {
+				break
+			}
+			return models.ListJobsResponse{}, wrapGCPError("cloudrun.ListJobs", err)
+		}
+		region, name := parseJobResourceName(job.Name)
+		lastMod := ""
+		if job.UpdateTime != nil {
+			lastMod = job.UpdateTime.AsTime().Format(tsFormat)
+		}
+		latestExec := ""
+		if job.LatestCreatedExecution != nil {
+			latestExec = job.LatestCreatedExecution.Name
+		}
+		var taskCount, parallelism int32
+		if job.Template != nil {
+			taskCount = job.Template.TaskCount
+			parallelism = job.Template.Parallelism
+		}
+		jobs = append(jobs, models.JobSummary{
+			Name:            name,
+			Region:          region,
+			LastModified:    lastMod,
+			TaskCount:       taskCount,
+			Parallelism:     parallelism,
+			Labels:          job.Labels,
+			LatestExecution: latestExec,
+		})
+	}
+	if jobs == nil {
+		jobs = []models.JobSummary{}
+	}
+	return models.ListJobsResponse{Jobs: jobs}, nil
+}
+
+func (a *gcpAdapter) GetJobDetails(ctx context.Context, req models.GetJobDetailsRequest) (models.JobDetails, error) {
+	if err := a.rateWait(ctx, "cloudrun.GetJobDetails"); err != nil {
+		return models.JobDetails{}, err
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	name := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", req.ProjectID, req.Region, req.JobName)
+	job, err := a.runJobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
+	if err != nil {
+		return models.JobDetails{}, wrapGCPError("cloudrun.GetJobDetails", err)
+	}
+
+	region, bareName := parseJobResourceName(job.Name)
+	lastMod := ""
+	if job.UpdateTime != nil {
+		lastMod = job.UpdateTime.AsTime().Format(tsFormat)
+	}
+	latestExec := ""
+	if job.LatestCreatedExecution != nil {
+		latestExec = job.LatestCreatedExecution.Name
+	}
+
+	var taskCount, parallelism, maxRetries int32
+	var timeoutSec int64
+	var image, sa string
+	if job.Template != nil {
+		taskCount = job.Template.TaskCount
+		parallelism = job.Template.Parallelism
+		if tt := job.Template.Template; tt != nil {
+			maxRetries = tt.GetMaxRetries()
+			if tt.Timeout != nil {
+				timeoutSec = int64(tt.Timeout.AsDuration().Seconds())
+			}
+			sa = tt.ServiceAccount
+			if len(tt.Containers) > 0 {
+				image = tt.Containers[0].Image
+			}
+		}
+	}
+
+	return models.JobDetails{
+		JobSummary: models.JobSummary{
+			Name:            bareName,
+			Region:          region,
+			LastModified:    lastMod,
+			TaskCount:       taskCount,
+			Parallelism:     parallelism,
+			Labels:          job.Labels,
+			LatestExecution: latestExec,
+		},
+		Image:          image,
+		MaxRetries:     maxRetries,
+		TimeoutSeconds: timeoutSec,
+		ServiceAccount: sa,
+	}, nil
+}
+
+func (a *gcpAdapter) ListJobExecutions(ctx context.Context, req models.ListJobExecutionsRequest) (models.ListJobExecutionsResponse, error) {
+	if err := a.rateWait(ctx, "cloudrun.ListJobExecutions"); err != nil {
+		return models.ListJobExecutionsResponse{}, err
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	limit := req.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	parent := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", req.ProjectID, req.Region, req.JobName)
+	it := a.runExecs.ListExecutions(ctx, &runpb.ListExecutionsRequest{
+		Parent:   parent,
+		PageSize: int32(limit),
+	})
+
+	var execs []models.JobExecutionSummary
+	for {
+		exec, err := it.Next()
+		if err != nil {
+			if isIteratorDone(err) {
+				break
+			}
+			return models.ListJobExecutionsResponse{}, wrapGCPError("cloudrun.ListJobExecutions", err)
+		}
+		if len(execs) >= limit {
+			break
+		}
+		start, completion := "", ""
+		if exec.StartTime != nil {
+			start = exec.StartTime.AsTime().Format(tsFormat)
+		}
+		if exec.CompletionTime != nil {
+			completion = exec.CompletionTime.AsTime().Format(tsFormat)
+		}
+		_, eName := parseExecutionResourceName(exec.Name)
+		execs = append(execs, models.JobExecutionSummary{
+			Name:           eName,
+			StartTime:      start,
+			CompletionTime: completion,
+			RunningCount:   exec.RunningCount,
+			SucceededCount: exec.SucceededCount,
+			FailedCount:    exec.FailedCount,
+		})
+	}
+	if execs == nil {
+		execs = []models.JobExecutionSummary{}
+	}
+	return models.ListJobExecutionsResponse{Executions: execs}, nil
+}
+
+// parseSvcResourceName extracts region and name from:
+// "projects/P/locations/REGION/services/NAME"
 func parseSvcResourceName(fullName string) (region, name string) {
-	// Expected: projects/{project}/locations/{region}/services/{name}
 	parts := strings.Split(fullName, "/")
 	if len(parts) == 6 && parts[0] == "projects" && parts[2] == "locations" && parts[4] == "services" {
 		return parts[3], parts[5]
+	}
+	return "", fullName
+}
+
+// parseJobResourceName extracts region and name from:
+// "projects/P/locations/REGION/jobs/NAME"
+func parseJobResourceName(fullName string) (region, name string) {
+	parts := strings.Split(fullName, "/")
+	if len(parts) == 6 && parts[0] == "projects" && parts[2] == "locations" && parts[4] == "jobs" {
+		return parts[3], parts[5]
+	}
+	return "", fullName
+}
+
+// parseExecutionResourceName extracts the bare execution name from:
+// "projects/P/locations/REGION/jobs/JOB/executions/NAME"
+func parseExecutionResourceName(fullName string) (job, name string) {
+	parts := strings.Split(fullName, "/")
+	if len(parts) == 8 && parts[0] == "projects" && parts[2] == "locations" && parts[4] == "jobs" && parts[6] == "executions" {
+		return parts[5], parts[7]
 	}
 	return "", fullName
 }

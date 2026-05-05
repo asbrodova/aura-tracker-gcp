@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
@@ -137,4 +138,90 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dm%ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+func (a *gcpAdapter) ListSubscriptions(ctx context.Context, req models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error) {
+	if err := a.rateWait(ctx, "pubsub.ListSubscriptions"); err != nil {
+		return models.ListSubscriptionsResponse{}, err
+	}
+	if a.pubsub == nil {
+		return models.ListSubscriptionsResponse{Subscriptions: []models.SubscriptionSummary{}}, nil
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	project := fmt.Sprintf("projects/%s", req.ProjectID)
+
+	var subs []models.SubscriptionSummary
+
+	if req.TopicName != "" {
+		// Filter by topic: list subscriptions on a specific topic.
+		topic := fmt.Sprintf("projects/%s/topics/%s", req.ProjectID, req.TopicName)
+		it := a.pubsub.TopicAdminClient.ListTopicSubscriptions(ctx, &pubsubpb.ListTopicSubscriptionsRequest{
+			Topic: topic,
+		})
+		for {
+			subName, err := it.Next()
+			if err != nil {
+				if isIteratorDone(err) {
+					break
+				}
+				return models.ListSubscriptionsResponse{}, wrapGCPError("pubsub.ListSubscriptions", err)
+			}
+			sub, err := a.pubsub.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
+				Subscription: subName,
+			})
+			if err != nil {
+				continue
+			}
+			subs = append(subs, subscriptionToSummary(sub))
+		}
+	} else {
+		it := a.pubsub.SubscriptionAdminClient.ListSubscriptions(ctx, &pubsubpb.ListSubscriptionsRequest{
+			Project: project,
+		})
+		for {
+			sub, err := it.Next()
+			if err != nil {
+				if isIteratorDone(err) {
+					break
+				}
+				return models.ListSubscriptionsResponse{}, wrapGCPError("pubsub.ListSubscriptions", err)
+			}
+			subs = append(subs, subscriptionToSummary(sub))
+		}
+	}
+
+	if subs == nil {
+		subs = []models.SubscriptionSummary{}
+	}
+	return models.ListSubscriptionsResponse{Subscriptions: subs}, nil
+}
+
+func subscriptionToSummary(sub *pubsubpb.Subscription) models.SubscriptionSummary {
+	pushEndpoint := ""
+	if sub.PushConfig != nil {
+		pushEndpoint = sub.PushConfig.PushEndpoint
+	}
+	deadLetterTopic := ""
+	if sub.DeadLetterPolicy != nil {
+		deadLetterTopic = parseSubResourceName(sub.DeadLetterPolicy.DeadLetterTopic)
+	}
+	return models.SubscriptionSummary{
+		Name:            parseSubResourceName(sub.Name),
+		Topic:           parseSubResourceName(sub.Topic),
+		PushEndpoint:    pushEndpoint,
+		DeadLetterTopic: deadLetterTopic,
+		Filter:          sub.Filter,
+	}
+}
+
+// parseSubResourceName extracts the bare resource name from a full path
+// like "projects/P/subscriptions/NAME" or "projects/P/topics/NAME".
+func parseSubResourceName(fullName string) string {
+	parts := strings.Split(fullName, "/")
+	if len(parts) >= 4 {
+		return parts[len(parts)-1]
+	}
+	return fullName
 }

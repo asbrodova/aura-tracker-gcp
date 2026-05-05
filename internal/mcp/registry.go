@@ -12,12 +12,24 @@ const (
 	ModuleTopology   = "topology"
 	ModuleAura       = "aura"
 	ModuleStorage    = "storage"
+	ModuleFunctions  = "functions"
+	ModuleEventarc      = "eventarc"
+	ModuleScheduler     = "scheduler"
+	ModuleWorkflows     = "workflows"
+	ModuleTasks         = "tasks"
+	ModuleSecretManager = "secretmanager"
+	ModuleVPCAccess        = "vpcaccess"
+	ModuleCloudSQL         = "cloudsql"
+	ModuleServerlessGraph  = "serverlessgraph"
 )
 
 // AllModules is the default set used when --modules is absent.
 var AllModules = []string{
 	ModuleGKE, ModuleCloudRun, ModulePubSub, ModuleLogging,
 	ModuleMonitoring, ModuleIAM, ModuleTopology, ModuleAura, ModuleStorage,
+	ModuleFunctions, ModuleEventarc, ModuleScheduler,
+	ModuleWorkflows, ModuleTasks, ModuleSecretManager,
+	ModuleVPCAccess, ModuleCloudSQL, ModuleServerlessGraph,
 }
 
 // ToolModule is the interface every tool domain struct must satisfy.

@@ -29,6 +29,9 @@ func (t *CloudRunTools) GetTools() []server.ServerTool {
 		t.ListServices(),
 		t.GetServiceDetails(),
 		t.UpdateTraffic(),
+		t.ListJobs(),
+		t.GetJobDetails(),
+		t.ListJobExecutions(),
 	}
 }
 
@@ -140,6 +143,105 @@ func (t *CloudRunTools) updateTrafficHandler(ctx context.Context, _ mcp.CallTool
 	result, err := mcp.NewToolResultJSON(resp)
 	if err != nil {
 		return nil, fmt.Errorf("gcp_cloudrun_update_traffic: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *CloudRunTools) ListJobs() server.ServerTool {
+	tool := mcp.NewTool("gcp_cloudrun_list_jobs",
+		mcp.WithDescription("List all Cloud Run jobs in a GCP project. Use region='-' or omit to list across all regions."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("region", mcp.Description("GCP region (e.g. us-central1). Omit or use '-' for all regions.")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Cloud Run Jobs",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.listJobsHandler),
+	}
+}
+
+func (t *CloudRunTools) listJobsHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ListJobsRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_cloudrun_list_jobs", "project", args.ProjectID, "region", args.Region)
+	resp, err := t.svc.ListJobs(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_cloudrun_list_jobs", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_cloudrun_list_jobs: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *CloudRunTools) GetJobDetails() server.ServerTool {
+	tool := mcp.NewTool("gcp_cloudrun_get_job_details",
+		mcp.WithDescription("Get detailed information about a specific Cloud Run job including container image, parallelism, and latest execution"),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
+		mcp.WithString("job_name", mcp.Required(), mcp.Description("Cloud Run job name")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Cloud Run Job Details",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.getJobDetailsHandler),
+	}
+}
+
+func (t *CloudRunTools) getJobDetailsHandler(ctx context.Context, _ mcp.CallToolRequest, args models.GetJobDetailsRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_cloudrun_get_job_details", "project", args.ProjectID, "region", args.Region, "job", args.JobName)
+	resp, err := t.svc.GetJobDetails(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_cloudrun_get_job_details", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_cloudrun_get_job_details: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *CloudRunTools) ListJobExecutions() server.ServerTool {
+	tool := mcp.NewTool("gcp_cloudrun_list_job_executions",
+		mcp.WithDescription("List recent executions of a Cloud Run job including status, start/completion times, and task counts"),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
+		mcp.WithString("job_name", mcp.Required(), mcp.Description("Cloud Run job name")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of executions to return (default 20)")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Cloud Run Job Executions",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.listJobExecutionsHandler),
+	}
+}
+
+func (t *CloudRunTools) listJobExecutionsHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ListJobExecutionsRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_cloudrun_list_job_executions", "project", args.ProjectID, "region", args.Region, "job", args.JobName)
+	resp, err := t.svc.ListJobExecutions(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_cloudrun_list_job_executions", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_cloudrun_list_job_executions: marshal: %w", err)
 	}
 	return result, nil
 }

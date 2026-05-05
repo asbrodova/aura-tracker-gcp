@@ -25,16 +25,49 @@ type GCPService interface {
 	ListServices(ctx context.Context, req models.ListServicesRequest) (models.ListServicesResponse, error)
 	GetServiceDetails(ctx context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error)
 	UpdateTraffic(ctx context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error)
+	ListJobs(ctx context.Context, req models.ListJobsRequest) (models.ListJobsResponse, error)
+	GetJobDetails(ctx context.Context, req models.GetJobDetailsRequest) (models.JobDetails, error)
+	ListJobExecutions(ctx context.Context, req models.ListJobExecutionsRequest) (models.ListJobExecutionsResponse, error)
+
+	// --- Cloud Functions ---
+	ListFunctions(ctx context.Context, req models.ListFunctionsRequest) (models.ListFunctionsResponse, error)
+	GetFunctionDetails(ctx context.Context, req models.GetFunctionDetailsRequest) (models.FunctionDetails, error)
+
+	// --- Eventarc ---
+	ListTriggers(ctx context.Context, req models.ListTriggersRequest) (models.ListTriggersResponse, error)
+	GetTrigger(ctx context.Context, req models.GetTriggerRequest) (models.TriggerDetails, error)
+
+	// --- Cloud Scheduler ---
+	ListSchedulerJobs(ctx context.Context, req models.ListSchedulerJobsRequest) (models.ListSchedulerJobsResponse, error)
+
+	// --- Workflows ---
+	ListWorkflows(ctx context.Context, req models.ListWorkflowsRequest) (models.ListWorkflowsResponse, error)
+	ListWorkflowExecutions(ctx context.Context, req models.ListWorkflowExecutionsRequest) (models.ListWorkflowExecutionsResponse, error)
+
+	// --- Cloud Tasks ---
+	ListTaskQueues(ctx context.Context, req models.ListTaskQueuesRequest) (models.ListTaskQueuesResponse, error)
+
+	// --- Secret Manager ---
+	ListSecrets(ctx context.Context, req models.ListSecretsRequest) (models.ListSecretsResponse, error)
+
+	// --- Serverless VPC Access ---
+	ListVPCConnectors(ctx context.Context, req models.ListVPCConnectorsRequest) (models.ListVPCConnectorsResponse, error)
+
+	// --- Cloud SQL ---
+	ListSQLInstances(ctx context.Context, req models.ListSQLInstancesRequest) (models.ListSQLInstancesResponse, error)
 
 	// --- Pub/Sub ---
 	ListTopics(ctx context.Context, req models.ListTopicsRequest) (models.ListTopicsResponse, error)
 	InspectTopicHealth(ctx context.Context, req models.InspectTopicHealthRequest) (models.TopicHealthReport, error)
+	ListSubscriptions(ctx context.Context, req models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error)
 
 	// --- Cloud Logging ---
 	QueryRecentLogs(ctx context.Context, req models.QueryRecentLogsRequest) (models.QueryRecentLogsResponse, error)
 
 	// --- Cloud Monitoring ---
 	GetMetrics(ctx context.Context, req models.GetMetricsRequest) (models.GetMetricsResponse, error)
+	ListMetricDescriptors(ctx context.Context, req models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error)
+	ListTraceServices(ctx context.Context, req models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error)
 
 	// --- IAM ---
 	TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error)
@@ -54,4 +87,7 @@ type GCPService interface {
 	// --- Cloud Storage (Resources) ---
 	ListBuckets(ctx context.Context, req models.ListBucketsRequest) (models.ListBucketsResponse, error)
 	GetBucketMetadata(ctx context.Context, req models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error)
+
+	// --- Serverless Graph ---
+	ExportServerlessGraph(ctx context.Context, req models.ExportServerlessGraphRequest) (models.ServerlessGraph, error)
 }

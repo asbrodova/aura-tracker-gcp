@@ -56,6 +56,15 @@ func (m *mockGCPService) GetServiceDetails(_ context.Context, _ models.GetServic
 func (m *mockGCPService) UpdateTraffic(_ context.Context, _ models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
 	return m.returnUpdateTraffic, m.returnUpdateTrafficErr
 }
+func (m *mockGCPService) ListJobs(_ context.Context, _ models.ListJobsRequest) (models.ListJobsResponse, error) {
+	return models.ListJobsResponse{}, nil
+}
+func (m *mockGCPService) GetJobDetails(_ context.Context, _ models.GetJobDetailsRequest) (models.JobDetails, error) {
+	return models.JobDetails{}, nil
+}
+func (m *mockGCPService) ListJobExecutions(_ context.Context, _ models.ListJobExecutionsRequest) (models.ListJobExecutionsResponse, error) {
+	return models.ListJobExecutionsResponse{}, nil
+}
 func (m *mockGCPService) ListTopics(_ context.Context, _ models.ListTopicsRequest) (models.ListTopicsResponse, error) {
 	return m.returnListTopics, m.returnListTopicsErr
 }
@@ -94,4 +103,49 @@ func (m *mockGCPService) ListBuckets(_ context.Context, _ models.ListBucketsRequ
 }
 func (m *mockGCPService) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
 	return models.BucketMetadataResponse{}, nil
+}
+func (m *mockGCPService) ListFunctions(_ context.Context, _ models.ListFunctionsRequest) (models.ListFunctionsResponse, error) {
+	return models.ListFunctionsResponse{}, nil
+}
+func (m *mockGCPService) GetFunctionDetails(_ context.Context, _ models.GetFunctionDetailsRequest) (models.FunctionDetails, error) {
+	return models.FunctionDetails{}, nil
+}
+func (m *mockGCPService) ListTriggers(_ context.Context, _ models.ListTriggersRequest) (models.ListTriggersResponse, error) {
+	return models.ListTriggersResponse{}, nil
+}
+func (m *mockGCPService) GetTrigger(_ context.Context, _ models.GetTriggerRequest) (models.TriggerDetails, error) {
+	return models.TriggerDetails{}, nil
+}
+func (m *mockGCPService) ListSchedulerJobs(_ context.Context, _ models.ListSchedulerJobsRequest) (models.ListSchedulerJobsResponse, error) {
+	return models.ListSchedulerJobsResponse{}, nil
+}
+func (m *mockGCPService) ListWorkflows(_ context.Context, _ models.ListWorkflowsRequest) (models.ListWorkflowsResponse, error) {
+	return models.ListWorkflowsResponse{}, nil
+}
+func (m *mockGCPService) ListWorkflowExecutions(_ context.Context, _ models.ListWorkflowExecutionsRequest) (models.ListWorkflowExecutionsResponse, error) {
+	return models.ListWorkflowExecutionsResponse{}, nil
+}
+func (m *mockGCPService) ListTaskQueues(_ context.Context, _ models.ListTaskQueuesRequest) (models.ListTaskQueuesResponse, error) {
+	return models.ListTaskQueuesResponse{}, nil
+}
+func (m *mockGCPService) ListSecrets(_ context.Context, _ models.ListSecretsRequest) (models.ListSecretsResponse, error) {
+	return models.ListSecretsResponse{}, nil
+}
+func (m *mockGCPService) ListSubscriptions(_ context.Context, _ models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error) {
+	return models.ListSubscriptionsResponse{}, nil
+}
+func (m *mockGCPService) ListVPCConnectors(_ context.Context, _ models.ListVPCConnectorsRequest) (models.ListVPCConnectorsResponse, error) {
+	return models.ListVPCConnectorsResponse{}, nil
+}
+func (m *mockGCPService) ListSQLInstances(_ context.Context, _ models.ListSQLInstancesRequest) (models.ListSQLInstancesResponse, error) {
+	return models.ListSQLInstancesResponse{}, nil
+}
+func (m *mockGCPService) ListMetricDescriptors(_ context.Context, _ models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error) {
+	return models.ListMetricDescriptorsResponse{}, nil
+}
+func (m *mockGCPService) ListTraceServices(_ context.Context, _ models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error) {
+	return models.ListTraceServicesResponse{}, nil
+}
+func (m *mockGCPService) ExportServerlessGraph(_ context.Context, _ models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
+	return models.ServerlessGraph{}, nil
 }

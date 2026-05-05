@@ -28,6 +28,7 @@ func (t *PubSubTools) GetTools() []server.ServerTool {
 	return []server.ServerTool{
 		t.ListTopics(),
 		t.InspectTopicHealth(),
+		t.ListSubscriptions(),
 	}
 }
 
@@ -90,6 +91,42 @@ func (t *PubSubTools) inspectTopicHealthHandler(ctx context.Context, _ mcp.CallT
 	result, err := mcp.NewToolResultJSON(resp)
 	if err != nil {
 		return nil, fmt.Errorf("gcp_pubsub_inspect_topic_health: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *PubSubTools) ListSubscriptions() server.ServerTool {
+	tool := mcp.NewTool("gcp_pubsub_list_subscriptions",
+		mcp.WithDescription(
+			"List Pub/Sub subscriptions in a GCP project. "+
+				"Shows push endpoint, dead-letter topic, and filter for each subscription. "+
+				"Optionally filter by topic_name to list only subscriptions for a specific topic.",
+		),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("topic_name", mcp.Description("Optional: filter to subscriptions on this topic (bare name, not full resource path)")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Pub/Sub Subscriptions",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.listSubscriptionsHandler),
+	}
+}
+
+func (t *PubSubTools) listSubscriptionsHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ListSubscriptionsRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_pubsub_list_subscriptions", "project", args.ProjectID, "topic", args.TopicName)
+	resp, err := t.svc.ListSubscriptions(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_pubsub_list_subscriptions", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_pubsub_list_subscriptions: marshal: %w", err)
 	}
 	return result, nil
 }

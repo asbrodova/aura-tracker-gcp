@@ -106,6 +106,60 @@ func (s *stubService) ListBuckets(_ context.Context, _ models.ListBucketsRequest
 func (s *stubService) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
 	return models.BucketMetadataResponse{}, nil
 }
+func (s *stubService) ListJobs(_ context.Context, _ models.ListJobsRequest) (models.ListJobsResponse, error) {
+	return models.ListJobsResponse{}, nil
+}
+func (s *stubService) GetJobDetails(_ context.Context, _ models.GetJobDetailsRequest) (models.JobDetails, error) {
+	return models.JobDetails{}, nil
+}
+func (s *stubService) ListJobExecutions(_ context.Context, _ models.ListJobExecutionsRequest) (models.ListJobExecutionsResponse, error) {
+	return models.ListJobExecutionsResponse{}, nil
+}
+func (s *stubService) ListFunctions(_ context.Context, _ models.ListFunctionsRequest) (models.ListFunctionsResponse, error) {
+	return models.ListFunctionsResponse{}, nil
+}
+func (s *stubService) GetFunctionDetails(_ context.Context, _ models.GetFunctionDetailsRequest) (models.FunctionDetails, error) {
+	return models.FunctionDetails{}, nil
+}
+func (s *stubService) ListTriggers(_ context.Context, _ models.ListTriggersRequest) (models.ListTriggersResponse, error) {
+	return models.ListTriggersResponse{}, nil
+}
+func (s *stubService) GetTrigger(_ context.Context, _ models.GetTriggerRequest) (models.TriggerDetails, error) {
+	return models.TriggerDetails{}, nil
+}
+func (s *stubService) ListSchedulerJobs(_ context.Context, _ models.ListSchedulerJobsRequest) (models.ListSchedulerJobsResponse, error) {
+	return models.ListSchedulerJobsResponse{}, nil
+}
+func (s *stubService) ListWorkflows(_ context.Context, _ models.ListWorkflowsRequest) (models.ListWorkflowsResponse, error) {
+	return models.ListWorkflowsResponse{}, nil
+}
+func (s *stubService) ListWorkflowExecutions(_ context.Context, _ models.ListWorkflowExecutionsRequest) (models.ListWorkflowExecutionsResponse, error) {
+	return models.ListWorkflowExecutionsResponse{}, nil
+}
+func (s *stubService) ListTaskQueues(_ context.Context, _ models.ListTaskQueuesRequest) (models.ListTaskQueuesResponse, error) {
+	return models.ListTaskQueuesResponse{}, nil
+}
+func (s *stubService) ListSecrets(_ context.Context, _ models.ListSecretsRequest) (models.ListSecretsResponse, error) {
+	return models.ListSecretsResponse{}, nil
+}
+func (s *stubService) ListSubscriptions(_ context.Context, _ models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error) {
+	return models.ListSubscriptionsResponse{}, nil
+}
+func (s *stubService) ListVPCConnectors(_ context.Context, _ models.ListVPCConnectorsRequest) (models.ListVPCConnectorsResponse, error) {
+	return models.ListVPCConnectorsResponse{}, nil
+}
+func (s *stubService) ListSQLInstances(_ context.Context, _ models.ListSQLInstancesRequest) (models.ListSQLInstancesResponse, error) {
+	return models.ListSQLInstancesResponse{}, nil
+}
+func (s *stubService) ListMetricDescriptors(_ context.Context, _ models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error) {
+	return models.ListMetricDescriptorsResponse{}, nil
+}
+func (s *stubService) ListTraceServices(_ context.Context, _ models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error) {
+	return models.ListTraceServicesResponse{}, nil
+}
+func (s *stubService) ExportServerlessGraph(_ context.Context, _ models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
+	return models.ServerlessGraph{}, nil
+}
 
 func newTestDecorator(inner *stubService) *SafetyDecorator {
 	return NewSafetyDecorator(inner, slog.Default())

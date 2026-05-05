@@ -216,8 +216,68 @@ func (d *SafetyDecorator) ListServices(ctx context.Context, req models.ListServi
 	return d.inner.ListServices(ctx, req)
 }
 
+func (d *SafetyDecorator) ListSubscriptions(ctx context.Context, req models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error) {
+	return d.inner.ListSubscriptions(ctx, req)
+}
+
 func (d *SafetyDecorator) GetServiceDetails(ctx context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
 	return d.inner.GetServiceDetails(ctx, req)
+}
+
+func (d *SafetyDecorator) ListJobs(ctx context.Context, req models.ListJobsRequest) (models.ListJobsResponse, error) {
+	return d.inner.ListJobs(ctx, req)
+}
+
+func (d *SafetyDecorator) GetJobDetails(ctx context.Context, req models.GetJobDetailsRequest) (models.JobDetails, error) {
+	return d.inner.GetJobDetails(ctx, req)
+}
+
+func (d *SafetyDecorator) ListJobExecutions(ctx context.Context, req models.ListJobExecutionsRequest) (models.ListJobExecutionsResponse, error) {
+	return d.inner.ListJobExecutions(ctx, req)
+}
+
+func (d *SafetyDecorator) ListFunctions(ctx context.Context, req models.ListFunctionsRequest) (models.ListFunctionsResponse, error) {
+	return d.inner.ListFunctions(ctx, req)
+}
+
+func (d *SafetyDecorator) GetFunctionDetails(ctx context.Context, req models.GetFunctionDetailsRequest) (models.FunctionDetails, error) {
+	return d.inner.GetFunctionDetails(ctx, req)
+}
+
+func (d *SafetyDecorator) ListTriggers(ctx context.Context, req models.ListTriggersRequest) (models.ListTriggersResponse, error) {
+	return d.inner.ListTriggers(ctx, req)
+}
+
+func (d *SafetyDecorator) GetTrigger(ctx context.Context, req models.GetTriggerRequest) (models.TriggerDetails, error) {
+	return d.inner.GetTrigger(ctx, req)
+}
+
+func (d *SafetyDecorator) ListSchedulerJobs(ctx context.Context, req models.ListSchedulerJobsRequest) (models.ListSchedulerJobsResponse, error) {
+	return d.inner.ListSchedulerJobs(ctx, req)
+}
+
+func (d *SafetyDecorator) ListWorkflows(ctx context.Context, req models.ListWorkflowsRequest) (models.ListWorkflowsResponse, error) {
+	return d.inner.ListWorkflows(ctx, req)
+}
+
+func (d *SafetyDecorator) ListWorkflowExecutions(ctx context.Context, req models.ListWorkflowExecutionsRequest) (models.ListWorkflowExecutionsResponse, error) {
+	return d.inner.ListWorkflowExecutions(ctx, req)
+}
+
+func (d *SafetyDecorator) ListTaskQueues(ctx context.Context, req models.ListTaskQueuesRequest) (models.ListTaskQueuesResponse, error) {
+	return d.inner.ListTaskQueues(ctx, req)
+}
+
+func (d *SafetyDecorator) ListSecrets(ctx context.Context, req models.ListSecretsRequest) (models.ListSecretsResponse, error) {
+	return d.inner.ListSecrets(ctx, req)
+}
+
+func (d *SafetyDecorator) ListVPCConnectors(ctx context.Context, req models.ListVPCConnectorsRequest) (models.ListVPCConnectorsResponse, error) {
+	return d.inner.ListVPCConnectors(ctx, req)
+}
+
+func (d *SafetyDecorator) ListSQLInstances(ctx context.Context, req models.ListSQLInstancesRequest) (models.ListSQLInstancesResponse, error) {
+	return d.inner.ListSQLInstances(ctx, req)
 }
 
 func (d *SafetyDecorator) ListTopics(ctx context.Context, req models.ListTopicsRequest) (models.ListTopicsResponse, error) {
@@ -234,6 +294,14 @@ func (d *SafetyDecorator) QueryRecentLogs(ctx context.Context, req models.QueryR
 
 func (d *SafetyDecorator) GetMetrics(ctx context.Context, req models.GetMetricsRequest) (models.GetMetricsResponse, error) {
 	return d.inner.GetMetrics(ctx, req)
+}
+
+func (d *SafetyDecorator) ListMetricDescriptors(ctx context.Context, req models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error) {
+	return d.inner.ListMetricDescriptors(ctx, req)
+}
+
+func (d *SafetyDecorator) ListTraceServices(ctx context.Context, req models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error) {
+	return d.inner.ListTraceServices(ctx, req)
 }
 
 func (d *SafetyDecorator) TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error) {
@@ -270,4 +338,8 @@ func (d *SafetyDecorator) ListBuckets(ctx context.Context, req models.ListBucket
 
 func (d *SafetyDecorator) GetBucketMetadata(ctx context.Context, req models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
 	return d.inner.GetBucketMetadata(ctx, req)
+}
+
+func (d *SafetyDecorator) ExportServerlessGraph(ctx context.Context, req models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
+	return d.inner.ExportServerlessGraph(ctx, req)
 }

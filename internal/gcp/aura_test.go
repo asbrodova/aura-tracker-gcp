@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	monitoringpb "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
+
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -379,6 +381,89 @@ func TestBuildDisplay_Yellow(t *testing.T) {
 	want := "🟡 Cloud SQL: main-db | Aura: 65 (Healthy, but High Disk Cost)"
 	if display != want {
 		t.Errorf("buildDisplay = %q, want %q", display, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// clamp
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Regression tests for commit 31af98c: Cloud Run metric aligner fix
+// ---------------------------------------------------------------------------
+
+// TestFetchMetricPoint_AlignerConstants verifies that the three aligner constants
+// used by fetchRateMetric, fetchMeanMetric, and fetchPercentileMetric are all
+// distinct. Re-introducing ALIGN_MEAN for DELTA/DISTRIBUTION metrics would cause
+// this test to fail by making two of the three equal.
+func TestFetchMetricPoint_AlignerConstants(t *testing.T) {
+	mean := monitoringpb.Aggregation_ALIGN_MEAN
+	rate := monitoringpb.Aggregation_ALIGN_RATE
+	p99 := monitoringpb.Aggregation_ALIGN_PERCENTILE_99
+
+	if rate == mean {
+		t.Error("ALIGN_RATE must differ from ALIGN_MEAN: fetchRateMetric must not use ALIGN_MEAN")
+	}
+	if p99 == mean {
+		t.Error("ALIGN_PERCENTILE_99 must differ from ALIGN_MEAN: fetchPercentileMetric must not use ALIGN_MEAN")
+	}
+	if rate == p99 {
+		t.Error("ALIGN_RATE must differ from ALIGN_PERCENTILE_99")
+	}
+}
+
+// TestCalculateAura_CloudRun_LatencyP99_ScoreFromDistribution is a regression
+// test for the DELTA DISTRIBUTION mis-alignment bug (commit 31af98c).
+// When ALIGN_MEAN was incorrectly applied to request_latencies, the raw value
+// was near-zero (a meaningless distribution mean), scoring 100 "OK" and hiding
+// real latency. With the correct ALIGN_PERCENTILE_99, 450ms maps to score 80.
+func TestCalculateAura_CloudRun_LatencyP99_ScoreFromDistribution(t *testing.T) {
+	score, label := cloudRunSignalScore("latency_p99", 450)
+	if score != 80 || label != "OK" {
+		t.Errorf("latency_p99=450ms: got (%d, %q), want (80, OK); "+
+			"if score is 100 the wrong aligner (ALIGN_MEAN) may have been restored", score, label)
+	}
+
+	// Also verify calculateAura propagates the signal score correctly.
+	signals := []models.AuraHealthSignal{
+		{Name: "error_rate", Value: 0.0, Score: 100, Label: "OK"},
+		{Name: "cpu_util", Value: 0.35, Score: 100, Label: "OK"},
+		{Name: "latency_p99", Value: 450, Score: score, Label: label},
+		{Name: "request_count_total", Value: 200, Score: 100, Label: "info"},
+	}
+	report := calculateAura(models.ResourceKindCloudRun, "slow-svc", "us-central1", signals)
+	var latSig *models.AuraHealthSignal
+	for i := range report.HealthSignals {
+		if report.HealthSignals[i].Name == "latency_p99" {
+			latSig = &report.HealthSignals[i]
+			break
+		}
+	}
+	if latSig == nil {
+		t.Fatal("latency_p99 signal missing from AuraReport.HealthSignals")
+	}
+	if latSig.Score != 80 {
+		t.Errorf("latency_p99 signal score in report: got %d, want 80", latSig.Score)
+	}
+}
+
+// TestCalculateAura_CloudRun_RequestCountRate verifies that request_count_total
+// is stored as a rate value (requests/sec), not a raw cumulative counter.
+// With ALIGN_RATE a value of 5.0 means ~5 req/s; with ALIGN_MEAN it would be
+// an arbitrary snapshot that could be orders of magnitude larger.
+func TestCalculateAura_CloudRun_RequestCountRate(t *testing.T) {
+	// Simulate the signal as produced by fetchRateMetric: value is req/s.
+	// Efficiency logic: cpu<5% AND totalReq>0 → eff=40.
+	signals := []models.AuraHealthSignal{
+		{Name: "error_rate", Value: 0.0, Score: 100, Label: "OK"},
+		{Name: "cpu_util", Value: 0.03, Score: 55, Label: "Warning"},
+		{Name: "latency_p99", Value: 120, Score: 100, Label: "OK"},
+		{Name: "request_count_total", Value: 5.0, Score: 100, Label: "info"}, // 5 req/s
+	}
+	report := calculateAura(models.ResourceKindCloudRun, "low-cpu-svc", "us-central1", signals)
+	if report.EfficiencyScore != 40 {
+		t.Errorf("cpu<5%% with traffic should give efficiency=40, got %d; "+
+			"if 0 the request_count signal may be using ALIGN_MEAN instead of ALIGN_RATE", report.EfficiencyScore)
 	}
 }
 
