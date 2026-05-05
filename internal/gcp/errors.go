@@ -7,6 +7,19 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// RetriableError wraps a transient GCP error (quota exhaustion, service
+// unavailable) that the caller may safely retry after a back-off.
+type RetriableError struct {
+	Op  string
+	Err error
+}
+
+func (e *RetriableError) Error() string {
+	return fmt.Sprintf("%s: retriable: %v", e.Op, e.Err)
+}
+
+func (e *RetriableError) Unwrap() error { return e.Err }
+
 // PermissionDeniedError wraps a GCP PermissionDenied error.
 // MCP tool handlers check for this type and surface it as a user-visible tool error.
 type PermissionDeniedError struct {
@@ -54,6 +67,8 @@ func wrapGCPError(op string, err error) error {
 		return &PermissionDeniedError{Op: op, Err: err}
 	case codes.NotFound:
 		return &NotFoundError{Op: op, Err: err}
+	case codes.ResourceExhausted, codes.Unavailable:
+		return &RetriableError{Op: op, Err: err}
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}

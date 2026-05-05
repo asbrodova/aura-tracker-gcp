@@ -69,6 +69,15 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewTopologyTools(svc, log),
 		tools.NewAuraTools(svc, log),
 		tools.NewStorageTools(svc, log),
+		tools.NewFunctionsTools(svc, log),
+		tools.NewEventarcTools(svc, log),
+		tools.NewSchedulerTools(svc, log),
+		tools.NewWorkflowsTools(svc, log),
+		tools.NewTasksTools(svc, log),
+		tools.NewSecretManagerTools(svc, log),
+		tools.NewVPCAccessTools(svc, log),
+		tools.NewCloudSQLTools(svc, log),
+		tools.NewServerlessGraphTools(svc, log),
 	}
 	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
 		s.AddTools(wrap(t))

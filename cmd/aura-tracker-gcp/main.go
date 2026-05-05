@@ -74,6 +74,15 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		adapterOpts = append(adapterOpts, gcpadapter.WithRecommender())
 		log.Info("recommender integration enabled")
 	}
+	if tb := os.Getenv("TRACE_BACKEND"); tb != "" {
+		adapterOpts = append(adapterOpts, gcpadapter.WithTraceBackend(tb))
+	}
+	if gts := os.Getenv("GRAPH_TIMEOUT_SECONDS"); gts != "" {
+		var secs int
+		if _, err := fmt.Sscanf(gts, "%d", &secs); err == nil && secs > 0 {
+			adapterOpts = append(adapterOpts, gcpadapter.WithGraphTimeout(time.Duration(secs)*time.Second))
+		}
+	}
 
 	svc, err := gcpadapter.New(ctx, projectID, adapterOpts...)
 	if err != nil {

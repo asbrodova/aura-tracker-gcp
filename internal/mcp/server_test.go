@@ -73,6 +73,60 @@ func (m *mockSvc) ListBuckets(_ context.Context, _ models.ListBucketsRequest) (m
 func (m *mockSvc) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
 	return models.BucketMetadataResponse{}, nil
 }
+func (m *mockSvc) ListJobs(_ context.Context, _ models.ListJobsRequest) (models.ListJobsResponse, error) {
+	return models.ListJobsResponse{}, nil
+}
+func (m *mockSvc) GetJobDetails(_ context.Context, _ models.GetJobDetailsRequest) (models.JobDetails, error) {
+	return models.JobDetails{}, nil
+}
+func (m *mockSvc) ListJobExecutions(_ context.Context, _ models.ListJobExecutionsRequest) (models.ListJobExecutionsResponse, error) {
+	return models.ListJobExecutionsResponse{}, nil
+}
+func (m *mockSvc) ListFunctions(_ context.Context, _ models.ListFunctionsRequest) (models.ListFunctionsResponse, error) {
+	return models.ListFunctionsResponse{}, nil
+}
+func (m *mockSvc) GetFunctionDetails(_ context.Context, _ models.GetFunctionDetailsRequest) (models.FunctionDetails, error) {
+	return models.FunctionDetails{}, nil
+}
+func (m *mockSvc) ListTriggers(_ context.Context, _ models.ListTriggersRequest) (models.ListTriggersResponse, error) {
+	return models.ListTriggersResponse{}, nil
+}
+func (m *mockSvc) GetTrigger(_ context.Context, _ models.GetTriggerRequest) (models.TriggerDetails, error) {
+	return models.TriggerDetails{}, nil
+}
+func (m *mockSvc) ListSchedulerJobs(_ context.Context, _ models.ListSchedulerJobsRequest) (models.ListSchedulerJobsResponse, error) {
+	return models.ListSchedulerJobsResponse{}, nil
+}
+func (m *mockSvc) ListWorkflows(_ context.Context, _ models.ListWorkflowsRequest) (models.ListWorkflowsResponse, error) {
+	return models.ListWorkflowsResponse{}, nil
+}
+func (m *mockSvc) ListWorkflowExecutions(_ context.Context, _ models.ListWorkflowExecutionsRequest) (models.ListWorkflowExecutionsResponse, error) {
+	return models.ListWorkflowExecutionsResponse{}, nil
+}
+func (m *mockSvc) ListTaskQueues(_ context.Context, _ models.ListTaskQueuesRequest) (models.ListTaskQueuesResponse, error) {
+	return models.ListTaskQueuesResponse{}, nil
+}
+func (m *mockSvc) ListSecrets(_ context.Context, _ models.ListSecretsRequest) (models.ListSecretsResponse, error) {
+	return models.ListSecretsResponse{}, nil
+}
+func (m *mockSvc) ListSubscriptions(_ context.Context, _ models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error) {
+	return models.ListSubscriptionsResponse{}, nil
+}
+func (m *mockSvc) ListVPCConnectors(_ context.Context, _ models.ListVPCConnectorsRequest) (models.ListVPCConnectorsResponse, error) {
+	return models.ListVPCConnectorsResponse{}, nil
+}
+func (m *mockSvc) ListSQLInstances(_ context.Context, _ models.ListSQLInstancesRequest) (models.ListSQLInstancesResponse, error) {
+	return models.ListSQLInstancesResponse{}, nil
+}
+func (m *mockSvc) ListMetricDescriptors(_ context.Context, _ models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error) {
+	return models.ListMetricDescriptorsResponse{}, nil
+}
+func (m *mockSvc) ListTraceServices(_ context.Context, _ models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error) {
+	return models.ListTraceServicesResponse{}, nil
+}
+func (m *mockSvc) ExportServerlessGraph(_ context.Context, _ models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
+	return models.ServerlessGraph{}, nil
+}
 
 func TestServerRegistersAllTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
@@ -85,8 +139,12 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_cloudrun_list_services",
 		"gcp_cloudrun_get_service_details",
 		"gcp_cloudrun_update_traffic",
+		"gcp_cloudrun_list_jobs",
+		"gcp_cloudrun_get_job_details",
+		"gcp_cloudrun_list_job_executions",
 		"gcp_pubsub_list_topics",
 		"gcp_pubsub_inspect_topic_health",
+		"gcp_pubsub_list_subscriptions",
 		"gcp_logging_query_recent",
 		"gcp_monitoring_get_metrics",
 		"gcp_iam_test_permissions",
@@ -95,6 +153,20 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_project_aura_summary",
 		"gcp_storage_list_buckets",
 		"gcp_storage_get_bucket_metadata",
+		"gcp_functions_list",
+		"gcp_functions_get_details",
+		"gcp_eventarc_list_triggers",
+		"gcp_eventarc_get_trigger",
+		"gcp_scheduler_list_jobs",
+		"gcp_workflows_list",
+		"gcp_workflows_list_executions",
+		"gcp_tasks_list_queues",
+		"gcp_secretmanager_list",
+		"gcp_vpc_list_connectors",
+		"gcp_cloudsql_list_instances",
+		"gcp_monitoring_list_metric_descriptors",
+		"gcp_trace_list_services",
+		"gcp_export_serverless_graph",
 	}
 
 	registered := s.ListTools()

@@ -10,15 +10,25 @@ import (
 
 	"cloud.google.com/go/bigquery"
 	container "cloud.google.com/go/container/apiv1"
+	cloudtasks "cloud.google.com/go/cloudtasks/apiv2"
+	eventarc "cloud.google.com/go/eventarc/apiv1"
 	"cloud.google.com/go/logging/logadmin"
 	monitoring "cloud.google.com/go/monitoring/apiv3/v2"
 	"cloud.google.com/go/pubsub/v2"
 	recommender "cloud.google.com/go/recommender/apiv1"
 	run "cloud.google.com/go/run/apiv2"
+	scheduler "cloud.google.com/go/scheduler/apiv1"
+	secretmanager "cloud.google.com/go/secretmanager/apiv1"
 	"cloud.google.com/go/storage"
+	workflowexecutions "cloud.google.com/go/workflows/executions/apiv1"
+	workflows "cloud.google.com/go/workflows/apiv1"
 	"golang.org/x/time/rate"
+	"google.golang.org/api/cloudfunctions/v1"
 	"google.golang.org/api/cloudresourcemanager/v1"
 	"google.golang.org/api/option"
+	"google.golang.org/api/cloudtrace/v1"
+	"google.golang.org/api/sqladmin/v1"
+	"google.golang.org/api/vpcaccess/v1"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
@@ -67,12 +77,38 @@ func WithModules(modules map[string]bool) Option {
 	return func(a *gcpAdapter) { a.enabledModules = modules }
 }
 
+// WithTraceBackend selects the backend used by gcp_trace_list_services.
+// Valid values: "trace" (Cloud Trace v1 REST, default) or "monitoring" (Monitoring metric proxy).
+func WithTraceBackend(backend string) Option {
+	return func(a *gcpAdapter) { a.traceBackend = backend }
+}
+
+// WithGraphTimeout sets the outer context timeout for gcp_export_serverless_graph.
+// Each individual sub-call still uses the per-call callTimeout (default 30s).
+// Default: 120 seconds.
+func WithGraphTimeout(d time.Duration) Option {
+	return func(a *gcpAdapter) { a.graphTimeout = d }
+}
+
 // gcpAdapter is the single concrete implementation of ports.GCPService.
 // SDK clients are lazily initialised based on the enabledModules set.
 type gcpAdapter struct {
 	clusterMgr        *container.ClusterManagerClient
 	runSvc            *run.ServicesClient
-	pubsub            *pubsub.Client
+	runJobs           *run.JobsClient
+	runExecs          *run.ExecutionsClient
+	fnGen1          *cloudfunctions.Service
+	eventarcClient     *eventarc.Client
+	schedulerClient    *scheduler.CloudSchedulerClient
+	workflowsClient    *workflows.Client
+	workflowExecClient *workflowexecutions.Client
+	tasksClient        *cloudtasks.Client
+	secretMgrClient    *secretmanager.Client
+	vpcAccess          *vpcaccess.Service
+	sqlAdmin           *sqladmin.Service
+	traceClient        *cloudtrace.Service
+	traceBackend       string
+	pubsub             *pubsub.Client
 	logAdmin          *logadmin.Client
 	metric            *monitoring.MetricClient
 	crm               *cloudresourcemanager.Service
@@ -83,9 +119,11 @@ type gcpAdapter struct {
 	enabledModules    map[string]bool
 	limiter           *rate.Limiter
 	callTimeout       time.Duration
+	graphTimeout      time.Duration
 	log               *slog.Logger
 	clientOpts        []option.ClientOption
 	auraCache         *ttlCache[models.AuraReport]
+	regionsCache      *ttlCache[[]string]
 }
 
 // New creates a gcpAdapter, initialises the required GCP SDK clients using
@@ -95,10 +133,13 @@ type gcpAdapter struct {
 // Call Close() when done to release gRPC connections.
 func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, error) {
 	a := &gcpAdapter{
-		limiter:     rate.NewLimiter(10, 20),
-		callTimeout: 30 * time.Second,
-		log:         slog.Default(),
-		auraCache:   newTTLCache[models.AuraReport](auraCacheTTL),
+		limiter:      rate.NewLimiter(10, 20),
+		callTimeout:  30 * time.Second,
+		graphTimeout: 120 * time.Second,
+		traceBackend: "trace",
+		log:          slog.Default(),
+		auraCache:    newTTLCache[models.AuraReport](auraCacheTTL),
+		regionsCache: newTTLCache[[]string](10 * time.Minute),
 	}
 	for _, o := range opts {
 		o(a)
@@ -118,6 +159,87 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.runSvc, err = run.NewServicesClient(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create run services client: %w", err)
+		}
+	}
+
+	if needed[clientRunJobs] {
+		a.runJobs, err = run.NewJobsClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create run jobs client: %w", err)
+		}
+		a.runExecs, err = run.NewExecutionsClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create run executions client: %w", err)
+		}
+	}
+
+	if needed[clientFunctionsV1] {
+		a.fnGen1, err = cloudfunctions.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create cloudfunctions v1 client: %w", err)
+		}
+	}
+
+	if needed[clientEventarc] {
+		a.eventarcClient, err = eventarc.NewClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create eventarc client: %w", err)
+		}
+	}
+
+	if needed[clientScheduler] {
+		a.schedulerClient, err = scheduler.NewCloudSchedulerClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create scheduler client: %w", err)
+		}
+	}
+
+	if needed[clientWorkflows] {
+		a.workflowsClient, err = workflows.NewClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create workflows client: %w", err)
+		}
+	}
+
+	if needed[clientWorkflowExec] {
+		a.workflowExecClient, err = workflowexecutions.NewClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create workflow executions client: %w", err)
+		}
+	}
+
+	if needed[clientTasks] {
+		a.tasksClient, err = cloudtasks.NewClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create cloudtasks client: %w", err)
+		}
+	}
+
+	if needed[clientSecretMgr] {
+		a.secretMgrClient, err = secretmanager.NewClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create secretmanager client: %w", err)
+		}
+	}
+
+	if needed[clientTrace] {
+		a.traceClient, err = cloudtrace.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create cloudtrace client: %w", err)
+		}
+	}
+
+	if needed[clientVPCAccess] {
+		a.vpcAccess, err = vpcaccess.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create vpcaccess client: %w", err)
+		}
+	}
+
+	if needed[clientSQLAdmin] {
+		a.sqlAdmin, err = sqladmin.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create sqladmin client: %w", err)
 		}
 	}
 
@@ -186,6 +308,46 @@ func (a *gcpAdapter) Close() error {
 	if a.runSvc != nil {
 		if err := a.runSvc.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close run client: %w", err))
+		}
+	}
+	if a.runJobs != nil {
+		if err := a.runJobs.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close run jobs client: %w", err))
+		}
+	}
+	if a.runExecs != nil {
+		if err := a.runExecs.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close run executions client: %w", err))
+		}
+	}
+	if a.eventarcClient != nil {
+		if err := a.eventarcClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close eventarc client: %w", err))
+		}
+	}
+	if a.schedulerClient != nil {
+		if err := a.schedulerClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close scheduler client: %w", err))
+		}
+	}
+	if a.workflowsClient != nil {
+		if err := a.workflowsClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close workflows client: %w", err))
+		}
+	}
+	if a.workflowExecClient != nil {
+		if err := a.workflowExecClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close workflow executions client: %w", err))
+		}
+	}
+	if a.tasksClient != nil {
+		if err := a.tasksClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close cloudtasks client: %w", err))
+		}
+	}
+	if a.secretMgrClient != nil {
+		if err := a.secretMgrClient.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close secretmanager client: %w", err))
 		}
 	}
 	if a.pubsub != nil {

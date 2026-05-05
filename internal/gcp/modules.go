@@ -4,24 +4,43 @@ package gcp
 type clientKey string
 
 const (
-	clientClusterMgr clientKey = "clusterMgr"
-	clientRunSvc     clientKey = "runSvc"
-	clientPubSub     clientKey = "pubsub"
-	clientLogAdmin   clientKey = "logAdmin"
-	clientMetric     clientKey = "metric"
-	clientCRM        clientKey = "crm"
-	clientBQ         clientKey = "bq"
-	clientGCS        clientKey = "gcs"
+	clientClusterMgr  clientKey = "clusterMgr"
+	clientRunSvc      clientKey = "runSvc"
+	clientRunJobs     clientKey = "runJobs" // Cloud Run Jobs + Executions clients
+	clientFunctionsV1 clientKey = "functionsV1"
+	clientEventarc       clientKey = "eventarc"
+	clientScheduler      clientKey = "scheduler"
+	clientWorkflows      clientKey = "workflows"
+	clientWorkflowExec   clientKey = "workflowExec"
+	clientTasks          clientKey = "tasks"
+	clientSecretMgr      clientKey = "secretMgr"
+	clientVPCAccess      clientKey = "vpcAccess"
+	clientSQLAdmin       clientKey = "sqlAdmin"
+	clientTrace          clientKey = "trace"
+	clientPubSub         clientKey = "pubsub"
+	clientLogAdmin    clientKey = "logAdmin"
+	clientMetric      clientKey = "metric"
+	clientCRM         clientKey = "crm"
+	clientBQ          clientKey = "bq"
+	clientGCS         clientKey = "gcs"
 )
 
 // moduleClientDeps maps each module name to the GCP clients it requires.
 // "_resources" is a pseudo-module for always-on MCP Resources (BigQuery, Storage, IAM).
 var moduleClientDeps = map[string][]clientKey{
 	"gke":        {clientClusterMgr, clientMetric, clientLogAdmin}, // GetClusterBottlenecks fans out to metric+logAdmin
-	"cloudrun":   {clientRunSvc},
+	"cloudrun":   {clientRunSvc, clientRunJobs},
+	"functions":  {clientFunctionsV1, clientRunSvc},
+	"eventarc":      {clientEventarc},
+	"scheduler":     {clientScheduler},
+	"workflows":     {clientWorkflows, clientWorkflowExec},
+	"tasks":         {clientTasks},
+	"secretmanager": {clientSecretMgr, clientRunSvc},
+	"vpcaccess":     {clientVPCAccess},
+	"cloudsql":      {clientSQLAdmin},
 	"pubsub":     {clientPubSub},
 	"logging":    {clientLogAdmin},
-	"monitoring": {clientMetric},
+	"monitoring": {clientMetric, clientTrace},
 	"iam":        {clientCRM},
 	"topology":   {clientRunSvc, clientPubSub}, // scans run annotations + pubsub push subscriptions
 	"aura":       {clientMetric, clientRunSvc, clientClusterMgr}, // GKE cluster discovery + control-plane health

@@ -7,7 +7,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **17 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **35 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 17 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 35 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -104,15 +104,16 @@ By default all 17 tools are registered. Use the `--modules` flag to load only th
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `pubsub` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
-| Cloud Run operations | `cloudrun,aura,monitoring,iam` | 7 |
+| Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
+| Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Storage inspection | `storage` | 2 |
-| Data / logging | `logging,monitoring,iam` | 3 |
-| Full toolkit | *(omit flag)* | 17 |
+| Data / logging | `logging,monitoring,iam` | 4 |
+| Full toolkit | *(omit flag)* | 35 |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
@@ -122,25 +123,125 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 
 ## Tools
 
-| Tool | Description | Mutation | Confirmation |
-|------|-------------|----------|-------------|
-| `gcp_gke_list_clusters` | List GKE clusters in a project/location | No | — |
-| `gcp_gke_get_cluster_details` | Describe a cluster: node pools, endpoint, labels | No | — |
-| `gcp_gke_get_cluster_bottlenecks` | Aggregate CPU/memory metrics + error logs → severity rating | No | — |
-| `gcp_gke_scale_deployment` | Resize a GKE node pool | **Yes** | Two-step¹ |
-| `gcp_cloudrun_list_services` | List Cloud Run services in a region | No | — |
-| `gcp_cloudrun_get_service_details` | Describe a service: traffic, revision, labels | No | — |
-| `gcp_cloudrun_update_traffic` | Update traffic split percentages | **Yes** | Two-step¹ |
-| `gcp_pubsub_list_topics` | List Pub/Sub topics with subscription counts | No | — |
-| `gcp_pubsub_inspect_topic_health` | Inspect topic for subscription lag and health issues | No | — |
-| `gcp_logging_query_recent` | Fetch recent Cloud Logging entries by severity and resource | No | — |
-| `gcp_monitoring_get_metrics` | Fetch Cloud Monitoring time-series metrics | No | — |
-| `gcp_iam_test_permissions` | Test which IAM permissions the caller has on a project | No | — |
-| `gcp_get_service_topology` | Infer the dependency graph of a Cloud Run service: Cloud SQL, Pub/Sub, VPC, secrets, and more. Supports `depth=1` (direct deps) and `depth=2` (deps-of-deps) | No | — |
-| `gcp_get_aura_score` | Return a composite Aura Score (0-100) for a single Cloud Run service, Cloud SQL instance, BigQuery dataset, or GKE cluster — combining golden-signal health metrics with utilization efficiency. Results are cached 5 min. | No | — |
-| `gcp_project_aura_summary` | Discover all Cloud Run, Cloud SQL, BigQuery, and GKE resources in the project, score each with an Aura Score, and return them sorted worst-first with a pre-formatted 🟢/🟡/🔴 summary block | No | — |
-| `gcp_storage_list_buckets` | List all Cloud Storage buckets in a project with location, storage class, labels, and creation time | No | — |
-| `gcp_storage_get_bucket_metadata` | Get detailed metadata for a GCS bucket: versioning, uniform bucket-level access, public access prevention, lifecycle rule count | No | — |
+### GKE
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_gke_list_clusters` | List GKE clusters in a project/location | No |
+| `gcp_gke_get_cluster_details` | Describe a cluster: node pools, endpoint, labels | No |
+| `gcp_gke_get_cluster_bottlenecks` | Aggregate CPU/memory metrics + error logs → severity rating | No |
+| `gcp_gke_scale_deployment` | Resize a GKE node pool | **Yes**¹ |
+
+### Cloud Run
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_cloudrun_list_services` | List Cloud Run services (excludes Gen 2 function wrappers) | No |
+| `gcp_cloudrun_get_service_details` | Describe a service: traffic, revision, labels | No |
+| `gcp_cloudrun_update_traffic` | Update traffic split percentages | **Yes**¹ |
+| `gcp_cloudrun_list_jobs` | List Cloud Run Jobs in a project (`region="-"` fans out to all regions) | No |
+| `gcp_cloudrun_get_job_details` | Describe a job: image, parallelism, SA, latest execution | No |
+| `gcp_cloudrun_list_job_executions` | List recent executions of a Cloud Run Job | No |
+
+### Cloud Functions
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_functions_list` | List Cloud Functions Gen 1 and/or Gen 2 (`generation=both` by default) | No |
+| `gcp_functions_get_details` | Full config for a function: entry point, memory, timeout, SA, VPC connector | No |
+
+### Eventarc
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_eventarc_list_triggers` | List Eventarc triggers with destination kind, SA, and transport topic | No |
+| `gcp_eventarc_get_trigger` | Full trigger details including event filters | No |
+
+### Cloud Scheduler
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_scheduler_list_jobs` | List Scheduler jobs with target kind (HTTP / Pub/Sub) and URI | No |
+
+### Workflows
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_workflows_list` | List Cloud Workflows | No |
+| `gcp_workflows_list_executions` | List recent executions of a workflow | No |
+
+### Cloud Tasks
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_tasks_list_queues` | List Cloud Tasks queues | No |
+
+### Pub/Sub
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_pubsub_list_topics` | List topics with subscription counts | No |
+| `gcp_pubsub_inspect_topic_health` | Subscription lag, push endpoints, dead-letter topics | No |
+| `gcp_pubsub_list_subscriptions` | List subscriptions with push endpoint and dead-letter details | No |
+
+### Secret Manager
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_secretmanager_list` | List secrets (metadata only — values are **never** read). Pass `include_references=true` to annotate each secret with the Cloud Run services that reference it. | No |
+
+### Serverless VPC Access
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_vpc_list_connectors` | List Serverless VPC Access connectors | No |
+
+### Cloud SQL
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_cloudsql_list_instances` | List Cloud SQL instances (uses SQL Admin API, not Monitoring) | No |
+
+### Cloud Logging
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_logging_query_recent` | Fetch recent Cloud Logging entries by severity and resource | No |
+
+### Cloud Monitoring
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_monitoring_get_metrics` | Fetch Cloud Monitoring time-series metrics | No |
+| `gcp_monitoring_list_metric_descriptors` | List metric descriptors, optionally filtered by prefix | No |
+| `gcp_trace_list_services` | List services that have sent traces to Cloud Trace (configurable backend) | No |
+
+### IAM
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_iam_test_permissions` | Test which IAM permissions the caller has on a project | No |
+
+### Topology & Aura Score
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_get_service_topology` | Infer Cloud Run service dependencies: Cloud SQL, Pub/Sub, VPC, secrets. Supports `depth=1` and `depth=2`. | No |
+| `gcp_get_aura_score` | Composite 0–100 health + efficiency score for a single resource. Cached 5 min. | No |
+| `gcp_project_aura_summary` | Auto-discover and score all Cloud Run, Cloud SQL, BigQuery, and GKE resources. Sorted worst-first with 🟢/🟡/🔴 display. | No |
+
+### Cloud Storage
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_storage_list_buckets` | List all GCS buckets with location, storage class, labels | No |
+| `gcp_storage_get_bucket_metadata` | Versioning, lifecycle rules, uniform access, public access prevention | No |
+
+### Serverless Graph Export
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_export_serverless_graph` | Export a full serverless/event-driven resource graph: nodes (35 kinds), typed edges (`triggers`, `routes_to`, `dead_letters_to`, `reads_secret`, …), and region/project groups. Optional `region` filter and `max_nodes` cap. | No |
 
 > ¹ **Two-step confirmation (HITL):** mutation tools require an explicit approval before any change is made.
 > 1. Call with `dry_run: true` → receive a `plan_id` and a before/after preview of the change (valid for 10 minutes).
@@ -469,6 +570,23 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 | `cloudsql.instances.list` | Cloud SQL Viewer | `gcp_project_aura_summary` Cloud SQL discovery |
 | `bigquery.datasets.list` | BigQuery Data Viewer | `gcp_project_aura_summary` BigQuery discovery |
 
+**Permissions required for Phase 1 serverless/event-driven tools:**
+
+| IAM Role | Module | What it grants |
+|---------|--------|----------------|
+| `roles/run.viewer` | `cloudrun` | Cloud Run services and jobs (list/get) |
+| `roles/cloudfunctions.viewer` | `functions` | Cloud Functions Gen 1 list/get |
+| `roles/eventarc.viewer` | `eventarc` | Eventarc trigger list/get (includes filters, destination, transport) |
+| `roles/cloudscheduler.viewer` | `scheduler` | Scheduler job list (includes target type and URI) |
+| `roles/workflows.viewer` | `workflows` | Workflow list and execution history |
+| `roles/cloudtasks.viewer` | `tasks` | Cloud Tasks queue list |
+| `roles/secretmanager.viewer` | `secretmanager` | Secret **metadata** list only — names, labels, create/update times. Does **not** grant secret value access. `roles/secretmanager.secretAccessor` is not required and not requested. |
+| `roles/vpcaccess.viewer` | `vpcaccess` | Serverless VPC Access connector list |
+| `roles/cloudsql.viewer` | `cloudsql` | SQL Admin API instance list |
+| `roles/monitoring.viewer` | `monitoring` | Metric descriptors and time-series list |
+| `roles/cloudtrace.user` | `monitoring` | Cloud Trace service enumeration (for `gcp_trace_list_services`) |
+| `roles/pubsub.viewer` | `pubsub` | Topic and subscription list/get |
+
 **Permissions required for Resources:**
 
 | Permission | IAM Role | Used by |
@@ -490,6 +608,8 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 | `RECOMMENDER_ENABLED` | No | Set `true` to enable the Cloud Recommender API integration. When enabled, Aura Scores include idle/over-provisioned flags with estimated monthly savings from GCP's pre-computed recommendations. Requires the Recommender Viewer role. Off by default. |
 | `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
+| `TRACE_BACKEND` | No | Backend for `gcp_trace_list_services`: `trace` (Cloud Trace v1 REST, default) or `monitoring` (Monitoring metric proxy). Use `monitoring` if Cloud Trace API is disabled but OpenCensus/OpenTelemetry metrics exist. |
+| `GRAPH_TIMEOUT_SECONDS` | No | Outer context timeout in seconds for `gcp_export_serverless_graph`. Default: `120`. Individual sub-calls still use `callTimeout` (30 s). |
 | `MCP_TRANSPORT` | No | Transport mode: `stdio` (default, for Claude Desktop) or `sse` (for Cloud Run / web-based MCP clients) |
 | `PORT` | No | HTTP port when `MCP_TRANSPORT=sse`. Cloud Run sets this automatically. Defaults to `8080`. |
 | `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Required for correct SSE endpoint URLs when deployed to Cloud Run. Defaults to `http://localhost:PORT` for local testing. |
@@ -532,7 +652,9 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **MCP annotations**: all 17 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **Read-only guarantees**: all 33 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
+- **MCP annotations**: all 35 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -682,15 +804,17 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 ┌─────────────────────────────▼───────────────────────────────────┐
 │              internal/mcp/   (MCP Protocol Layer)                │
 │   server.go — tool + resource + prompt registration              │
-│   tools/     gke · cloudrun · pubsub · logging · monitoring      │
-│              iam · topology · aura · storage                     │
+│   tools/     gke · cloudrun · functions · eventarc · scheduler    │
+│              workflows · tasks · pubsub · secretmanager           │
+│              vpcaccess · cloudsql · logging · monitoring          │
+│              iam · topology · aura · storage · serverlessgraph    │
 │   resources/ bigquery · cloudrun · storage · iam                 │
 │   prompts/   audit-security · optimize-bq · incident-response    │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ calls only ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
 │           ports/gcp_service.go   (Hexagon Boundary)              │
-│                    GCPService interface (20 methods)              │
+│                    GCPService interface (38 methods)              │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ implements ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
@@ -703,9 +827,11 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 ┌─────────────────────────────▼───────────────────────────────────┐
 │              internal/gcp/   (GCP Adapter Layer)                 │
 │   client.go — SDK factory, rate limiter (10 rps), 30s timeout    │
-│   gke · gke_bottleneck · cloudrun · pubsub                       │
-│   logging · monitoring · iam · topology · aura                   │
-│   bigquery · storage                                             │
+│   gke · gke_bottleneck · cloudrun · functions · eventarc          │
+│   scheduler · workflows · tasks · secretmanager · vpcaccess       │
+│   cloudsql · pubsub · logging · monitoring · iam                  │
+│   topology · aura · bigquery · storage · serverlessgraph          │
+│   regions (discoverRegions helper, 3-tier fallback + 10-min TTL) │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ Google Cloud Go SDK (gRPC / REST)
                           GCP APIs
@@ -776,25 +902,37 @@ aura-tracker-gcp/
 │   │   ├── decorator.go           # SafetyDecorator: implements GCPService, enforces plan/confirm flow
 │   │   └── store.go               # PlanStore: sync.Mutex TTL map, single-use UUID plan IDs
 │   ├── gcp/                       # GCP SDK adapter (secondary port)
-│   │   ├── client.go              # gcpAdapter, New(), rate limiter, timeout
+│   │   ├── client.go              # gcpAdapter, New(), rate limiter, timeout, all client fields
+│   │   ├── modules.go             # moduleClientDeps map, neededClients(), clientKey constants
 │   │   ├── errors.go              # PermissionDeniedError, NotFoundError, ConfirmationRequiredError
+│   │   ├── regions.go             # discoverRegions() — 3-tier fallback, 10-min TTL cache
 │   │   ├── gke.go                 # ListClusters, GetClusterDetails, ScaleDeployment
 │   │   ├── gke_bottleneck.go      # GetClusterBottlenecks (errgroup fan-out)
-│   │   ├── cloudrun.go            # Cloud Run adapter
-│   │   ├── pubsub.go              # Pub/Sub adapter
-│   │   ├── logging.go             # Cloud Logging adapter
-│   │   ├── monitoring.go          # Cloud Monitoring adapter
-│   │   ├── iam.go                 # IAM adapter
+│   │   ├── cloudrun.go            # ListServices, GetServiceDetails, UpdateTraffic, ListJobs, GetJobDetails, ListJobExecutions
+│   │   ├── functions.go           # ListFunctions (Gen1+Gen2), GetFunctionDetails
+│   │   ├── eventarc.go            # ListTriggers, GetTrigger (multi-region fan-out)
+│   │   ├── scheduler.go           # ListSchedulerJobs (multi-region fan-out)
+│   │   ├── workflows.go           # ListWorkflows, ListWorkflowExecutions
+│   │   ├── tasks.go               # ListTaskQueues
+│   │   ├── secretmanager.go       # ListSecrets (metadata only, no values read)
+│   │   ├── vpcaccess.go           # ListVPCConnectors
+│   │   ├── cloudsql.go            # ListSQLInstances
+│   │   ├── pubsub.go              # ListTopics, InspectTopicHealth, ListSubscriptions
+│   │   ├── logging.go             # QueryRecentLogs
+│   │   ├── monitoring.go          # GetMetrics, ListMetricDescriptors, ListTraceServices
+│   │   ├── iam.go                 # TestPermissions
 │   │   ├── topology.go            # GetServiceTopology (dependency graph inference)
 │   │   ├── aura.go                # GetAuraScore, GetProjectAuraSummary (health + efficiency scoring)
+│   │   ├── serverlessgraph.go     # ExportServerlessGraph (parallel fan-out + edge stitching)
 │   │   ├── bigquery.go            # ListDatasets, ListTables, GetTableSchema
 │   │   ├── storage.go             # ListBuckets, GetBucketMetadata
-│   │   ├── cache.go               # Generic TTL cache (5-min default for aura scores)
+│   │   ├── cache.go               # Generic TTL cache (5-min aura scores, 10-min regions)
 │   │   ├── dlp.go                 # DLPAdapter: GCP DLP client, InspectText
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool + resource + prompt registration
-│       ├── tools/                 # one file per GCP domain (17 tools)
+│       ├── registry.go            # module constants, AllModules, FilteredRegistry
+│       ├── tools/                 # one file per GCP domain (35 tools)
 │       ├── resources/             # MCP Resource handlers (10 resources)
 │       │   ├── resources.go       # constructor types
 │       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)
@@ -804,7 +942,10 @@ aura-tracker-gcp/
 │       └── prompts/               # MCP Prompt Templates (3 prompts)
 │           └── prompts.go         # audit-security · optimize-bq · incident-response
 ├── pkg/models/                    # shared input/output structs (no GCP deps)
+│   ├── graph.go                   # GraphNode, GraphEdge, GraphGroup, ServerlessGraph, PartialResult
+│   ├── errors.go                  # ToolError (structured error envelope)
+│   └── ...                        # one file per GCP domain
 └── ports/
-    ├── gcp_service.go             # GCPService interface (hexagon boundary, 20 methods)
+    ├── gcp_service.go             # GCPService interface (hexagon boundary, 38 methods)
     └── dlp_service.go             # DLPService interface (secondary hexagon port)
 ```
