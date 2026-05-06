@@ -16,6 +16,41 @@ type TestPermissionsResponse struct {
 	CallerIdentity string             `json:"caller_identity,omitempty"`
 }
 
+// --- Resource IAM Bindings ---
+
+type GetResourceIAMBindingsRequest struct {
+	URN string `json:"urn"`
+}
+
+type IAMBinding struct {
+	Role    string   `json:"role"`
+	Members []string `json:"members"`
+}
+
+type GetResourceIAMBindingsResponse struct {
+	URN      string       `json:"urn"`
+	Bindings []IAMBinding `json:"bindings"`
+}
+
+// --- Service Accounts ---
+
+type ListServiceAccountsRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+type ServiceAccountSummary struct {
+	Name        string `json:"name"`
+	Email       string `json:"email"`
+	DisplayName string `json:"display_name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Disabled    bool   `json:"disabled,omitempty"`
+	UniqueID    string `json:"unique_id,omitempty"`
+}
+
+type ListServiceAccountsResponse struct {
+	ServiceAccounts []ServiceAccountSummary `json:"service_accounts"`
+}
+
 // MyPermissionsReport is returned by the gcp://{project}/iam/my-permissions resource.
 // It splits permissions into granted and denied so the AI can explain capability gaps.
 type MyPermissionsReport struct {

@@ -199,6 +199,8 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_logging_query_recent",
 		"gcp_monitoring_get_metrics",
 		"gcp_iam_test_permissions",
+		"gcp_iam_get_resource_bindings",
+		"gcp_iam_list_service_accounts",
 		"gcp_get_service_topology",
 		"gcp_get_aura_score",
 		"gcp_project_aura_summary",
@@ -360,4 +362,10 @@ func (m *mockSvc) ListCloudBuildTriggers(_ context.Context, _ models.ListCloudBu
 }
 func (m *mockSvc) ListServiceDirectoryNamespaces(_ context.Context, _ models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
 	return models.ListServiceDirectoryNamespacesResponse{}, nil
+}
+func (m *mockSvc) GetResourceIAMBindings(_ context.Context, _ models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error) {
+	return models.GetResourceIAMBindingsResponse{}, nil
+}
+func (m *mockSvc) ListServiceAccounts(_ context.Context, _ models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
+	return models.ListServiceAccountsResponse{}, nil
 }

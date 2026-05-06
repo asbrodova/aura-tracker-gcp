@@ -432,3 +432,9 @@ func (s *stubService) ListCloudBuildTriggers(_ context.Context, _ models.ListClo
 func (s *stubService) ListServiceDirectoryNamespaces(_ context.Context, _ models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
 	return models.ListServiceDirectoryNamespacesResponse{}, nil
 }
+func (s *stubService) GetResourceIAMBindings(_ context.Context, _ models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error) {
+	return models.GetResourceIAMBindingsResponse{}, nil
+}
+func (s *stubService) ListServiceAccounts(_ context.Context, _ models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
+	return models.ListServiceAccountsResponse{}, nil
+}

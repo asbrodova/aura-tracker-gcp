@@ -90,6 +90,8 @@ type GCPService interface {
 
 	// --- IAM ---
 	TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error)
+	GetResourceIAMBindings(ctx context.Context, req models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error)
+	ListServiceAccounts(ctx context.Context, req models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error)
 
 	// --- Topology ---
 	GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error)
