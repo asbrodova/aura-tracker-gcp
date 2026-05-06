@@ -145,6 +145,39 @@ func (m *mockSvc) ListGKENetworkPolicies(_ context.Context, _ models.ListGKENetw
 func (m *mockSvc) GetGKEMeshTopology(_ context.Context, _ models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error) {
 	return models.GKEMeshTopologyResponse{}, nil
 }
+func (m *mockSvc) ListLoadBalancers(_ context.Context, _ models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error) {
+	return models.ListLoadBalancersResponse{}, nil
+}
+func (m *mockSvc) ListURLMaps(_ context.Context, _ models.ListURLMapsRequest) (models.ListURLMapsResponse, error) {
+	return models.ListURLMapsResponse{}, nil
+}
+func (m *mockSvc) ListNEGs(_ context.Context, _ models.ListNEGsRequest) (models.ListNEGsResponse, error) {
+	return models.ListNEGsResponse{}, nil
+}
+func (m *mockSvc) ListAPIGateways(_ context.Context, _ models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error) {
+	return models.ListAPIGatewaysResponse{}, nil
+}
+func (m *mockSvc) ListVPCNetworks(_ context.Context, _ models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error) {
+	return models.ListVPCNetworksResponse{}, nil
+}
+func (m *mockSvc) ListVPCSubnets(_ context.Context, _ models.ListVPCSubnetsRequest) (models.ListVPCSubnetsResponse, error) {
+	return models.ListVPCSubnetsResponse{}, nil
+}
+func (m *mockSvc) ListPSCEndpoints(_ context.Context, _ models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error) {
+	return models.ListPSCEndpointsResponse{}, nil
+}
+func (m *mockSvc) ListSpannerInstances(_ context.Context, _ models.ListSpannerInstancesRequest) (models.ListSpannerInstancesResponse, error) {
+	return models.ListSpannerInstancesResponse{}, nil
+}
+func (m *mockSvc) ListAlloyDBClusters(_ context.Context, _ models.ListAlloyDBClustersRequest) (models.ListAlloyDBClustersResponse, error) {
+	return models.ListAlloyDBClustersResponse{}, nil
+}
+func (m *mockSvc) ListFirestoreDatabases(_ context.Context, _ models.ListFirestoreDatabasesRequest) (models.ListFirestoreDatabasesResponse, error) {
+	return models.ListFirestoreDatabasesResponse{}, nil
+}
+func (m *mockSvc) ListMemorystoreInstances(_ context.Context, _ models.ListMemorystoreInstancesRequest) (models.ListMemorystoreInstancesResponse, error) {
+	return models.ListMemorystoreInstancesResponse{}, nil
+}
 
 func TestServerRegistersAllTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
@@ -198,6 +231,10 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_vpc_list_networks",
 		"gcp_vpc_list_subnets",
 		"gcp_psc_list_endpoints",
+		"gcp_spanner_list_instances",
+		"gcp_alloydb_list_clusters",
+		"gcp_firestore_list_databases",
+		"gcp_memorystore_list_instances",
 	}
 
 	registered := s.ListTools()
@@ -307,25 +344,4 @@ func TestPromptHandlerRequiresProjectID(t *testing.T) {
 	if !strings.Contains(string(raw), "error") {
 		t.Errorf("expected error for missing project_id, got: %s", string(raw))
 	}
-}
-func (m *mockSvc) ListLoadBalancers(_ context.Context, _ models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error) {
-	return models.ListLoadBalancersResponse{}, nil
-}
-func (m *mockSvc) ListURLMaps(_ context.Context, _ models.ListURLMapsRequest) (models.ListURLMapsResponse, error) {
-	return models.ListURLMapsResponse{}, nil
-}
-func (m *mockSvc) ListNEGs(_ context.Context, _ models.ListNEGsRequest) (models.ListNEGsResponse, error) {
-	return models.ListNEGsResponse{}, nil
-}
-func (m *mockSvc) ListAPIGateways(_ context.Context, _ models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error) {
-	return models.ListAPIGatewaysResponse{}, nil
-}
-func (m *mockSvc) ListVPCNetworks(_ context.Context, _ models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error) {
-	return models.ListVPCNetworksResponse{}, nil
-}
-func (m *mockSvc) ListVPCSubnets(_ context.Context, _ models.ListVPCSubnetsRequest) (models.ListVPCSubnetsResponse, error) {
-	return models.ListVPCSubnetsResponse{}, nil
-}
-func (m *mockSvc) ListPSCEndpoints(_ context.Context, _ models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error) {
-	return models.ListPSCEndpointsResponse{}, nil
 }

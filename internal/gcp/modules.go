@@ -25,6 +25,10 @@ const (
 	clientCRM         clientKey = "crm"
 	clientBQ          clientKey = "bq"
 	clientGCS         clientKey = "gcs"
+	clientSpanner     clientKey = "spanner"
+	clientAlloyDB     clientKey = "alloydb"
+	clientFirestore   clientKey = "firestore"
+	clientMemorystore clientKey = "memorystore"
 )
 
 // moduleClientDeps maps each module name to the GCP clients it requires.
@@ -50,6 +54,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"topology":   {clientRunSvc, clientPubSub}, // scans run annotations + pubsub push subscriptions
 	"aura":       {clientMetric, clientRunSvc, clientClusterMgr}, // GKE cluster discovery + control-plane health
 	"storage":    {clientGCS},
+	"datastores": {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
 	"_resources": {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
 }
 

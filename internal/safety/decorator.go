@@ -395,3 +395,19 @@ func (d *SafetyDecorator) GetBucketMetadata(ctx context.Context, req models.GetB
 func (d *SafetyDecorator) ExportServerlessGraph(ctx context.Context, req models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
 	return d.inner.ExportServerlessGraph(ctx, req)
 }
+
+func (d *SafetyDecorator) ListSpannerInstances(ctx context.Context, req models.ListSpannerInstancesRequest) (models.ListSpannerInstancesResponse, error) {
+	return d.inner.ListSpannerInstances(ctx, req)
+}
+
+func (d *SafetyDecorator) ListAlloyDBClusters(ctx context.Context, req models.ListAlloyDBClustersRequest) (models.ListAlloyDBClustersResponse, error) {
+	return d.inner.ListAlloyDBClusters(ctx, req)
+}
+
+func (d *SafetyDecorator) ListFirestoreDatabases(ctx context.Context, req models.ListFirestoreDatabasesRequest) (models.ListFirestoreDatabasesResponse, error) {
+	return d.inner.ListFirestoreDatabases(ctx, req)
+}
+
+func (d *SafetyDecorator) ListMemorystoreInstances(ctx context.Context, req models.ListMemorystoreInstancesRequest) (models.ListMemorystoreInstancesResponse, error) {
+	return d.inner.ListMemorystoreInstances(ctx, req)
+}
