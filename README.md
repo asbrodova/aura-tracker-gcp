@@ -7,7 +7,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **35 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **44 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -264,6 +264,15 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 |------|-------------|----------|
 | `gcp_storage_list_buckets` | List all GCS buckets with location, storage class, labels | No |
 | `gcp_storage_get_bucket_metadata` | Versioning, lifecycle rules, uniform access, public access prevention | No |
+
+### Data Stores
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_spanner_list_instances` | List Cloud Spanner instances with state, node count, processing units, and edition | No |
+| `gcp_alloydb_list_clusters` | List AlloyDB clusters with state, PostgreSQL version, and cluster type (primary/secondary) | No |
+| `gcp_firestore_list_databases` | List Firestore databases with type (Native/Datastore), location, concurrency mode, and edition | No |
+| `gcp_memorystore_list_instances` | List Memorystore for Redis instances with tier, memory size, Redis version, and host endpoint | No |
 
 ### Serverless Graph Export
 

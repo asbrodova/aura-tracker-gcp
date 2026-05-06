@@ -188,3 +188,15 @@ func (m *mockGCPService) ListVPCSubnets(_ context.Context, _ models.ListVPCSubne
 func (m *mockGCPService) ListPSCEndpoints(_ context.Context, _ models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error) {
 	return models.ListPSCEndpointsResponse{}, nil
 }
+func (m *mockGCPService) ListSpannerInstances(_ context.Context, _ models.ListSpannerInstancesRequest) (models.ListSpannerInstancesResponse, error) {
+	return models.ListSpannerInstancesResponse{}, nil
+}
+func (m *mockGCPService) ListAlloyDBClusters(_ context.Context, _ models.ListAlloyDBClustersRequest) (models.ListAlloyDBClustersResponse, error) {
+	return models.ListAlloyDBClustersResponse{}, nil
+}
+func (m *mockGCPService) ListFirestoreDatabases(_ context.Context, _ models.ListFirestoreDatabasesRequest) (models.ListFirestoreDatabasesResponse, error) {
+	return models.ListFirestoreDatabasesResponse{}, nil
+}
+func (m *mockGCPService) ListMemorystoreInstances(_ context.Context, _ models.ListMemorystoreInstancesRequest) (models.ListMemorystoreInstancesResponse, error) {
+	return models.ListMemorystoreInstancesResponse{}, nil
+}

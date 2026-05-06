@@ -23,12 +23,16 @@ import (
 	workflowexecutions "cloud.google.com/go/workflows/executions/apiv1"
 	workflows "cloud.google.com/go/workflows/apiv1"
 	"golang.org/x/time/rate"
+	"google.golang.org/api/alloydb/v1"
 	"google.golang.org/api/apigateway/v1beta"
 	"google.golang.org/api/cloudfunctions/v1"
 	"google.golang.org/api/cloudresourcemanager/v1"
-	"google.golang.org/api/compute/v1"
-	"google.golang.org/api/option"
 	"google.golang.org/api/cloudtrace/v1"
+	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/firestore/v1"
+	"google.golang.org/api/option"
+	"google.golang.org/api/redis/v1"
+	"google.golang.org/api/spanner/v1"
 	"google.golang.org/api/sqladmin/v1"
 	"google.golang.org/api/vpcaccess/v1"
 
@@ -118,6 +122,10 @@ type gcpAdapter struct {
 	crm               *cloudresourcemanager.Service
 	bq                *bigquery.Client
 	gcs               *storage.Client
+	spannerSvc     *spanner.Service
+	alloydbSvc     *alloydb.Service
+	firestoreSvc   *firestore.Service
+	redisSvc       *redis.Service
 	rec               *recommender.Client
 	enableRecommender bool
 	enabledModules    map[string]bool
@@ -309,6 +317,34 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.gcs, err = storage.NewClient(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create storage client: %w", err)
+		}
+	}
+
+	if needed[clientSpanner] {
+		a.spannerSvc, err = spanner.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create spanner client: %w", err)
+		}
+	}
+
+	if needed[clientAlloyDB] {
+		a.alloydbSvc, err = alloydb.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create alloydb client: %w", err)
+		}
+	}
+
+	if needed[clientFirestore] {
+		a.firestoreSvc, err = firestore.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create firestore client: %w", err)
+		}
+	}
+
+	if needed[clientMemorystore] {
+		a.redisSvc, err = redis.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create memorystore client: %w", err)
 		}
 	}
 
