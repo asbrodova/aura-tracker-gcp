@@ -411,3 +411,19 @@ func (d *SafetyDecorator) ListFirestoreDatabases(ctx context.Context, req models
 func (d *SafetyDecorator) ListMemorystoreInstances(ctx context.Context, req models.ListMemorystoreInstancesRequest) (models.ListMemorystoreInstancesResponse, error) {
 	return d.inner.ListMemorystoreInstances(ctx, req)
 }
+
+func (d *SafetyDecorator) ListArtifactRegistryRepos(ctx context.Context, req models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error) {
+	return d.inner.ListArtifactRegistryRepos(ctx, req)
+}
+
+func (d *SafetyDecorator) ListArtifactRegistryImages(ctx context.Context, req models.ListArtifactRegistryImagesRequest) (models.ListArtifactRegistryImagesResponse, error) {
+	return d.inner.ListArtifactRegistryImages(ctx, req)
+}
+
+func (d *SafetyDecorator) ListCloudBuildTriggers(ctx context.Context, req models.ListCloudBuildTriggersRequest) (models.ListCloudBuildTriggersResponse, error) {
+	return d.inner.ListCloudBuildTriggers(ctx, req)
+}
+
+func (d *SafetyDecorator) ListServiceDirectoryNamespaces(ctx context.Context, req models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
+	return d.inner.ListServiceDirectoryNamespaces(ctx, req)
+}

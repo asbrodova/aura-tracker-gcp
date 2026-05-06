@@ -25,6 +25,8 @@ import (
 	"golang.org/x/time/rate"
 	"google.golang.org/api/alloydb/v1"
 	"google.golang.org/api/apigateway/v1beta"
+	"google.golang.org/api/artifactregistry/v1"
+	"google.golang.org/api/cloudbuild/v1"
 	"google.golang.org/api/cloudfunctions/v1"
 	"google.golang.org/api/cloudresourcemanager/v1"
 	"google.golang.org/api/cloudtrace/v1"
@@ -32,6 +34,7 @@ import (
 	"google.golang.org/api/firestore/v1"
 	"google.golang.org/api/option"
 	"google.golang.org/api/redis/v1"
+	"google.golang.org/api/servicedirectory/v1"
 	"google.golang.org/api/spanner/v1"
 	"google.golang.org/api/sqladmin/v1"
 	"google.golang.org/api/vpcaccess/v1"
@@ -112,8 +115,11 @@ type gcpAdapter struct {
 	secretMgrClient    *secretmanager.Client
 	vpcAccess          *vpcaccess.Service
 	sqlAdmin           *sqladmin.Service
-	computeSvc         *compute.Service
-	apiGatewaySvc      *apigateway.Service
+	computeSvc              *compute.Service
+	apiGatewaySvc           *apigateway.Service
+	artifactRegistrySvc     *artifactregistry.Service
+	cloudBuildSvc           *cloudbuild.Service
+	serviceDirectorySvc     *servicedirectory.APIService
 	traceClient        *cloudtrace.Service
 	traceBackend       string
 	pubsub             *pubsub.Client
@@ -259,6 +265,27 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.apiGatewaySvc, err = apigateway.NewService(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create apigateway client: %w", err)
+		}
+	}
+
+	if needed[clientArtifactRegistry] {
+		a.artifactRegistrySvc, err = artifactregistry.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create artifactregistry client: %w", err)
+		}
+	}
+
+	if needed[clientCloudBuild] {
+		a.cloudBuildSvc, err = cloudbuild.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create cloudbuild client: %w", err)
+		}
+	}
+
+	if needed[clientServiceDirectory] {
+		a.serviceDirectorySvc, err = servicedirectory.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create servicedirectory client: %w", err)
 		}
 	}
 
