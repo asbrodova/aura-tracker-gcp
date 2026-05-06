@@ -219,6 +219,10 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_cloudsql_list_instances",
 		"gcp_monitoring_list_metric_descriptors",
 		"gcp_trace_list_services",
+		"gcp_monitoring_list_alert_policies",
+		"gcp_monitoring_list_uptime_checks",
+		"gcp_monitoring_list_slos",
+		"gcp_monitoring_list_dashboards",
 		"gcp_export_serverless_graph",
 		"gcp_gke_list_workloads",
 		"gcp_gke_get_workload_details",
@@ -368,4 +372,16 @@ func (m *mockSvc) GetResourceIAMBindings(_ context.Context, _ models.GetResource
 }
 func (m *mockSvc) ListServiceAccounts(_ context.Context, _ models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
 	return models.ListServiceAccountsResponse{}, nil
+}
+func (m *mockSvc) ListAlertPolicies(_ context.Context, _ models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error) {
+	return models.ListAlertPoliciesResponse{}, nil
+}
+func (m *mockSvc) ListUptimeChecks(_ context.Context, _ models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error) {
+	return models.ListUptimeChecksResponse{}, nil
+}
+func (m *mockSvc) ListSLOs(_ context.Context, _ models.ListSLOsRequest) (models.ListSLOsResponse, error) {
+	return models.ListSLOsResponse{}, nil
+}
+func (m *mockSvc) ListDashboards(_ context.Context, _ models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
+	return models.ListDashboardsResponse{}, nil
 }

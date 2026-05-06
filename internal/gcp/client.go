@@ -33,6 +33,8 @@ import (
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/firestore/v1"
 	"google.golang.org/api/iam/v1"
+	monitoringv1 "google.golang.org/api/monitoring/v1"
+	monitoringv3 "google.golang.org/api/monitoring/v3"
 	"google.golang.org/api/option"
 	"google.golang.org/api/redis/v1"
 	"google.golang.org/api/servicedirectory/v1"
@@ -133,7 +135,9 @@ type gcpAdapter struct {
 	alloydbSvc     *alloydb.Service
 	firestoreSvc   *firestore.Service
 	redisSvc       *redis.Service
-	iamAdminSvc    *iam.Service
+	iamAdminSvc      *iam.Service
+	monitoringSvc    *monitoringv3.Service
+	monitoringV1Svc  *monitoringv1.Service
 	rec               *recommender.Client
 	enableRecommender bool
 	enabledModules    map[string]bool
@@ -288,6 +292,20 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.serviceDirectorySvc, err = servicedirectory.NewService(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create servicedirectory client: %w", err)
+		}
+	}
+
+	if needed[clientMonitoringV3] {
+		a.monitoringSvc, err = monitoringv3.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create monitoring v3 client: %w", err)
+		}
+	}
+
+	if needed[clientMonitoringV1] {
+		a.monitoringV1Svc, err = monitoringv1.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create monitoring v1 client: %w", err)
 		}
 	}
 
