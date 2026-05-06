@@ -23,8 +23,10 @@ import (
 	workflowexecutions "cloud.google.com/go/workflows/executions/apiv1"
 	workflows "cloud.google.com/go/workflows/apiv1"
 	"golang.org/x/time/rate"
+	"google.golang.org/api/apigateway/v1beta"
 	"google.golang.org/api/cloudfunctions/v1"
 	"google.golang.org/api/cloudresourcemanager/v1"
+	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/option"
 	"google.golang.org/api/cloudtrace/v1"
 	"google.golang.org/api/sqladmin/v1"
@@ -106,6 +108,8 @@ type gcpAdapter struct {
 	secretMgrClient    *secretmanager.Client
 	vpcAccess          *vpcaccess.Service
 	sqlAdmin           *sqladmin.Service
+	computeSvc         *compute.Service
+	apiGatewaySvc      *apigateway.Service
 	traceClient        *cloudtrace.Service
 	traceBackend       string
 	pubsub             *pubsub.Client
@@ -233,6 +237,20 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.vpcAccess, err = vpcaccess.NewService(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create vpcaccess client: %w", err)
+		}
+	}
+
+	if needed[clientCompute] {
+		a.computeSvc, err = compute.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create compute client: %w", err)
+		}
+	}
+
+	if needed[clientAPIGateway] {
+		a.apiGatewaySvc, err = apigateway.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create apigateway client: %w", err)
 		}
 	}
 

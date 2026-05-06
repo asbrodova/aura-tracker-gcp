@@ -80,6 +80,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewServerlessGraphTools(svc, log),
 		tools.NewGKEWorkloadTools(svc, log),
 		tools.NewGKEMeshTools(svc, log),
+		tools.NewNetworkingTools(svc, log),
 	}
 	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
 		s.AddTools(wrap(t))

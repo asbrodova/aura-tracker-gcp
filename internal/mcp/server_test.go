@@ -191,6 +191,13 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_gke_list_ingresses",
 		"gcp_gke_list_network_policies",
 		"gcp_gke_get_mesh_topology",
+		"gcp_compute_list_loadbalancers",
+		"gcp_compute_list_url_maps",
+		"gcp_compute_list_negs",
+		"gcp_apigateway_list",
+		"gcp_vpc_list_networks",
+		"gcp_vpc_list_subnets",
+		"gcp_psc_list_endpoints",
 	}
 
 	registered := s.ListTools()
@@ -300,4 +307,25 @@ func TestPromptHandlerRequiresProjectID(t *testing.T) {
 	if !strings.Contains(string(raw), "error") {
 		t.Errorf("expected error for missing project_id, got: %s", string(raw))
 	}
+}
+func (m *mockSvc) ListLoadBalancers(_ context.Context, _ models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error) {
+	return models.ListLoadBalancersResponse{}, nil
+}
+func (m *mockSvc) ListURLMaps(_ context.Context, _ models.ListURLMapsRequest) (models.ListURLMapsResponse, error) {
+	return models.ListURLMapsResponse{}, nil
+}
+func (m *mockSvc) ListNEGs(_ context.Context, _ models.ListNEGsRequest) (models.ListNEGsResponse, error) {
+	return models.ListNEGsResponse{}, nil
+}
+func (m *mockSvc) ListAPIGateways(_ context.Context, _ models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error) {
+	return models.ListAPIGatewaysResponse{}, nil
+}
+func (m *mockSvc) ListVPCNetworks(_ context.Context, _ models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error) {
+	return models.ListVPCNetworksResponse{}, nil
+}
+func (m *mockSvc) ListVPCSubnets(_ context.Context, _ models.ListVPCSubnetsRequest) (models.ListVPCSubnetsResponse, error) {
+	return models.ListVPCSubnetsResponse{}, nil
+}
+func (m *mockSvc) ListPSCEndpoints(_ context.Context, _ models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error) {
+	return models.ListPSCEndpointsResponse{}, nil
 }

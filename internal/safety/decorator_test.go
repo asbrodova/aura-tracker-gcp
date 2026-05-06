@@ -387,3 +387,24 @@ func TestScaleDeployment_PlanCannotBeConfirmedTwice(t *testing.T) {
 		t.Errorf("expected ConfirmationRequiredError on replay, got %T: %v", err, err)
 	}
 }
+func (s *stubService) ListLoadBalancers(_ context.Context, _ models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error) {
+	return models.ListLoadBalancersResponse{}, nil
+}
+func (s *stubService) ListURLMaps(_ context.Context, _ models.ListURLMapsRequest) (models.ListURLMapsResponse, error) {
+	return models.ListURLMapsResponse{}, nil
+}
+func (s *stubService) ListNEGs(_ context.Context, _ models.ListNEGsRequest) (models.ListNEGsResponse, error) {
+	return models.ListNEGsResponse{}, nil
+}
+func (s *stubService) ListAPIGateways(_ context.Context, _ models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error) {
+	return models.ListAPIGatewaysResponse{}, nil
+}
+func (s *stubService) ListVPCNetworks(_ context.Context, _ models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error) {
+	return models.ListVPCNetworksResponse{}, nil
+}
+func (s *stubService) ListVPCSubnets(_ context.Context, _ models.ListVPCSubnetsRequest) (models.ListVPCSubnetsResponse, error) {
+	return models.ListVPCSubnetsResponse{}, nil
+}
+func (s *stubService) ListPSCEndpoints(_ context.Context, _ models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error) {
+	return models.ListPSCEndpointsResponse{}, nil
+}

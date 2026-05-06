@@ -31,6 +31,15 @@ type GCPService interface {
 	// --- GKE Mesh Topology (Phase 2) ---
 	GetGKEMeshTopology(ctx context.Context, req models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error)
 
+	// --- Networking (Phase 2) ---
+	ListLoadBalancers(ctx context.Context, req models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error)
+	ListURLMaps(ctx context.Context, req models.ListURLMapsRequest) (models.ListURLMapsResponse, error)
+	ListNEGs(ctx context.Context, req models.ListNEGsRequest) (models.ListNEGsResponse, error)
+	ListAPIGateways(ctx context.Context, req models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error)
+	ListVPCNetworks(ctx context.Context, req models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error)
+	ListVPCSubnets(ctx context.Context, req models.ListVPCSubnetsRequest) (models.ListVPCSubnetsResponse, error)
+	ListPSCEndpoints(ctx context.Context, req models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error)
+
 	// --- Cloud Run ---
 	ListServices(ctx context.Context, req models.ListServicesRequest) (models.ListServicesResponse, error)
 	GetServiceDetails(ctx context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error)
