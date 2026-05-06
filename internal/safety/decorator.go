@@ -427,3 +427,11 @@ func (d *SafetyDecorator) ListCloudBuildTriggers(ctx context.Context, req models
 func (d *SafetyDecorator) ListServiceDirectoryNamespaces(ctx context.Context, req models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
 	return d.inner.ListServiceDirectoryNamespaces(ctx, req)
 }
+
+func (d *SafetyDecorator) GetResourceIAMBindings(ctx context.Context, req models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error) {
+	return d.inner.GetResourceIAMBindings(ctx, req)
+}
+
+func (d *SafetyDecorator) ListServiceAccounts(ctx context.Context, req models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
+	return d.inner.ListServiceAccounts(ctx, req)
+}

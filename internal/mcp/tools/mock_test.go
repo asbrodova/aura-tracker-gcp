@@ -212,3 +212,9 @@ func (m *mockGCPService) ListCloudBuildTriggers(_ context.Context, _ models.List
 func (m *mockGCPService) ListServiceDirectoryNamespaces(_ context.Context, _ models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
 	return models.ListServiceDirectoryNamespacesResponse{}, nil
 }
+func (m *mockGCPService) GetResourceIAMBindings(_ context.Context, _ models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error) {
+	return models.GetResourceIAMBindingsResponse{}, nil
+}
+func (m *mockGCPService) ListServiceAccounts(_ context.Context, _ models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
+	return models.ListServiceAccountsResponse{}, nil
+}

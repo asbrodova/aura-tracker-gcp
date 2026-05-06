@@ -25,7 +25,11 @@ func NewIAMTools(svc ports.GCPService, log *slog.Logger) *IAMTools {
 func (t *IAMTools) Name() string { return "iam" }
 
 func (t *IAMTools) GetTools() []server.ServerTool {
-	return []server.ServerTool{t.TestPermissions()}
+	return []server.ServerTool{
+		t.TestPermissions(),
+		t.GetResourceIAMBindings(),
+		t.ListServiceAccounts(),
+	}
 }
 
 func (t *IAMTools) TestPermissions() server.ServerTool {
@@ -63,6 +67,67 @@ func (t *IAMTools) testPermissionsHandler(ctx context.Context, _ mcp.CallToolReq
 		return nil, fmt.Errorf("gcp_iam_test_permissions: marshal: %w", err)
 	}
 	return result, nil
+}
+
+func (t *IAMTools) GetResourceIAMBindings() server.ServerTool {
+	tool := mcp.NewTool("gcp_iam_get_resource_bindings",
+		mcp.WithDescription(
+			"Get IAM bindings for a GCP resource identified by its URN. "+
+				"Supported URN kinds: storage_bucket, project. "+
+				"URN format: urn:gcp:{kind}:{region}:{project_id}:{resource-name}. "+
+				"Returns the list of role→members bindings on that resource.",
+		),
+		mcp.WithString("urn", mcp.Required(), mcp.Description("Resource URN, e.g. urn:gcp:storage_bucket:-:my-project:my-bucket")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "Get Resource IAM Bindings",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool: tool,
+		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args struct {
+			URN string `json:"urn"`
+		}) (*mcp.CallToolResult, error) {
+			resp, err := t.svc.GetResourceIAMBindings(ctx, models.GetResourceIAMBindingsRequest{URN: args.URN})
+			if err != nil {
+				return handleServiceError("gcp_iam_get_resource_bindings", err)
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+		}),
+	}
+}
+
+func (t *IAMTools) ListServiceAccounts() server.ServerTool {
+	tool := mcp.NewTool("gcp_iam_list_service_accounts",
+		mcp.WithDescription(
+			"List IAM service accounts in a project. "+
+				"Returns each account's name, email, display name, description, "+
+				"disabled status, and unique numeric ID.",
+		),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Service Accounts",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool: tool,
+		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args struct {
+			ProjectID string `json:"project_id"`
+		}) (*mcp.CallToolResult, error) {
+			resp, err := t.svc.ListServiceAccounts(ctx, models.ListServiceAccountsRequest{ProjectID: args.ProjectID})
+			if err != nil {
+				return handleServiceError("gcp_iam_list_service_accounts", err)
+			}
+			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+		}),
+	}
 }
 
 // defaultPermissionsToCheck returns a useful set of GCP permissions to probe

@@ -32,6 +32,7 @@ import (
 	"google.golang.org/api/cloudtrace/v1"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/firestore/v1"
+	"google.golang.org/api/iam/v1"
 	"google.golang.org/api/option"
 	"google.golang.org/api/redis/v1"
 	"google.golang.org/api/servicedirectory/v1"
@@ -132,6 +133,7 @@ type gcpAdapter struct {
 	alloydbSvc     *alloydb.Service
 	firestoreSvc   *firestore.Service
 	redisSvc       *redis.Service
+	iamAdminSvc    *iam.Service
 	rec               *recommender.Client
 	enableRecommender bool
 	enabledModules    map[string]bool
@@ -286,6 +288,13 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.serviceDirectorySvc, err = servicedirectory.NewService(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create servicedirectory client: %w", err)
+		}
+	}
+
+	if needed[clientIAMAdmin] {
+		a.iamAdminSvc, err = iam.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create iam client: %w", err)
 		}
 	}
 
