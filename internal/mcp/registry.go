@@ -27,6 +27,7 @@ const (
 	ModuleGKEMesh      = "gke_mesh"
 	ModuleNetworking   = "networking"
 	ModuleDatastores   = "datastores"
+	ModuleSupplyChain  = "supplychain"
 )
 
 // AllModules is the default set used when --modules is absent.
@@ -37,7 +38,7 @@ var AllModules = []string{
 	ModuleWorkflows, ModuleTasks, ModuleSecretManager,
 	ModuleVPCAccess, ModuleCloudSQL, ModuleServerlessGraph,
 	// Phase 2
-	ModuleGKEWorkloads, ModuleGKEMesh, ModuleNetworking, ModuleDatastores,
+	ModuleGKEWorkloads, ModuleGKEMesh, ModuleNetworking, ModuleDatastores, ModuleSupplyChain,
 }
 
 // ToolModule is the interface every tool domain struct must satisfy.

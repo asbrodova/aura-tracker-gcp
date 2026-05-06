@@ -420,3 +420,15 @@ func TestScaleDeployment_PlanCannotBeConfirmedTwice(t *testing.T) {
 		t.Errorf("expected ConfirmationRequiredError on replay, got %T: %v", err, err)
 	}
 }
+func (s *stubService) ListArtifactRegistryRepos(_ context.Context, _ models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error) {
+	return models.ListArtifactRegistryReposResponse{}, nil
+}
+func (s *stubService) ListArtifactRegistryImages(_ context.Context, _ models.ListArtifactRegistryImagesRequest) (models.ListArtifactRegistryImagesResponse, error) {
+	return models.ListArtifactRegistryImagesResponse{}, nil
+}
+func (s *stubService) ListCloudBuildTriggers(_ context.Context, _ models.ListCloudBuildTriggersRequest) (models.ListCloudBuildTriggersResponse, error) {
+	return models.ListCloudBuildTriggersResponse{}, nil
+}
+func (s *stubService) ListServiceDirectoryNamespaces(_ context.Context, _ models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
+	return models.ListServiceDirectoryNamespacesResponse{}, nil
+}

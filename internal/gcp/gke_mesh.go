@@ -163,7 +163,7 @@ func (a *gcpAdapter) istioMeshEdges(ctx context.Context, projectID, clusterName 
 // logBasedMeshEdges scans Istio proxy access log entries in Cloud Logging for
 // source_workload / destination_workload label pairs. This is the fallback when
 // Anthos Service Mesh metrics are unavailable.
-func (a *gcpAdapter) logBasedMeshEdges(ctx context.Context, projectID, clusterName string, start, end time.Time) ([]models.GKEMeshEdge, error) {
+func (a *gcpAdapter) logBasedMeshEdges(ctx context.Context, _ /*projectID*/ string, clusterName string, start, end time.Time) ([]models.GKEMeshEdge, error) {
 	filter := fmt.Sprintf(
 		`resource.type="k8s_container"`+
 			` AND resource.labels.cluster_name="%s"`+

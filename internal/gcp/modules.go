@@ -23,12 +23,15 @@ const (
 	clientAPIGateway  clientKey = "apiGateway"
 	clientMetric      clientKey = "metric"
 	clientCRM         clientKey = "crm"
-	clientBQ          clientKey = "bq"
-	clientGCS         clientKey = "gcs"
-	clientSpanner     clientKey = "spanner"
-	clientAlloyDB     clientKey = "alloydb"
-	clientFirestore   clientKey = "firestore"
-	clientMemorystore clientKey = "memorystore"
+	clientBQ                 clientKey = "bq"
+	clientGCS                clientKey = "gcs"
+	clientSpanner            clientKey = "spanner"
+	clientAlloyDB            clientKey = "alloydb"
+	clientFirestore          clientKey = "firestore"
+	clientMemorystore        clientKey = "memorystore"
+	clientArtifactRegistry  clientKey = "artifactRegistry"
+	clientCloudBuild         clientKey = "cloudBuild"
+	clientServiceDirectory   clientKey = "serviceDirectory"
 )
 
 // moduleClientDeps maps each module name to the GCP clients it requires.
@@ -53,9 +56,10 @@ var moduleClientDeps = map[string][]clientKey{
 	"iam":        {clientCRM},
 	"topology":   {clientRunSvc, clientPubSub}, // scans run annotations + pubsub push subscriptions
 	"aura":       {clientMetric, clientRunSvc, clientClusterMgr}, // GKE cluster discovery + control-plane health
-	"storage":    {clientGCS},
-	"datastores": {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
-	"_resources": {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
+	"storage":     {clientGCS},
+	"datastores":  {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
+	"supplychain": {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
+	"_resources":  {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
 }
 
 // neededClients returns the union of client keys for the given module set,

@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 48 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 56 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -104,7 +104,7 @@ By default all 48 tools are registered. Use the `--modules` flag to load only th
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `supplychain`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
@@ -273,6 +273,15 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | `gcp_alloydb_list_clusters` | List AlloyDB clusters with state, PostgreSQL version, and cluster type (primary/secondary) | No |
 | `gcp_firestore_list_databases` | List Firestore databases with type (Native/Datastore), location, concurrency mode, and edition | No |
 | `gcp_memorystore_list_instances` | List Memorystore for Redis instances with tier, memory size, Redis version, and host endpoint | No |
+
+### Supply Chain
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_artifactregistry_list_repos` | List Artifact Registry repositories; returns format (DOCKER, MAVEN, NPM, etc.), location, description, and size | No |
+| `gcp_artifactregistry_list_images` | List Docker images in an Artifact Registry repository; returns URI, tags, build time, upload time, and size | No |
+| `gcp_cloudbuild_list_triggers` | List Cloud Build triggers; returns event type (github, pubsub, webhook, manual), enabled status, tags, and build config filename | No |
+| `gcp_servicedirectory_list` | List Service Directory namespaces and their registered services; omit location to scan all locations | No |
 
 ### Serverless Graph Export
 
@@ -691,7 +700,7 @@ The server runs under a specific service account (Application Default Credential
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
 - **Read-only guarantees**: all 33 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 48 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 56 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -969,7 +978,7 @@ aura-tracker-gcp/
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool + resource + prompt registration
 │       ├── registry.go            # module constants, AllModules, FilteredRegistry
-│       ├── tools/                 # one file per GCP domain (48 tools)
+│       ├── tools/                 # one file per GCP domain (56 tools)
 │       ├── resources/             # MCP Resource handlers (10 resources)
 │       │   ├── resources.go       # constructor types
 │       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)

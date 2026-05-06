@@ -235,6 +235,10 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_alloydb_list_clusters",
 		"gcp_firestore_list_databases",
 		"gcp_memorystore_list_instances",
+		"gcp_artifactregistry_list_repos",
+		"gcp_artifactregistry_list_images",
+		"gcp_cloudbuild_list_triggers",
+		"gcp_servicedirectory_list",
 	}
 
 	registered := s.ListTools()
@@ -344,4 +348,16 @@ func TestPromptHandlerRequiresProjectID(t *testing.T) {
 	if !strings.Contains(string(raw), "error") {
 		t.Errorf("expected error for missing project_id, got: %s", string(raw))
 	}
+}
+func (m *mockSvc) ListArtifactRegistryRepos(_ context.Context, _ models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error) {
+	return models.ListArtifactRegistryReposResponse{}, nil
+}
+func (m *mockSvc) ListArtifactRegistryImages(_ context.Context, _ models.ListArtifactRegistryImagesRequest) (models.ListArtifactRegistryImagesResponse, error) {
+	return models.ListArtifactRegistryImagesResponse{}, nil
+}
+func (m *mockSvc) ListCloudBuildTriggers(_ context.Context, _ models.ListCloudBuildTriggersRequest) (models.ListCloudBuildTriggersResponse, error) {
+	return models.ListCloudBuildTriggersResponse{}, nil
+}
+func (m *mockSvc) ListServiceDirectoryNamespaces(_ context.Context, _ models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
+	return models.ListServiceDirectoryNamespacesResponse{}, nil
 }

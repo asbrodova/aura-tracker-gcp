@@ -82,6 +82,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewGKEMeshTools(svc, log),
 		tools.NewNetworkingTools(svc, log),
 		tools.NewDatastoreTools(svc, log),
+		tools.NewSupplyChainTools(svc, log),
 	}
 	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
 		s.AddTools(wrap(t))

@@ -273,12 +273,3 @@ type k8sNetworkPolicyPort struct {
 	Protocol string `json:"protocol"`
 }
 
-// --- Namespaces (used for all-namespace listing) ---
-
-type k8sNamespaceList struct {
-	Items []k8sNamespace `json:"items"`
-}
-
-type k8sNamespace struct {
-	Metadata k8sMeta `json:"metadata"`
-}

@@ -200,3 +200,15 @@ func (m *mockGCPService) ListFirestoreDatabases(_ context.Context, _ models.List
 func (m *mockGCPService) ListMemorystoreInstances(_ context.Context, _ models.ListMemorystoreInstancesRequest) (models.ListMemorystoreInstancesResponse, error) {
 	return models.ListMemorystoreInstancesResponse{}, nil
 }
+func (m *mockGCPService) ListArtifactRegistryRepos(_ context.Context, _ models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error) {
+	return models.ListArtifactRegistryReposResponse{}, nil
+}
+func (m *mockGCPService) ListArtifactRegistryImages(_ context.Context, _ models.ListArtifactRegistryImagesRequest) (models.ListArtifactRegistryImagesResponse, error) {
+	return models.ListArtifactRegistryImagesResponse{}, nil
+}
+func (m *mockGCPService) ListCloudBuildTriggers(_ context.Context, _ models.ListCloudBuildTriggersRequest) (models.ListCloudBuildTriggersResponse, error) {
+	return models.ListCloudBuildTriggersResponse{}, nil
+}
+func (m *mockGCPService) ListServiceDirectoryNamespaces(_ context.Context, _ models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error) {
+	return models.ListServiceDirectoryNamespacesResponse{}, nil
+}
