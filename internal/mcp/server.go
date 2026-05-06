@@ -79,6 +79,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewCloudSQLTools(svc, log),
 		tools.NewServerlessGraphTools(svc, log),
 		tools.NewGKEWorkloadTools(svc, log),
+		tools.NewGKEMeshTools(svc, log),
 	}
 	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
 		s.AddTools(wrap(t))

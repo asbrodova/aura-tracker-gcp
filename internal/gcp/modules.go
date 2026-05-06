@@ -30,6 +30,7 @@ const (
 var moduleClientDeps = map[string][]clientKey{
 	"gke":          {clientClusterMgr, clientMetric, clientLogAdmin}, // GetClusterBottlenecks fans out to metric+logAdmin
 	"gke_workloads": {clientClusterMgr}, // dialK8s fetches cluster endpoint; K8s calls use thin HTTP client
+	"gke_mesh":      {clientMetric, clientLogAdmin}, // Istio metrics primary; log-based fallback
 	"cloudrun":   {clientRunSvc, clientRunJobs},
 	"functions":  {clientFunctionsV1, clientRunSvc},
 	"eventarc":      {clientEventarc},

@@ -175,6 +175,9 @@ func (s *stubService) ListGKEIngresses(_ context.Context, _ models.ListGKEIngres
 func (s *stubService) ListGKENetworkPolicies(_ context.Context, _ models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
 	return models.ListGKENetworkPoliciesResponse{}, nil
 }
+func (s *stubService) GetGKEMeshTopology(_ context.Context, _ models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error) {
+	return models.GKEMeshTopologyResponse{}, nil
+}
 
 func newTestDecorator(inner *stubService) *SafetyDecorator {
 	return NewSafetyDecorator(inner, slog.Default())
