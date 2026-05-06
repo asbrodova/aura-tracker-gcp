@@ -142,6 +142,9 @@ func (m *mockSvc) ListGKEIngresses(_ context.Context, _ models.ListGKEIngressesR
 func (m *mockSvc) ListGKENetworkPolicies(_ context.Context, _ models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
 	return models.ListGKENetworkPoliciesResponse{}, nil
 }
+func (m *mockSvc) GetGKEMeshTopology(_ context.Context, _ models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error) {
+	return models.GKEMeshTopologyResponse{}, nil
+}
 
 func TestServerRegistersAllTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
@@ -187,6 +190,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_gke_list_services",
 		"gcp_gke_list_ingresses",
 		"gcp_gke_list_network_policies",
+		"gcp_gke_get_mesh_topology",
 	}
 
 	registered := s.ListTools()

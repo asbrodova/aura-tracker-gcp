@@ -28,6 +28,9 @@ type GCPService interface {
 	ListGKEIngresses(ctx context.Context, req models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error)
 	ListGKENetworkPolicies(ctx context.Context, req models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error)
 
+	// --- GKE Mesh Topology (Phase 2) ---
+	GetGKEMeshTopology(ctx context.Context, req models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error)
+
 	// --- Cloud Run ---
 	ListServices(ctx context.Context, req models.ListServicesRequest) (models.ListServicesResponse, error)
 	GetServiceDetails(ctx context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error)

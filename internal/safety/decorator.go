@@ -224,6 +224,10 @@ func (d *SafetyDecorator) ListGKENetworkPolicies(ctx context.Context, req models
 	return d.inner.ListGKENetworkPolicies(ctx, req)
 }
 
+func (d *SafetyDecorator) GetGKEMeshTopology(ctx context.Context, req models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error) {
+	return d.inner.GetGKEMeshTopology(ctx, req)
+}
+
 func (d *SafetyDecorator) GetClusterDetails(ctx context.Context, req models.GetClusterDetailsRequest) (models.ClusterDetails, error) {
 	return d.inner.GetClusterDetails(ctx, req)
 }

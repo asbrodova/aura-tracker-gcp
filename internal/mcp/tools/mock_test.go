@@ -164,3 +164,6 @@ func (m *mockGCPService) ListGKEIngresses(_ context.Context, _ models.ListGKEIng
 func (m *mockGCPService) ListGKENetworkPolicies(_ context.Context, _ models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
 	return models.ListGKENetworkPoliciesResponse{}, nil
 }
+func (m *mockGCPService) GetGKEMeshTopology(_ context.Context, _ models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error) {
+	return models.GKEMeshTopologyResponse{}, nil
+}
