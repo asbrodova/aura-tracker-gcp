@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 41 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 48 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -147,6 +147,18 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | Tool | Description | Mutation |
 |------|-------------|----------|
 | `gcp_gke_get_mesh_topology` | Get service-to-service traffic edges from Anthos Service Mesh (Istio) telemetry. Primary: Cloud Monitoring `istio.io/service/server/request_count` metric. Falls back to Istio proxy access logs when ASM is not installed. Returns caller/callee workload names, namespace, and requests-per-minute. | No |
+
+### Networking
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_compute_list_loadbalancers` | List Compute Engine forwarding rules (global and regional LBs); returns IP, protocol, ports, load-balancing scheme, and target proxy name | No |
+| `gcp_compute_list_url_maps` | List Compute Engine URL maps (global and regional); returns name, default backend service, and host rule count | No |
+| `gcp_compute_list_negs` | List Network Endpoint Groups across all zones; includes type, size, and linked Cloud Run service for SERVERLESS NEGs | No |
+| `gcp_apigateway_list` | List API Gateway instances; returns state, API config ID, and default hostname | No |
+| `gcp_vpc_list_networks` | List VPC networks; returns auto-create-subnets mode, subnet count, peering count, and MTU | No |
+| `gcp_vpc_list_subnets` | List VPC subnets across all regions; filterable by network and region; returns CIDR, Private Google Access, purpose | No |
+| `gcp_psc_list_endpoints` | List Private Service Connect consumer endpoints (forwarding rules with purpose=PRIVATE_SERVICE_CONNECT) | No |
 
 ### Cloud Run
 
@@ -670,7 +682,7 @@ The server runs under a specific service account (Application Default Credential
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
 - **Read-only guarantees**: all 33 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 41 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 48 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -948,7 +960,7 @@ aura-tracker-gcp/
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool + resource + prompt registration
 │       ├── registry.go            # module constants, AllModules, FilteredRegistry
-│       ├── tools/                 # one file per GCP domain (41 tools)
+│       ├── tools/                 # one file per GCP domain (48 tools)
 │       ├── resources/             # MCP Resource handlers (10 resources)
 │       │   ├── resources.go       # constructor types
 │       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)

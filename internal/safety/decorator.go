@@ -228,6 +228,34 @@ func (d *SafetyDecorator) GetGKEMeshTopology(ctx context.Context, req models.Get
 	return d.inner.GetGKEMeshTopology(ctx, req)
 }
 
+func (d *SafetyDecorator) ListLoadBalancers(ctx context.Context, req models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error) {
+	return d.inner.ListLoadBalancers(ctx, req)
+}
+
+func (d *SafetyDecorator) ListURLMaps(ctx context.Context, req models.ListURLMapsRequest) (models.ListURLMapsResponse, error) {
+	return d.inner.ListURLMaps(ctx, req)
+}
+
+func (d *SafetyDecorator) ListNEGs(ctx context.Context, req models.ListNEGsRequest) (models.ListNEGsResponse, error) {
+	return d.inner.ListNEGs(ctx, req)
+}
+
+func (d *SafetyDecorator) ListAPIGateways(ctx context.Context, req models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error) {
+	return d.inner.ListAPIGateways(ctx, req)
+}
+
+func (d *SafetyDecorator) ListVPCNetworks(ctx context.Context, req models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error) {
+	return d.inner.ListVPCNetworks(ctx, req)
+}
+
+func (d *SafetyDecorator) ListVPCSubnets(ctx context.Context, req models.ListVPCSubnetsRequest) (models.ListVPCSubnetsResponse, error) {
+	return d.inner.ListVPCSubnets(ctx, req)
+}
+
+func (d *SafetyDecorator) ListPSCEndpoints(ctx context.Context, req models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error) {
+	return d.inner.ListPSCEndpoints(ctx, req)
+}
+
 func (d *SafetyDecorator) GetClusterDetails(ctx context.Context, req models.GetClusterDetailsRequest) (models.ClusterDetails, error) {
 	return d.inner.GetClusterDetails(ctx, req)
 }

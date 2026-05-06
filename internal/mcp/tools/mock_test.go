@@ -167,3 +167,24 @@ func (m *mockGCPService) ListGKENetworkPolicies(_ context.Context, _ models.List
 func (m *mockGCPService) GetGKEMeshTopology(_ context.Context, _ models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error) {
 	return models.GKEMeshTopologyResponse{}, nil
 }
+func (m *mockGCPService) ListLoadBalancers(_ context.Context, _ models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error) {
+	return models.ListLoadBalancersResponse{}, nil
+}
+func (m *mockGCPService) ListURLMaps(_ context.Context, _ models.ListURLMapsRequest) (models.ListURLMapsResponse, error) {
+	return models.ListURLMapsResponse{}, nil
+}
+func (m *mockGCPService) ListNEGs(_ context.Context, _ models.ListNEGsRequest) (models.ListNEGsResponse, error) {
+	return models.ListNEGsResponse{}, nil
+}
+func (m *mockGCPService) ListAPIGateways(_ context.Context, _ models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error) {
+	return models.ListAPIGatewaysResponse{}, nil
+}
+func (m *mockGCPService) ListVPCNetworks(_ context.Context, _ models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error) {
+	return models.ListVPCNetworksResponse{}, nil
+}
+func (m *mockGCPService) ListVPCSubnets(_ context.Context, _ models.ListVPCSubnetsRequest) (models.ListVPCSubnetsResponse, error) {
+	return models.ListVPCSubnetsResponse{}, nil
+}
+func (m *mockGCPService) ListPSCEndpoints(_ context.Context, _ models.ListPSCEndpointsRequest) (models.ListPSCEndpointsResponse, error) {
+	return models.ListPSCEndpointsResponse{}, nil
+}
