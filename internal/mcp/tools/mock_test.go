@@ -149,3 +149,18 @@ func (m *mockGCPService) ListTraceServices(_ context.Context, _ models.ListTrace
 func (m *mockGCPService) ExportServerlessGraph(_ context.Context, _ models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
 	return models.ServerlessGraph{}, nil
 }
+func (m *mockGCPService) ListGKEWorkloads(_ context.Context, _ models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error) {
+	return models.ListGKEWorkloadsResponse{}, nil
+}
+func (m *mockGCPService) GetGKEWorkloadDetails(_ context.Context, _ models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error) {
+	return models.GKEWorkloadDetails{}, nil
+}
+func (m *mockGCPService) ListGKEServices(_ context.Context, _ models.ListGKEServicesRequest) (models.ListGKEServicesResponse, error) {
+	return models.ListGKEServicesResponse{}, nil
+}
+func (m *mockGCPService) ListGKEIngresses(_ context.Context, _ models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error) {
+	return models.ListGKEIngressesResponse{}, nil
+}
+func (m *mockGCPService) ListGKENetworkPolicies(_ context.Context, _ models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
+	return models.ListGKENetworkPoliciesResponse{}, nil
+}

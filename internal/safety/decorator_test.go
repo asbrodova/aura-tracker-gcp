@@ -160,6 +160,21 @@ func (s *stubService) ListTraceServices(_ context.Context, _ models.ListTraceSer
 func (s *stubService) ExportServerlessGraph(_ context.Context, _ models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
 	return models.ServerlessGraph{}, nil
 }
+func (s *stubService) ListGKEWorkloads(_ context.Context, _ models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error) {
+	return models.ListGKEWorkloadsResponse{}, nil
+}
+func (s *stubService) GetGKEWorkloadDetails(_ context.Context, _ models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error) {
+	return models.GKEWorkloadDetails{}, nil
+}
+func (s *stubService) ListGKEServices(_ context.Context, _ models.ListGKEServicesRequest) (models.ListGKEServicesResponse, error) {
+	return models.ListGKEServicesResponse{}, nil
+}
+func (s *stubService) ListGKEIngresses(_ context.Context, _ models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error) {
+	return models.ListGKEIngressesResponse{}, nil
+}
+func (s *stubService) ListGKENetworkPolicies(_ context.Context, _ models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
+	return models.ListGKENetworkPoliciesResponse{}, nil
+}
 
 func newTestDecorator(inner *stubService) *SafetyDecorator {
 	return NewSafetyDecorator(inner, slog.Default())

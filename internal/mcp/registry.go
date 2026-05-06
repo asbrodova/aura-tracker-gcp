@@ -21,6 +21,9 @@ const (
 	ModuleVPCAccess        = "vpcaccess"
 	ModuleCloudSQL         = "cloudsql"
 	ModuleServerlessGraph  = "serverlessgraph"
+
+	// Phase 2 modules
+	ModuleGKEWorkloads = "gke_workloads"
 )
 
 // AllModules is the default set used when --modules is absent.
@@ -30,6 +33,8 @@ var AllModules = []string{
 	ModuleFunctions, ModuleEventarc, ModuleScheduler,
 	ModuleWorkflows, ModuleTasks, ModuleSecretManager,
 	ModuleVPCAccess, ModuleCloudSQL, ModuleServerlessGraph,
+	// Phase 2
+	ModuleGKEWorkloads,
 }
 
 // ToolModule is the interface every tool domain struct must satisfy.

@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 35 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 40 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -131,6 +131,16 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | `gcp_gke_get_cluster_details` | Describe a cluster: node pools, endpoint, labels | No |
 | `gcp_gke_get_cluster_bottlenecks` | Aggregate CPU/memory metrics + error logs → severity rating | No |
 | `gcp_gke_scale_deployment` | Resize a GKE node pool | **Yes**¹ |
+
+### GKE Workloads
+
+| Tool | Description | Mutation |
+|------|-------------|----------|
+| `gcp_gke_list_workloads` | List Deployments, StatefulSets, DaemonSets, CronJobs, and Jobs in a GKE cluster; includes image, replica count, SA, secret refs, and OTel detection | No |
+| `gcp_gke_get_workload_details` | Full spec for a single workload: all containers, env vars (secret refs masked), resource limits, node selector, tolerations, annotations | No |
+| `gcp_gke_list_services` | List Kubernetes Services; returns type, selector, ports, and NEG annotation linking to GCP Load Balancers | No |
+| `gcp_gke_list_ingresses` | List Ingress resources and Gateway API HTTPRoutes; returns hosts, TLS status, routing rules, and linked GCP LB name | No |
+| `gcp_gke_list_network_policies` | List NetworkPolicies; returns pod selector, ingress/egress rule counts, and policy types | No |
 
 ### Cloud Run
 
@@ -654,7 +664,7 @@ The server runs under a specific service account (Application Default Credential
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
 - **Read-only guarantees**: all 33 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 35 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 40 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -932,7 +942,7 @@ aura-tracker-gcp/
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool + resource + prompt registration
 │       ├── registry.go            # module constants, AllModules, FilteredRegistry
-│       ├── tools/                 # one file per GCP domain (35 tools)
+│       ├── tools/                 # one file per GCP domain (40 tools)
 │       ├── resources/             # MCP Resource handlers (10 resources)
 │       │   ├── resources.go       # constructor types
 │       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)
