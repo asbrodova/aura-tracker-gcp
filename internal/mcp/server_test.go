@@ -127,6 +127,21 @@ func (m *mockSvc) ListTraceServices(_ context.Context, _ models.ListTraceService
 func (m *mockSvc) ExportServerlessGraph(_ context.Context, _ models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
 	return models.ServerlessGraph{}, nil
 }
+func (m *mockSvc) ListGKEWorkloads(_ context.Context, _ models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error) {
+	return models.ListGKEWorkloadsResponse{}, nil
+}
+func (m *mockSvc) GetGKEWorkloadDetails(_ context.Context, _ models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error) {
+	return models.GKEWorkloadDetails{}, nil
+}
+func (m *mockSvc) ListGKEServices(_ context.Context, _ models.ListGKEServicesRequest) (models.ListGKEServicesResponse, error) {
+	return models.ListGKEServicesResponse{}, nil
+}
+func (m *mockSvc) ListGKEIngresses(_ context.Context, _ models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error) {
+	return models.ListGKEIngressesResponse{}, nil
+}
+func (m *mockSvc) ListGKENetworkPolicies(_ context.Context, _ models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
+	return models.ListGKENetworkPoliciesResponse{}, nil
+}
 
 func TestServerRegistersAllTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
@@ -167,6 +182,11 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_monitoring_list_metric_descriptors",
 		"gcp_trace_list_services",
 		"gcp_export_serverless_graph",
+		"gcp_gke_list_workloads",
+		"gcp_gke_get_workload_details",
+		"gcp_gke_list_services",
+		"gcp_gke_list_ingresses",
+		"gcp_gke_list_network_policies",
 	}
 
 	registered := s.ListTools()

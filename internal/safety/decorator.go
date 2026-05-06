@@ -204,6 +204,26 @@ func (d *SafetyDecorator) ListClusters(ctx context.Context, req models.ListClust
 	return d.inner.ListClusters(ctx, req)
 }
 
+func (d *SafetyDecorator) ListGKEWorkloads(ctx context.Context, req models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error) {
+	return d.inner.ListGKEWorkloads(ctx, req)
+}
+
+func (d *SafetyDecorator) GetGKEWorkloadDetails(ctx context.Context, req models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error) {
+	return d.inner.GetGKEWorkloadDetails(ctx, req)
+}
+
+func (d *SafetyDecorator) ListGKEServices(ctx context.Context, req models.ListGKEServicesRequest) (models.ListGKEServicesResponse, error) {
+	return d.inner.ListGKEServices(ctx, req)
+}
+
+func (d *SafetyDecorator) ListGKEIngresses(ctx context.Context, req models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error) {
+	return d.inner.ListGKEIngresses(ctx, req)
+}
+
+func (d *SafetyDecorator) ListGKENetworkPolicies(ctx context.Context, req models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
+	return d.inner.ListGKENetworkPolicies(ctx, req)
+}
+
 func (d *SafetyDecorator) GetClusterDetails(ctx context.Context, req models.GetClusterDetailsRequest) (models.ClusterDetails, error) {
 	return d.inner.GetClusterDetails(ctx, req)
 }

@@ -28,7 +28,8 @@ const (
 // moduleClientDeps maps each module name to the GCP clients it requires.
 // "_resources" is a pseudo-module for always-on MCP Resources (BigQuery, Storage, IAM).
 var moduleClientDeps = map[string][]clientKey{
-	"gke":        {clientClusterMgr, clientMetric, clientLogAdmin}, // GetClusterBottlenecks fans out to metric+logAdmin
+	"gke":          {clientClusterMgr, clientMetric, clientLogAdmin}, // GetClusterBottlenecks fans out to metric+logAdmin
+	"gke_workloads": {clientClusterMgr}, // dialK8s fetches cluster endpoint; K8s calls use thin HTTP client
 	"cloudrun":   {clientRunSvc, clientRunJobs},
 	"functions":  {clientFunctionsV1, clientRunSvc},
 	"eventarc":      {clientEventarc},
