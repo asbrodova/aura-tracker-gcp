@@ -29,6 +29,10 @@ func (t *MonitoringTools) GetTools() []server.ServerTool {
 		t.GetMetrics(),
 		t.ListMetricDescriptors(),
 		t.ListTraceServices(),
+		t.ListAlertPolicies(),
+		t.ListUptimeChecks(),
+		t.ListSLOs(),
+		t.ListDashboards(),
 	}
 }
 
@@ -139,4 +143,132 @@ func (t *MonitoringTools) listTraceServicesHandler(ctx context.Context, _ mcp.Ca
 		return nil, fmt.Errorf("gcp_trace_list_services: marshal: %w", err)
 	}
 	return result, nil
+}
+
+func (t *MonitoringTools) ListAlertPolicies() server.ServerTool {
+	tool := mcp.NewTool("gcp_monitoring_list_alert_policies",
+		mcp.WithDescription(
+			"List Cloud Monitoring alert policies in a project. "+
+				"Returns policy name, display name, enabled status, severity, and condition display names. "+
+				"Use filter to narrow results, e.g. 'enabled=\"true\"'.",
+		),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("filter", mcp.Description("Optional filter expression")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Alert Policies",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool: tool,
+		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args models.ListAlertPoliciesRequest) (*mcp.CallToolResult, error) {
+			resp, err := t.svc.ListAlertPolicies(ctx, args)
+			if err != nil {
+				return handleServiceError("gcp_monitoring_list_alert_policies", err)
+			}
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_monitoring_list_alert_policies: marshal: %w", err)
+			}
+			return result, nil
+		}),
+	}
+}
+
+func (t *MonitoringTools) ListUptimeChecks() server.ServerTool {
+	tool := mcp.NewTool("gcp_monitoring_list_uptime_checks",
+		mcp.WithDescription(
+			"List Cloud Monitoring uptime check configurations in a project. "+
+				"Returns name, display name, check period, timeout, and checker type.",
+		),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Uptime Checks",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool: tool,
+		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args models.ListUptimeChecksRequest) (*mcp.CallToolResult, error) {
+			resp, err := t.svc.ListUptimeChecks(ctx, args)
+			if err != nil {
+				return handleServiceError("gcp_monitoring_list_uptime_checks", err)
+			}
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_monitoring_list_uptime_checks: marshal: %w", err)
+			}
+			return result, nil
+		}),
+	}
+}
+
+func (t *MonitoringTools) ListSLOs() server.ServerTool {
+	tool := mcp.NewTool("gcp_monitoring_list_slos",
+		mcp.WithDescription(
+			"List Service Level Objectives (SLOs) for monitoring services in a project. "+
+				"Lists all services and their SLOs; optionally filter by service_name. "+
+				"Returns SLO name, display name, goal (0–1), and calendar period.",
+		),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("service_name", mcp.Description("Optional service name suffix to filter results")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List SLOs",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool: tool,
+		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args models.ListSLOsRequest) (*mcp.CallToolResult, error) {
+			resp, err := t.svc.ListSLOs(ctx, args)
+			if err != nil {
+				return handleServiceError("gcp_monitoring_list_slos", err)
+			}
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_monitoring_list_slos: marshal: %w", err)
+			}
+			return result, nil
+		}),
+	}
+}
+
+func (t *MonitoringTools) ListDashboards() server.ServerTool {
+	tool := mcp.NewTool("gcp_monitoring_list_dashboards",
+		mcp.WithDescription(
+			"List Cloud Monitoring dashboards in a project. "+
+				"Returns dashboard name, display name, and etag.",
+		),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Dashboards",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool: tool,
+		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args models.ListDashboardsRequest) (*mcp.CallToolResult, error) {
+			resp, err := t.svc.ListDashboards(ctx, args)
+			if err != nil {
+				return handleServiceError("gcp_monitoring_list_dashboards", err)
+			}
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_monitoring_list_dashboards: marshal: %w", err)
+			}
+			return result, nil
+		}),
+	}
 }

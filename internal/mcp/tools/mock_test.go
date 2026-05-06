@@ -218,3 +218,15 @@ func (m *mockGCPService) GetResourceIAMBindings(_ context.Context, _ models.GetR
 func (m *mockGCPService) ListServiceAccounts(_ context.Context, _ models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
 	return models.ListServiceAccountsResponse{}, nil
 }
+func (m *mockGCPService) ListAlertPolicies(_ context.Context, _ models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error) {
+	return models.ListAlertPoliciesResponse{}, nil
+}
+func (m *mockGCPService) ListUptimeChecks(_ context.Context, _ models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error) {
+	return models.ListUptimeChecksResponse{}, nil
+}
+func (m *mockGCPService) ListSLOs(_ context.Context, _ models.ListSLOsRequest) (models.ListSLOsResponse, error) {
+	return models.ListSLOsResponse{}, nil
+}
+func (m *mockGCPService) ListDashboards(_ context.Context, _ models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
+	return models.ListDashboardsResponse{}, nil
+}

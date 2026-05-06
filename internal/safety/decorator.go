@@ -435,3 +435,19 @@ func (d *SafetyDecorator) GetResourceIAMBindings(ctx context.Context, req models
 func (d *SafetyDecorator) ListServiceAccounts(ctx context.Context, req models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
 	return d.inner.ListServiceAccounts(ctx, req)
 }
+
+func (d *SafetyDecorator) ListAlertPolicies(ctx context.Context, req models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error) {
+	return d.inner.ListAlertPolicies(ctx, req)
+}
+
+func (d *SafetyDecorator) ListUptimeChecks(ctx context.Context, req models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error) {
+	return d.inner.ListUptimeChecks(ctx, req)
+}
+
+func (d *SafetyDecorator) ListSLOs(ctx context.Context, req models.ListSLOsRequest) (models.ListSLOsResponse, error) {
+	return d.inner.ListSLOs(ctx, req)
+}
+
+func (d *SafetyDecorator) ListDashboards(ctx context.Context, req models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
+	return d.inner.ListDashboards(ctx, req)
+}

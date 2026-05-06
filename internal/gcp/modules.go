@@ -33,6 +33,8 @@ const (
 	clientCloudBuild         clientKey = "cloudBuild"
 	clientServiceDirectory   clientKey = "serviceDirectory"
 	clientIAMAdmin           clientKey = "iamAdmin"
+	clientMonitoringV3       clientKey = "monitoringV3"
+	clientMonitoringV1       clientKey = "monitoringV1"
 )
 
 // moduleClientDeps maps each module name to the GCP clients it requires.
@@ -53,7 +55,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"cloudsql":      {clientSQLAdmin},
 	"pubsub":     {clientPubSub},
 	"logging":    {clientLogAdmin},
-	"monitoring": {clientMetric, clientTrace},
+	"monitoring": {clientMetric, clientTrace, clientMonitoringV3, clientMonitoringV1},
 	"iam":        {clientCRM, clientIAMAdmin},
 	"topology":   {clientRunSvc, clientPubSub}, // scans run annotations + pubsub push subscriptions
 	"aura":       {clientMetric, clientRunSvc, clientClusterMgr}, // GKE cluster discovery + control-plane health

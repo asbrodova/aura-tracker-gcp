@@ -40,6 +40,77 @@ type ListMetricDescriptorsResponse struct {
 	Descriptors []MetricDescriptorSummary `json:"descriptors"`
 }
 
+// --- Alert Policies ---
+
+type AlertPolicySummary struct {
+	Name        string   `json:"name"`
+	DisplayName string   `json:"display_name,omitempty"`
+	Enabled     bool     `json:"enabled"`
+	Severity    string   `json:"severity,omitempty"`
+	Conditions  []string `json:"conditions,omitempty"`
+}
+
+type ListAlertPoliciesRequest struct {
+	ProjectID string `json:"project_id"`
+	Filter    string `json:"filter,omitempty"`
+}
+
+type ListAlertPoliciesResponse struct {
+	Policies []AlertPolicySummary `json:"policies"`
+}
+
+// --- Uptime Checks ---
+
+type UptimeCheckSummary struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	Period      string `json:"period,omitempty"`
+	Timeout     string `json:"timeout,omitempty"`
+	CheckerType string `json:"checker_type,omitempty"`
+}
+
+type ListUptimeChecksRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+type ListUptimeChecksResponse struct {
+	UptimeChecks []UptimeCheckSummary `json:"uptime_checks"`
+}
+
+// --- SLOs ---
+
+type SLOSummary struct {
+	Name        string  `json:"name"`
+	DisplayName string  `json:"display_name,omitempty"`
+	Goal        float64 `json:"goal,omitempty"`
+	CalendarPeriod string `json:"calendar_period,omitempty"`
+}
+
+type ListSLOsRequest struct {
+	ProjectID   string `json:"project_id"`
+	ServiceName string `json:"service_name,omitempty"`
+}
+
+type ListSLOsResponse struct {
+	SLOs []SLOSummary `json:"slos"`
+}
+
+// --- Dashboards ---
+
+type DashboardSummary struct {
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	Etag        string `json:"etag,omitempty"`
+}
+
+type ListDashboardsRequest struct {
+	ProjectID string `json:"project_id"`
+}
+
+type ListDashboardsResponse struct {
+	Dashboards []DashboardSummary `json:"dashboards"`
+}
+
 // TraceService represents a service discovered via Cloud Trace.
 type TraceService struct {
 	Name string `json:"name"`

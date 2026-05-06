@@ -87,6 +87,10 @@ type GCPService interface {
 	GetMetrics(ctx context.Context, req models.GetMetricsRequest) (models.GetMetricsResponse, error)
 	ListMetricDescriptors(ctx context.Context, req models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error)
 	ListTraceServices(ctx context.Context, req models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error)
+	ListAlertPolicies(ctx context.Context, req models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error)
+	ListUptimeChecks(ctx context.Context, req models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error)
+	ListSLOs(ctx context.Context, req models.ListSLOsRequest) (models.ListSLOsResponse, error)
+	ListDashboards(ctx context.Context, req models.ListDashboardsRequest) (models.ListDashboardsResponse, error)
 
 	// --- IAM ---
 	TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error)

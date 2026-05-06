@@ -14,6 +14,145 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
+func (a *gcpAdapter) ListAlertPolicies(ctx context.Context, req models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error) {
+	if err := a.rateWait(ctx, "monitoring.ListAlertPolicies"); err != nil {
+		return models.ListAlertPoliciesResponse{}, err
+	}
+	if a.monitoringSvc == nil {
+		return models.ListAlertPoliciesResponse{Policies: []models.AlertPolicySummary{}}, nil
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	call := a.monitoringSvc.Projects.AlertPolicies.List("projects/" + req.ProjectID).Context(ctx)
+	if req.Filter != "" {
+		call = call.Filter(req.Filter)
+	}
+	resp, err := call.Do()
+	if err != nil {
+		return models.ListAlertPoliciesResponse{}, wrapGCPError("monitoring.ListAlertPolicies", err)
+	}
+
+	policies := make([]models.AlertPolicySummary, 0, len(resp.AlertPolicies))
+	for _, p := range resp.AlertPolicies {
+		enabled := p.Enabled
+		conditions := make([]string, 0, len(p.Conditions))
+		for _, c := range p.Conditions {
+			conditions = append(conditions, c.DisplayName)
+		}
+		policies = append(policies, models.AlertPolicySummary{
+			Name:        p.Name,
+			DisplayName: p.DisplayName,
+			Enabled:     enabled,
+			Severity:    p.Severity,
+			Conditions:  conditions,
+		})
+	}
+	return models.ListAlertPoliciesResponse{Policies: policies}, nil
+}
+
+func (a *gcpAdapter) ListUptimeChecks(ctx context.Context, req models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error) {
+	if err := a.rateWait(ctx, "monitoring.ListUptimeChecks"); err != nil {
+		return models.ListUptimeChecksResponse{}, err
+	}
+	if a.monitoringSvc == nil {
+		return models.ListUptimeChecksResponse{UptimeChecks: []models.UptimeCheckSummary{}}, nil
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	resp, err := a.monitoringSvc.Projects.UptimeCheckConfigs.List("projects/" + req.ProjectID).Context(ctx).Do()
+	if err != nil {
+		return models.ListUptimeChecksResponse{}, wrapGCPError("monitoring.ListUptimeChecks", err)
+	}
+
+	checks := make([]models.UptimeCheckSummary, 0, len(resp.UptimeCheckConfigs))
+	for _, c := range resp.UptimeCheckConfigs {
+		checkerType := "STATIC_IP_CHECKERS"
+		if c.CheckerType != "" {
+			checkerType = c.CheckerType
+		}
+		checks = append(checks, models.UptimeCheckSummary{
+			Name:        c.Name,
+			DisplayName: c.DisplayName,
+			Period:      c.Period,
+			Timeout:     c.Timeout,
+			CheckerType: checkerType,
+		})
+	}
+	return models.ListUptimeChecksResponse{UptimeChecks: checks}, nil
+}
+
+func (a *gcpAdapter) ListSLOs(ctx context.Context, req models.ListSLOsRequest) (models.ListSLOsResponse, error) {
+	if err := a.rateWait(ctx, "monitoring.ListSLOs"); err != nil {
+		return models.ListSLOsResponse{}, err
+	}
+	if a.monitoringSvc == nil {
+		return models.ListSLOsResponse{SLOs: []models.SLOSummary{}}, nil
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	// List services first, then SLOs per service.
+	parent := "projects/" + req.ProjectID
+	svcResp, err := a.monitoringSvc.Services.List(parent).Context(ctx).Do()
+	if err != nil {
+		return models.ListSLOsResponse{}, wrapGCPError("monitoring.ListSLOs.services", err)
+	}
+
+	var slos []models.SLOSummary
+	for _, svc := range svcResp.Services {
+		if req.ServiceName != "" && !strings.HasSuffix(svc.Name, "/"+req.ServiceName) {
+			continue
+		}
+		if err := a.rateWait(ctx, "monitoring.ListSLOs.slos"); err != nil {
+			return models.ListSLOsResponse{}, err
+		}
+		sloResp, err := a.monitoringSvc.Services.ServiceLevelObjectives.List(svc.Name).Context(ctx).Do()
+		if err != nil {
+			continue
+		}
+		for _, s := range sloResp.ServiceLevelObjectives {
+			slos = append(slos, models.SLOSummary{
+				Name:           s.Name,
+				DisplayName:    s.DisplayName,
+				Goal:           s.Goal,
+				CalendarPeriod: s.CalendarPeriod,
+			})
+		}
+	}
+	if slos == nil {
+		slos = []models.SLOSummary{}
+	}
+	return models.ListSLOsResponse{SLOs: slos}, nil
+}
+
+func (a *gcpAdapter) ListDashboards(ctx context.Context, req models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
+	if err := a.rateWait(ctx, "monitoring.ListDashboards"); err != nil {
+		return models.ListDashboardsResponse{}, err
+	}
+	if a.monitoringV1Svc == nil {
+		return models.ListDashboardsResponse{Dashboards: []models.DashboardSummary{}}, nil
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	resp, err := a.monitoringV1Svc.Projects.Dashboards.List("projects/" + req.ProjectID).Context(ctx).Do()
+	if err != nil {
+		return models.ListDashboardsResponse{}, wrapGCPError("monitoring.ListDashboards", err)
+	}
+
+	dashboards := make([]models.DashboardSummary, 0, len(resp.Dashboards))
+	for _, d := range resp.Dashboards {
+		dashboards = append(dashboards, models.DashboardSummary{
+			Name:        d.Name,
+			DisplayName: d.DisplayName,
+			Etag:        d.Etag,
+		})
+	}
+	return models.ListDashboardsResponse{Dashboards: dashboards}, nil
+}
+
 func (a *gcpAdapter) ListMetricDescriptors(ctx context.Context, req models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error) {
 	if err := a.rateWait(ctx, "monitoring.ListMetricDescriptors"); err != nil {
 		return models.ListMetricDescriptorsResponse{}, err

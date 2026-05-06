@@ -438,3 +438,15 @@ func (s *stubService) GetResourceIAMBindings(_ context.Context, _ models.GetReso
 func (s *stubService) ListServiceAccounts(_ context.Context, _ models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
 	return models.ListServiceAccountsResponse{}, nil
 }
+func (s *stubService) ListAlertPolicies(_ context.Context, _ models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error) {
+	return models.ListAlertPoliciesResponse{}, nil
+}
+func (s *stubService) ListUptimeChecks(_ context.Context, _ models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error) {
+	return models.ListUptimeChecksResponse{}, nil
+}
+func (s *stubService) ListSLOs(_ context.Context, _ models.ListSLOsRequest) (models.ListSLOsResponse, error) {
+	return models.ListSLOsResponse{}, nil
+}
+func (s *stubService) ListDashboards(_ context.Context, _ models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
+	return models.ListDashboardsResponse{}, nil
+}
