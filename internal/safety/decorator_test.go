@@ -459,3 +459,6 @@ func (s *stubService) GetObservabilityCoverage(_ context.Context, _ models.GetOb
 func (s *stubService) ExportArchitectureGraph(_ context.Context, _ models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
 	return models.ServerlessGraph{}, nil
 }
+func (s *stubService) ListTaggedResources(_ context.Context, _ models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
+	return models.ListTaggedResourcesResponse{}, nil
+}

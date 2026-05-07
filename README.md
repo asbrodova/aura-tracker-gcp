@@ -7,7 +7,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **65 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **66 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 65 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 66 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -104,7 +104,7 @@ By default all 65 tools are registered. Use the `--modules` flag to load only th
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
@@ -250,6 +250,7 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | `gcp_trace_list_dependency_edges` | Infer service-to-service dependency edges from Cloud Trace span parent/child relationships (up to 2000 traces, default 7-day lookback) | No |
 | `gcp_observability_coverage` | Roll up observability signal coverage (metrics, traces, logs, alerts) for Cloud Run services; returns per-service scores and gap recommendations | No |
 | `gcp_export_architecture_graph` | Export a full project-wide architecture graph (Phase 1 + Phase 2): GKE workloads, networking, data stores, supply chain, IAM, and observability. Infers service-to-service edges via K8s spec, IAM bindings, mesh telemetry, and Cloud Trace. Results cached 5 minutes. | No |
+| `gcp_tag_list_resources` | List GCP resources bound to a specific tag key (and optional value) using the Cloud Resource Manager v3 TagBindings API; returns each resource's full name, tag value ID, and namespaced tag name | No |
 
 ### IAM
 
@@ -641,6 +642,17 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 | `roles/monitoring.viewer` | `monitoring` | Metric descriptors and time-series list |
 | `roles/cloudtrace.user` | `monitoring` | Cloud Trace service enumeration (for `gcp_trace_list_services`) |
 | `roles/pubsub.viewer` | `pubsub` | Topic and subscription list/get |
+| `roles/compute.networkViewer` | `networking` | Load balancers, URL maps, NEGs, VPC networks, subnets, PSC endpoints |
+| `roles/apigateway.viewer` | `networking` | API Gateway gateways and API configs |
+| `roles/spanner.viewer` | `datastores` | Spanner instance list |
+| `roles/alloydb.viewer` | `datastores` | AlloyDB cluster list |
+| `roles/datastore.viewer` | `datastores` | Firestore database list |
+| `roles/redis.viewer` | `datastores` | Memorystore (Redis) instance list |
+| `roles/artifactregistry.reader` | `supplychain` | Artifact Registry repository and image list |
+| `roles/cloudbuild.builds.viewer` | `supplychain` | Cloud Build trigger list |
+| `roles/servicedirectory.viewer` | `supplychain` | Service Directory namespace and service list |
+| `roles/iam.serviceAccountViewer` | `iam` | Service account list |
+| `roles/resourcemanager.tagViewer` | `tagging` | Tag binding list (CRM v3) |
 
 **Permissions required for Resources:**
 
@@ -709,7 +721,7 @@ The server runs under a specific service account (Application Default Credential
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
 - **Read-only guarantees**: all 33 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 65 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 66 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -987,7 +999,7 @@ aura-tracker-gcp/
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool + resource + prompt registration
 │       ├── registry.go            # module constants, AllModules, FilteredRegistry
-│       ├── tools/                 # one file per GCP domain (65 tools)
+│       ├── tools/                 # one file per GCP domain (66 tools)
 │       ├── resources/             # MCP Resource handlers (10 resources)
 │       │   ├── resources.go       # constructor types
 │       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)

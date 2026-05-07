@@ -29,6 +29,7 @@ import (
 	"google.golang.org/api/cloudbuild/v1"
 	"google.golang.org/api/cloudfunctions/v1"
 	"google.golang.org/api/cloudresourcemanager/v1"
+	crmv3 "google.golang.org/api/cloudresourcemanager/v3"
 	"google.golang.org/api/cloudtrace/v1"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/firestore/v1"
@@ -138,6 +139,7 @@ type gcpAdapter struct {
 	iamAdminSvc      *iam.Service
 	monitoringSvc    *monitoringv3.Service
 	monitoringV1Svc  *monitoringv1.Service
+	crmV3Svc         *crmv3.Service
 	rec               *recommender.Client
 	enableRecommender bool
 	enabledModules    map[string]bool
@@ -359,6 +361,15 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.crm, err = cloudresourcemanager.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloudresourcemanager client: %w", err)
+		}
+	}
+
+	if needed[clientCRMv3] {
+		httpOpts := make([]option.ClientOption, len(a.clientOpts))
+		copy(httpOpts, a.clientOpts)
+		a.crmV3Svc, err = crmv3.NewService(ctx, httpOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create cloudresourcemanager/v3 client: %w", err)
 		}
 	}
 

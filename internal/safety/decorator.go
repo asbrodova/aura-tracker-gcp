@@ -463,3 +463,7 @@ func (d *SafetyDecorator) GetObservabilityCoverage(ctx context.Context, req mode
 func (d *SafetyDecorator) ExportArchitectureGraph(ctx context.Context, req models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
 	return d.inner.ExportArchitectureGraph(ctx, req)
 }
+
+func (d *SafetyDecorator) ListTaggedResources(ctx context.Context, req models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
+	return d.inner.ListTaggedResources(ctx, req)
+}
