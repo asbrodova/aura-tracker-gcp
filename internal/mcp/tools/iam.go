@@ -134,6 +134,7 @@ func (t *IAMTools) ListServiceAccounts() server.ServerTool {
 // when the caller does not specify an explicit list.
 func defaultPermissionsToCheck() []string {
 	return []string{
+		// Phase 1 — core services
 		"container.clusters.list",
 		"container.clusters.get",
 		"container.clusters.update",
@@ -145,5 +146,30 @@ func defaultPermissionsToCheck() []string {
 		"logging.logEntries.list",
 		"monitoring.timeSeries.list",
 		"resourcemanager.projects.getIamPolicy",
+		// Phase 2 — GKE workloads
+		"container.namespaces.get",
+		// Phase 2 — networking
+		"compute.forwardingRules.list",
+		"compute.networks.list",
+		"compute.subnetworks.list",
+		"compute.networkEndpointGroups.list",
+		// Phase 2 — data stores
+		"spanner.instances.list",
+		"alloydb.clusters.list",
+		"datastore.databases.list",
+		"redis.instances.list",
+		// Phase 2 — supply chain
+		"artifactregistry.repositories.list",
+		"cloudbuild.builds.list",
+		"servicedirectory.namespaces.list",
+		// Phase 2 — IAM
+		"iam.serviceAccounts.list",
+		// Phase 2 — monitoring completions
+		"monitoring.alertPolicies.list",
+		"monitoring.uptimeCheckConfigs.list",
+		// Phase 2 — tagging
+		"resourcemanager.tagBindings.list",
+		// Phase 2 — traces
+		"cloudtrace.traces.list",
 	}
 }

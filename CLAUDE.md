@@ -50,7 +50,7 @@ internal/mcp/  NEVER imports internal/gcp/
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--modules` | *(all)* | Comma-separated list of tool modules to enable: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`. Use `none` for zero tools (resources and prompts remain). Each excluded module also skips its GCP client connection at startup. |
+| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Use `none` for zero tools (resources and prompts remain). Each excluded module also skips its GCP client connection at startup. |
 | `--version` | — | Print version and exit. |
 
 ## README Hygiene
@@ -140,10 +140,7 @@ Custom patterns are appended via the `patterns:` list in the YAML config.
 2. If it needs a GCP service, add a port to `ports/<name>_service.go` and an adapter to `internal/gcp/<name>.go`
 3. Wire the constructor in the `switch anonCfg.Mode` block in `cmd/aura-tracker-gcp/main.go`
 
-## Phase 2 Work (Not Yet Implemented)
+## Notes
 
-`gcp_gke_scale_deployment` currently resizes GKE **node pools** via the GKE management API.
-Scaling individual **Kubernetes Deployments** requires `k8s.io/client-go` (significant dep addition):
-1. `container.GetCluster` to fetch endpoint + CA cert
-2. `golang.org/x/oauth2/google` for access token
-3. `k8s.io/client-go/kubernetes` for `AppsV1().Deployments().Patch()`
+`gcp_gke_scale_deployment` resizes GKE **node pools** via the GKE management API.
+Scaling individual **Kubernetes Deployments** requires `k8s.io/client-go` (significant dep addition) and is not currently implemented.
