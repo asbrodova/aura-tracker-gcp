@@ -459,3 +459,7 @@ func (d *SafetyDecorator) ListTraceDependencyEdges(ctx context.Context, req mode
 func (d *SafetyDecorator) GetObservabilityCoverage(ctx context.Context, req models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error) {
 	return d.inner.GetObservabilityCoverage(ctx, req)
 }
+
+func (d *SafetyDecorator) ExportArchitectureGraph(ctx context.Context, req models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
+	return d.inner.ExportArchitectureGraph(ctx, req)
+}

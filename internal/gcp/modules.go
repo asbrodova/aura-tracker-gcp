@@ -63,6 +63,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"datastores":  {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
 	"supplychain": {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
 	"coverage":    {clientRunSvc, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
+	"archgraph":   {clientRunSvc, clientRunJobs, clientFunctionsV1, clientEventarc, clientScheduler, clientWorkflows, clientWorkflowExec, clientTasks, clientSecretMgr, clientVPCAccess, clientSQLAdmin, clientPubSub, clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore, clientArtifactRegistry, clientCloudBuild, clientServiceDirectory, clientCompute, clientAPIGateway, clientIAMAdmin, clientClusterMgr, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
 	"_resources":  {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
 }
 

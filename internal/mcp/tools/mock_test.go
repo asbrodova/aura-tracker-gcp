@@ -236,3 +236,6 @@ func (m *mockGCPService) ListTraceDependencyEdges(_ context.Context, _ models.Li
 func (m *mockGCPService) GetObservabilityCoverage(_ context.Context, _ models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error) {
 	return models.ObservabilityCoverageResponse{}, nil
 }
+func (m *mockGCPService) ExportArchitectureGraph(_ context.Context, _ models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
+	return models.ServerlessGraph{}, nil
+}
