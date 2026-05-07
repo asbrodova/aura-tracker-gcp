@@ -248,6 +248,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_artifactregistry_list_images",
 		"gcp_cloudbuild_list_triggers",
 		"gcp_servicedirectory_list",
+		"gcp_tag_list_resources",
 	}
 
 	registered := s.ListTools()
@@ -396,4 +397,7 @@ func (m *mockSvc) GetObservabilityCoverage(_ context.Context, _ models.GetObserv
 }
 func (m *mockSvc) ExportArchitectureGraph(_ context.Context, _ models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
 	return models.ServerlessGraph{}, nil
+}
+func (m *mockSvc) ListTaggedResources(_ context.Context, _ models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
+	return models.ListTaggedResourcesResponse{}, nil
 }

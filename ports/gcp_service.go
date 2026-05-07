@@ -94,6 +94,7 @@ type GCPService interface {
 	ListTraceDependencyEdges(ctx context.Context, req models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error)
 	GetObservabilityCoverage(ctx context.Context, req models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error)
 	ExportArchitectureGraph(ctx context.Context, req models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error)
+	ListTaggedResources(ctx context.Context, req models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error)
 
 	// --- IAM ---
 	TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error)

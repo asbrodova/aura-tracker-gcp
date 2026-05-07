@@ -239,3 +239,6 @@ func (m *mockGCPService) GetObservabilityCoverage(_ context.Context, _ models.Ge
 func (m *mockGCPService) ExportArchitectureGraph(_ context.Context, _ models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
 	return models.ServerlessGraph{}, nil
 }
+func (m *mockGCPService) ListTaggedResources(_ context.Context, _ models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
+	return models.ListTaggedResourcesResponse{}, nil
+}
