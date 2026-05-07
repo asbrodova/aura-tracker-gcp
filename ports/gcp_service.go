@@ -92,6 +92,7 @@ type GCPService interface {
 	ListSLOs(ctx context.Context, req models.ListSLOsRequest) (models.ListSLOsResponse, error)
 	ListDashboards(ctx context.Context, req models.ListDashboardsRequest) (models.ListDashboardsResponse, error)
 	ListTraceDependencyEdges(ctx context.Context, req models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error)
+	GetObservabilityCoverage(ctx context.Context, req models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error)
 
 	// --- IAM ---
 	TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error)

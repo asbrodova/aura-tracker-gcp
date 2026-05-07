@@ -224,6 +224,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_monitoring_list_slos",
 		"gcp_monitoring_list_dashboards",
 		"gcp_trace_list_dependency_edges",
+		"gcp_observability_coverage",
 		"gcp_export_serverless_graph",
 		"gcp_gke_list_workloads",
 		"gcp_gke_get_workload_details",
@@ -388,4 +389,7 @@ func (m *mockSvc) ListDashboards(_ context.Context, _ models.ListDashboardsReque
 }
 func (m *mockSvc) ListTraceDependencyEdges(_ context.Context, _ models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
 	return models.ListTraceDependencyEdgesResponse{}, nil
+}
+func (m *mockSvc) GetObservabilityCoverage(_ context.Context, _ models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error) {
+	return models.ObservabilityCoverageResponse{}, nil
 }

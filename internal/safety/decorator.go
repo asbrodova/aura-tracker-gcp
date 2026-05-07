@@ -455,3 +455,7 @@ func (d *SafetyDecorator) ListDashboards(ctx context.Context, req models.ListDas
 func (d *SafetyDecorator) ListTraceDependencyEdges(ctx context.Context, req models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
 	return d.inner.ListTraceDependencyEdges(ctx, req)
 }
+
+func (d *SafetyDecorator) GetObservabilityCoverage(ctx context.Context, req models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error) {
+	return d.inner.GetObservabilityCoverage(ctx, req)
+}
