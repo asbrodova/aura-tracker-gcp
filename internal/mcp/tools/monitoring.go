@@ -33,6 +33,7 @@ func (t *MonitoringTools) GetTools() []server.ServerTool {
 		t.ListUptimeChecks(),
 		t.ListSLOs(),
 		t.ListDashboards(),
+		t.ListTraceDependencyEdges(),
 	}
 }
 
@@ -267,6 +268,43 @@ func (t *MonitoringTools) ListDashboards() server.ServerTool {
 			result, err := mcp.NewToolResultJSON(resp)
 			if err != nil {
 				return nil, fmt.Errorf("gcp_monitoring_list_dashboards: marshal: %w", err)
+			}
+			return result, nil
+		}),
+	}
+}
+
+func (t *MonitoringTools) ListTraceDependencyEdges() server.ServerTool {
+	tool := mcp.NewTool("gcp_trace_list_dependency_edges",
+		mcp.WithDescription(
+			"Infer service-to-service dependency edges from Cloud Trace span parent/child relationships. "+
+				"Scans up to 2000 traces over the lookback window (default 7 days) and returns caller→callee "+
+				"pairs with sample counts. Use the results to build a service dependency graph.",
+		),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithNumber("lookback_hours",
+			mcp.Description("Hours of trace data to scan (1–720). Default: 168 (7 days)."),
+			mcp.Min(1),
+			mcp.Max(720),
+		),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List Trace Dependency Edges",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool: tool,
+		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args models.ListTraceDependencyEdgesRequest) (*mcp.CallToolResult, error) {
+			resp, err := t.svc.ListTraceDependencyEdges(ctx, args)
+			if err != nil {
+				return handleServiceError("gcp_trace_list_dependency_edges", err)
+			}
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_trace_list_dependency_edges: marshal: %w", err)
 			}
 			return result, nil
 		}),

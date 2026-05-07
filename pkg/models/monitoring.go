@@ -111,6 +111,28 @@ type ListDashboardsResponse struct {
 	Dashboards []DashboardSummary `json:"dashboards"`
 }
 
+// TraceDependencyEdge represents a caller→callee relationship inferred from Cloud Trace spans.
+type TraceDependencyEdge struct {
+	Caller     string `json:"caller"`
+	Callee     string `json:"callee"`
+	SampleCount int   `json:"sample_count"`
+}
+
+// ListTraceDependencyEdgesRequest requests trace-derived service dependency edges.
+type ListTraceDependencyEdgesRequest struct {
+	ProjectID     string `json:"project_id"`
+	LookbackHours int    `json:"lookback_hours,omitempty"` // default 168 (7 days)
+}
+
+// ListTraceDependencyEdgesResponse holds the inferred edges.
+type ListTraceDependencyEdgesResponse struct {
+	Edges []TraceDependencyEdge `json:"edges"`
+	// TracesScanned is the number of traces examined.
+	TracesScanned int    `json:"traces_scanned"`
+	LookbackHours int    `json:"lookback_hours"`
+	Backend       string `json:"backend"` // always "trace"
+}
+
 // TraceService represents a service discovered via Cloud Trace.
 type TraceService struct {
 	Name string `json:"name"`

@@ -451,3 +451,7 @@ func (d *SafetyDecorator) ListSLOs(ctx context.Context, req models.ListSLOsReque
 func (d *SafetyDecorator) ListDashboards(ctx context.Context, req models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
 	return d.inner.ListDashboards(ctx, req)
 }
+
+func (d *SafetyDecorator) ListTraceDependencyEdges(ctx context.Context, req models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
+	return d.inner.ListTraceDependencyEdges(ctx, req)
+}

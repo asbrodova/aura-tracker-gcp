@@ -7,7 +7,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **62 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **63 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 62 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 63 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -247,6 +247,7 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | `gcp_monitoring_list_uptime_checks` | List Cloud Monitoring uptime check configurations with period, timeout, and checker type | No |
 | `gcp_monitoring_list_slos` | List Service Level Objectives (SLOs) for monitoring services, with goal and calendar period | No |
 | `gcp_monitoring_list_dashboards` | List Cloud Monitoring dashboards with display name and etag | No |
+| `gcp_trace_list_dependency_edges` | Infer service-to-service dependency edges from Cloud Trace span parent/child relationships (up to 2000 traces, default 7-day lookback) | No |
 
 ### IAM
 
@@ -706,7 +707,7 @@ The server runs under a specific service account (Application Default Credential
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
 - **Read-only guarantees**: all 33 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 62 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 63 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -984,7 +985,7 @@ aura-tracker-gcp/
 │   └── mcp/                       # MCP protocol layer (primary port)
 │       ├── server.go              # tool + resource + prompt registration
 │       ├── registry.go            # module constants, AllModules, FilteredRegistry
-│       ├── tools/                 # one file per GCP domain (62 tools)
+│       ├── tools/                 # one file per GCP domain (63 tools)
 │       ├── resources/             # MCP Resource handlers (10 resources)
 │       │   ├── resources.go       # constructor types
 │       │   ├── bigquery.go        # gcp://{p}/bigquery/... (datasets, tables, schema)

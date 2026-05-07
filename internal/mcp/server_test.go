@@ -223,6 +223,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_monitoring_list_uptime_checks",
 		"gcp_monitoring_list_slos",
 		"gcp_monitoring_list_dashboards",
+		"gcp_trace_list_dependency_edges",
 		"gcp_export_serverless_graph",
 		"gcp_gke_list_workloads",
 		"gcp_gke_get_workload_details",
@@ -384,4 +385,7 @@ func (m *mockSvc) ListSLOs(_ context.Context, _ models.ListSLOsRequest) (models.
 }
 func (m *mockSvc) ListDashboards(_ context.Context, _ models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
 	return models.ListDashboardsResponse{}, nil
+}
+func (m *mockSvc) ListTraceDependencyEdges(_ context.Context, _ models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
+	return models.ListTraceDependencyEdgesResponse{}, nil
 }
