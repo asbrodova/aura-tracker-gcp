@@ -84,6 +84,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewDatastoreTools(svc, log),
 		tools.NewSupplyChainTools(svc, log),
 		tools.NewCoverageTools(svc, log),
+		tools.NewArchGraphTools(svc, log),
 	}
 	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
 		s.AddTools(wrap(t))

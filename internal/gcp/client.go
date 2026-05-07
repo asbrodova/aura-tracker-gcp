@@ -148,6 +148,7 @@ type gcpAdapter struct {
 	clientOpts        []option.ClientOption
 	auraCache         *ttlCache[models.AuraReport]
 	regionsCache      *ttlCache[[]string]
+	graphCache        *ttlCache[models.ServerlessGraph]
 }
 
 // New creates a gcpAdapter, initialises the required GCP SDK clients using
@@ -164,6 +165,7 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		log:          slog.Default(),
 		auraCache:    newTTLCache[models.AuraReport](auraCacheTTL),
 		regionsCache: newTTLCache[[]string](10 * time.Minute),
+		graphCache:   newTTLCache[models.ServerlessGraph](archGraphCacheTTL),
 	}
 	for _, o := range opts {
 		o(a)
