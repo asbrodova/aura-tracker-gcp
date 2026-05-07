@@ -62,6 +62,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"storage":     {clientGCS},
 	"datastores":  {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
 	"supplychain": {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
+	"coverage":    {clientRunSvc, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
 	"_resources":  {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
 }
 

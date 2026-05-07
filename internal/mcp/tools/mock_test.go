@@ -233,3 +233,6 @@ func (m *mockGCPService) ListDashboards(_ context.Context, _ models.ListDashboar
 func (m *mockGCPService) ListTraceDependencyEdges(_ context.Context, _ models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
 	return models.ListTraceDependencyEdgesResponse{}, nil
 }
+func (m *mockGCPService) GetObservabilityCoverage(_ context.Context, _ models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error) {
+	return models.ObservabilityCoverageResponse{}, nil
+}

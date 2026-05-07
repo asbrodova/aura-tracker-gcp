@@ -453,3 +453,6 @@ func (s *stubService) ListDashboards(_ context.Context, _ models.ListDashboardsR
 func (s *stubService) ListTraceDependencyEdges(_ context.Context, _ models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
 	return models.ListTraceDependencyEdgesResponse{}, nil
 }
+func (s *stubService) GetObservabilityCoverage(_ context.Context, _ models.GetObservabilityCoverageRequest) (models.ObservabilityCoverageResponse, error) {
+	return models.ObservabilityCoverageResponse{}, nil
+}
