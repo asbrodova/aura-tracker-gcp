@@ -7,7 +7,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **66 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **67 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -88,7 +88,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 66 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 67 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -111,7 +111,7 @@ Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `sch
 | Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
-| Storage inspection | `storage` | 2 |
+| Storage inspection | `storage` | 3 |
 | Data / logging | `logging,monitoring,iam` | 4 |
 | Full toolkit | *(omit flag)* | 35 |
 
@@ -274,6 +274,7 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 |------|-------------|----------|
 | `gcp_storage_list_buckets` | List all GCS buckets with location, storage class, labels | No |
 | `gcp_storage_get_bucket_metadata` | Versioning, lifecycle rules, uniform access, public access prevention | No |
+| `gcp_storage_list_bucket_objects` | List objects in a GCS bucket with optional prefix filter and configurable limit (max 1000) | No |
 
 ### Data Stores
 
@@ -719,9 +720,9 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **Read-only guarantees**: all 33 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Read-only guarantees**: all 34 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 66 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 67 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -992,7 +993,7 @@ aura-tracker-gcp/
 │   │   ├── aura.go                # GetAuraScore, GetProjectAuraSummary (health + efficiency scoring)
 │   │   ├── serverlessgraph.go     # ExportServerlessGraph (parallel fan-out + edge stitching)
 │   │   ├── bigquery.go            # ListDatasets, ListTables, GetTableSchema
-│   │   ├── storage.go             # ListBuckets, GetBucketMetadata
+│   │   ├── storage.go             # ListBuckets, GetBucketMetadata, ListBucketObjects
 │   │   ├── cache.go               # Generic TTL cache (5-min aura scores, 10-min regions)
 │   │   ├── dlp.go                 # DLPAdapter: GCP DLP client, InspectText
 │   │   └── util.go                # isIteratorDone, isGRPCNotFound helpers

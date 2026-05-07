@@ -116,6 +116,7 @@ type GCPService interface {
 	// --- Cloud Storage (Resources) ---
 	ListBuckets(ctx context.Context, req models.ListBucketsRequest) (models.ListBucketsResponse, error)
 	GetBucketMetadata(ctx context.Context, req models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error)
+	ListBucketObjects(ctx context.Context, req models.ListBucketObjectsRequest) (models.ListBucketObjectsResponse, error)
 
 	// --- Serverless Graph ---
 	ExportServerlessGraph(ctx context.Context, req models.ExportServerlessGraphRequest) (models.ServerlessGraph, error)

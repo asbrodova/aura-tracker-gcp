@@ -104,6 +104,9 @@ func (m *mockGCPService) ListBuckets(_ context.Context, _ models.ListBucketsRequ
 func (m *mockGCPService) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
 	return models.BucketMetadataResponse{}, nil
 }
+func (m *mockGCPService) ListBucketObjects(_ context.Context, _ models.ListBucketObjectsRequest) (models.ListBucketObjectsResponse, error) {
+	return models.ListBucketObjectsResponse{}, nil
+}
 func (m *mockGCPService) ListFunctions(_ context.Context, _ models.ListFunctionsRequest) (models.ListFunctionsResponse, error) {
 	return models.ListFunctionsResponse{}, nil
 }

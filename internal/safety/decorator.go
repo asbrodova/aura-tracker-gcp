@@ -392,6 +392,10 @@ func (d *SafetyDecorator) GetBucketMetadata(ctx context.Context, req models.GetB
 	return d.inner.GetBucketMetadata(ctx, req)
 }
 
+func (d *SafetyDecorator) ListBucketObjects(ctx context.Context, req models.ListBucketObjectsRequest) (models.ListBucketObjectsResponse, error) {
+	return d.inner.ListBucketObjects(ctx, req)
+}
+
 func (d *SafetyDecorator) ExportServerlessGraph(ctx context.Context, req models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
 	return d.inner.ExportServerlessGraph(ctx, req)
 }
