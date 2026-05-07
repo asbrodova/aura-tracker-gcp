@@ -450,3 +450,6 @@ func (s *stubService) ListSLOs(_ context.Context, _ models.ListSLOsRequest) (mod
 func (s *stubService) ListDashboards(_ context.Context, _ models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
 	return models.ListDashboardsResponse{}, nil
 }
+func (s *stubService) ListTraceDependencyEdges(_ context.Context, _ models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
+	return models.ListTraceDependencyEdgesResponse{}, nil
+}

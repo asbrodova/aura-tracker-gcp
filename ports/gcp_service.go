@@ -91,6 +91,7 @@ type GCPService interface {
 	ListUptimeChecks(ctx context.Context, req models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error)
 	ListSLOs(ctx context.Context, req models.ListSLOsRequest) (models.ListSLOsResponse, error)
 	ListDashboards(ctx context.Context, req models.ListDashboardsRequest) (models.ListDashboardsResponse, error)
+	ListTraceDependencyEdges(ctx context.Context, req models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error)
 
 	// --- IAM ---
 	TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error)

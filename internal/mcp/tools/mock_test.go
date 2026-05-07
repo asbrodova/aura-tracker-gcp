@@ -230,3 +230,6 @@ func (m *mockGCPService) ListSLOs(_ context.Context, _ models.ListSLOsRequest) (
 func (m *mockGCPService) ListDashboards(_ context.Context, _ models.ListDashboardsRequest) (models.ListDashboardsResponse, error) {
 	return models.ListDashboardsResponse{}, nil
 }
+func (m *mockGCPService) ListTraceDependencyEdges(_ context.Context, _ models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error) {
+	return models.ListTraceDependencyEdgesResponse{}, nil
+}
