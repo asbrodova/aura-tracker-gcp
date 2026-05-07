@@ -8,7 +8,10 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
-const maxBuckets = 200
+const (
+	maxBuckets       = 200
+	maxBucketObjects = 1000
+)
 
 func (a *gcpAdapter) ListBuckets(ctx context.Context, req models.ListBucketsRequest) (models.ListBucketsResponse, error) {
 	if err := a.rateWait(ctx, "storage.ListBuckets"); err != nil {
@@ -39,6 +42,56 @@ func (a *gcpAdapter) ListBuckets(ctx context.Context, req models.ListBucketsRequ
 		buckets = []models.BucketSummary{}
 	}
 	return models.ListBucketsResponse{ProjectID: req.ProjectID, Buckets: buckets}, nil
+}
+
+func (a *gcpAdapter) ListBucketObjects(ctx context.Context, req models.ListBucketObjectsRequest) (models.ListBucketObjectsResponse, error) {
+	if err := a.rateWait(ctx, "storage.ListBucketObjects"); err != nil {
+		return models.ListBucketObjectsResponse{}, err
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	limit := req.MaxResults
+	if limit <= 0 || limit > maxBucketObjects {
+		limit = maxBucketObjects
+	}
+
+	q := &storage.Query{Prefix: req.Prefix}
+	it := a.gcs.Bucket(req.BucketName).Objects(ctx, q)
+
+	var objects []models.ObjectSummary
+	for len(objects) < limit {
+		attrs, err := it.Next()
+		if err != nil {
+			if isIteratorDone(err) {
+				break
+			}
+			return models.ListBucketObjectsResponse{}, wrapGCPError("storage.ListBucketObjects", err)
+		}
+		objects = append(objects, models.ObjectSummary{
+			Name:         attrs.Name,
+			SizeBytes:    attrs.Size,
+			ContentType:  attrs.ContentType,
+			StorageClass: attrs.StorageClass,
+			Updated:      attrs.Updated.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	truncated := false
+	if len(objects) == limit {
+		if _, err := it.Next(); !isIteratorDone(err) {
+			truncated = true
+		}
+	}
+	if objects == nil {
+		objects = []models.ObjectSummary{}
+	}
+	return models.ListBucketObjectsResponse{
+		BucketName: req.BucketName,
+		Prefix:     req.Prefix,
+		Objects:    objects,
+		Truncated:  truncated,
+	}, nil
 }
 
 func (a *gcpAdapter) GetBucketMetadata(ctx context.Context, req models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {

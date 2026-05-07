@@ -73,6 +73,9 @@ func (m *mockSvc) ListBuckets(_ context.Context, _ models.ListBucketsRequest) (m
 func (m *mockSvc) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
 	return models.BucketMetadataResponse{}, nil
 }
+func (m *mockSvc) ListBucketObjects(_ context.Context, _ models.ListBucketObjectsRequest) (models.ListBucketObjectsResponse, error) {
+	return models.ListBucketObjectsResponse{}, nil
+}
 func (m *mockSvc) ListJobs(_ context.Context, _ models.ListJobsRequest) (models.ListJobsResponse, error) {
 	return models.ListJobsResponse{}, nil
 }
@@ -206,6 +209,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_project_aura_summary",
 		"gcp_storage_list_buckets",
 		"gcp_storage_get_bucket_metadata",
+		"gcp_storage_list_bucket_objects",
 		"gcp_functions_list",
 		"gcp_functions_get_details",
 		"gcp_eventarc_list_triggers",
