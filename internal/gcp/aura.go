@@ -201,7 +201,8 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 			`run.googleapis.com/request_count`,
 			baseFilter+` AND metric.labels.response_code_class = "5xx"`, 60)
 		if err != nil {
-			return err
+			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "error_count_5xx", "err", err)
+			return nil
 		}
 		errCount5xx = v
 		return nil
@@ -211,17 +212,21 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 			`run.googleapis.com/request_count`,
 			baseFilter, 60)
 		if err != nil {
-			return err
+			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "request_count_total", "err", err)
+			return nil
 		}
 		totalCount = v
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		// cpu/utilizations is a DELTA DISTRIBUTION metric; ALIGN_MEAN is rejected by the
+		// Monitoring API. Use p50 (median) to get a representative utilization value.
+		v, err := a.fetchPercentileMetric(gctx, projectID,
 			`run.googleapis.com/container/cpu/utilizations`,
-			baseFilter, 60)
+			baseFilter, 50, 60)
 		if err != nil {
-			return err
+			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "cpu_util", "err", err)
+			return nil
 		}
 		cpuUtil = v
 		return nil
@@ -231,7 +236,8 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 			`run.googleapis.com/request_latencies`,
 			baseFilter, 99, 60)
 		if err != nil {
-			return err
+			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "latency_p99", "err", err)
+			return nil
 		}
 		latencyP99 = v
 		return nil
@@ -578,10 +584,18 @@ func (a *gcpAdapter) fetchRateMetric(ctx context.Context, projectID, metricType,
 	return a.fetchMetricPoint(ctx, projectID, metricType, filter, lookbackMinutes, monitoringpb.Aggregation_ALIGN_RATE)
 }
 
-// fetchPercentileMetric returns a per-series percentile-aligned point. Only the p99
-// aligner is used (ALIGN_PERCENTILE_99). The result is the mean across all series.
-func (a *gcpAdapter) fetchPercentileMetric(ctx context.Context, projectID, metricType, filter string, _ int, lookbackMinutes int) (float64, error) {
-	return a.fetchMetricPoint(ctx, projectID, metricType, filter, lookbackMinutes, monitoringpb.Aggregation_ALIGN_PERCENTILE_99)
+// fetchPercentileMetric returns a per-series percentile-aligned point.
+// Supported percentiles: 50, 95, 99 (anything else defaults to p99).
+// The result is the mean across all series.
+func (a *gcpAdapter) fetchPercentileMetric(ctx context.Context, projectID, metricType, filter string, percentile int, lookbackMinutes int) (float64, error) {
+	aligner := monitoringpb.Aggregation_ALIGN_PERCENTILE_99
+	switch percentile {
+	case 50:
+		aligner = monitoringpb.Aggregation_ALIGN_PERCENTILE_50
+	case 95:
+		aligner = monitoringpb.Aggregation_ALIGN_PERCENTILE_95
+	}
+	return a.fetchMetricPoint(ctx, projectID, metricType, filter, lookbackMinutes, aligner)
 }
 
 func (a *gcpAdapter) fetchMetricPoint(ctx context.Context, projectID, metricType, filter string, lookbackMinutes int, aligner monitoringpb.Aggregation_Aligner) (float64, error) {
