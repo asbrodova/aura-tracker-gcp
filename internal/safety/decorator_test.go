@@ -106,6 +106,9 @@ func (s *stubService) ListBuckets(_ context.Context, _ models.ListBucketsRequest
 func (s *stubService) GetBucketMetadata(_ context.Context, _ models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error) {
 	return models.BucketMetadataResponse{}, nil
 }
+func (s *stubService) ListBucketObjects(_ context.Context, _ models.ListBucketObjectsRequest) (models.ListBucketObjectsResponse, error) {
+	return models.ListBucketObjectsResponse{}, nil
+}
 func (s *stubService) ListJobs(_ context.Context, _ models.ListJobsRequest) (models.ListJobsResponse, error) {
 	return models.ListJobsResponse{}, nil
 }

@@ -28,6 +28,7 @@ func (t *StorageTools) GetTools() []server.ServerTool {
 	return []server.ServerTool{
 		t.ListBuckets(),
 		t.GetBucketMetadata(),
+		t.ListBucketObjects(),
 	}
 }
 
@@ -90,6 +91,40 @@ func (t *StorageTools) getBucketMetadataHandler(ctx context.Context, _ mcp.CallT
 	result, err := mcp.NewToolResultJSON(resp)
 	if err != nil {
 		return nil, fmt.Errorf("gcp_storage_get_bucket_metadata: marshal: %w", err)
+	}
+	return result, nil
+}
+
+func (t *StorageTools) ListBucketObjects() server.ServerTool {
+	tool := mcp.NewTool("gcp_storage_list_bucket_objects",
+		mcp.WithDescription("List objects in a GCS bucket. Supports optional prefix filtering and a configurable result limit (max 1000)."),
+		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("bucket_name", mcp.Required(), mcp.Description("Bucket name")),
+		mcp.WithString("prefix", mcp.Description("Filter objects by name prefix (e.g. \"images/\")")),
+		mcp.WithNumber("max_results", mcp.Description("Maximum number of objects to return (default 1000, max 1000)")),
+		mcp.WithToolAnnotation(mcp.ToolAnnotation{
+			Title:           "List GCS Bucket Objects",
+			ReadOnlyHint:    boolPtr(true),
+			DestructiveHint: boolPtr(false),
+			IdempotentHint:  boolPtr(true),
+			OpenWorldHint:   boolPtr(true),
+		}),
+	)
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: mcp.NewTypedToolHandler(t.listBucketObjectsHandler),
+	}
+}
+
+func (t *StorageTools) listBucketObjectsHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ListBucketObjectsRequest) (*mcp.CallToolResult, error) {
+	t.log.InfoContext(ctx, "gcp_storage_list_bucket_objects", "project", args.ProjectID, "bucket", args.BucketName, "prefix", args.Prefix)
+	resp, err := t.svc.ListBucketObjects(ctx, args)
+	if err != nil {
+		return handleServiceError("gcp_storage_list_bucket_objects", err)
+	}
+	result, err := mcp.NewToolResultJSON(resp)
+	if err != nil {
+		return nil, fmt.Errorf("gcp_storage_list_bucket_objects: marshal: %w", err)
 	}
 	return result, nil
 }

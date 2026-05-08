@@ -22,6 +22,28 @@ type GetBucketMetadataRequest struct {
 	BucketName string `json:"bucket_name"`
 }
 
+type ListBucketObjectsRequest struct {
+	ProjectID  string `json:"project_id"`
+	BucketName string `json:"bucket_name"`
+	Prefix     string `json:"prefix,omitempty"`
+	MaxResults int    `json:"max_results,omitempty"`
+}
+
+type ObjectSummary struct {
+	Name         string `json:"name"`
+	SizeBytes    int64  `json:"size_bytes"`
+	ContentType  string `json:"content_type"`
+	StorageClass string `json:"storage_class"`
+	Updated      string `json:"updated"`
+}
+
+type ListBucketObjectsResponse struct {
+	BucketName string          `json:"bucket_name"`
+	Prefix     string          `json:"prefix,omitempty"`
+	Objects    []ObjectSummary `json:"objects"`
+	Truncated  bool            `json:"truncated"`
+}
+
 type BucketMetadataResponse struct {
 	Name                     string            `json:"name"`
 	Location                 string            `json:"location"`
