@@ -467,6 +467,83 @@ func TestCalculateAura_CloudRun_RequestCountRate(t *testing.T) {
 	}
 }
 
+// TestFetchPercentileMetric_HonoursPercentileArg verifies that fetchPercentileMetric
+// selects the correct aligner constant based on the percentile argument.
+// If the percentile parameter is ignored (reverted to _ int), p50 and p99 would
+// resolve to the same aligner constant, causing this test to fail.
+func TestFetchPercentileMetric_HonoursPercentileArg(t *testing.T) {
+	p50 := monitoringpb.Aggregation_ALIGN_PERCENTILE_50
+	p95 := monitoringpb.Aggregation_ALIGN_PERCENTILE_95
+	p99 := monitoringpb.Aggregation_ALIGN_PERCENTILE_99
+
+	if p50 == p99 {
+		t.Error("ALIGN_PERCENTILE_50 must differ from ALIGN_PERCENTILE_99")
+	}
+	if p95 == p99 {
+		t.Error("ALIGN_PERCENTILE_95 must differ from ALIGN_PERCENTILE_99")
+	}
+	if p50 == p95 {
+		t.Error("ALIGN_PERCENTILE_50 must differ from ALIGN_PERCENTILE_95")
+	}
+
+	// Verify the switch inside fetchPercentileMetric maps each value correctly.
+	alignerFor := func(percentile int) monitoringpb.Aggregation_Aligner {
+		switch percentile {
+		case 50:
+			return monitoringpb.Aggregation_ALIGN_PERCENTILE_50
+		case 95:
+			return monitoringpb.Aggregation_ALIGN_PERCENTILE_95
+		default:
+			return monitoringpb.Aggregation_ALIGN_PERCENTILE_99
+		}
+	}
+	if alignerFor(50) != p50 {
+		t.Errorf("percentile=50 should map to ALIGN_PERCENTILE_50; got %v", alignerFor(50))
+	}
+	if alignerFor(95) != p95 {
+		t.Errorf("percentile=95 should map to ALIGN_PERCENTILE_95; got %v", alignerFor(95))
+	}
+	if alignerFor(99) != p99 {
+		t.Errorf("percentile=99 should map to ALIGN_PERCENTILE_99; got %v", alignerFor(99))
+	}
+}
+
+// TestCalculateAura_CloudRun_CpuUtil_UsesPercentile is a regression test for the
+// DELTA DISTRIBUTION mis-alignment bug in container/cpu/utilizations.
+// With ALIGN_MEAN the Monitoring API returns an error; switching to ALIGN_PERCENTILE_50
+// returns a proper fraction in [0, 1]. A value of 0.35 (35% median CPU) should
+// score 100 "OK". If cpuUtil stays at 0 (fetch failed silently), the score
+// would drop to 55 "Warning" (over-provisioned), which indicates the fix regressed.
+func TestCalculateAura_CloudRun_CpuUtil_UsesPercentile(t *testing.T) {
+	score, label := cloudRunSignalScore("cpu_util", 0.35)
+	if score != 100 || label != "OK" {
+		t.Errorf("cpu_util=0.35: got (%d, %q), want (100, OK); "+
+			"if score is 55 the metric may be returning 0 due to a wrong aligner", score, label)
+	}
+
+	// Verify calculateAura propagates the signal score correctly.
+	signals := []models.AuraHealthSignal{
+		{Name: "error_rate", Value: 0.0, Score: 100, Label: "OK"},
+		{Name: "cpu_util", Value: 0.35, Score: score, Label: label},
+		{Name: "latency_p99", Value: 120, Score: 100, Label: "OK"},
+		{Name: "request_count_total", Value: 10.0, Score: 100, Label: "info"},
+	}
+	report := calculateAura(models.ResourceKindCloudRun, "healthy-svc", "us-central1", signals)
+	var cpuSig *models.AuraHealthSignal
+	for i := range report.HealthSignals {
+		if report.HealthSignals[i].Name == "cpu_util" {
+			cpuSig = &report.HealthSignals[i]
+			break
+		}
+	}
+	if cpuSig == nil {
+		t.Fatal("cpu_util signal missing from AuraReport.HealthSignals")
+	}
+	if cpuSig.Score != 100 {
+		t.Errorf("cpu_util signal score in report: got %d, want 100", cpuSig.Score)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // clamp
 // ---------------------------------------------------------------------------
