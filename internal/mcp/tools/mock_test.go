@@ -89,6 +89,12 @@ func (m *mockGCPService) GetAuraScore(_ context.Context, _ models.GetAuraScoreRe
 func (m *mockGCPService) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
 	return models.ProjectAuraSummaryResponse{}, nil
 }
+func (m *mockGCPService) GetGKEAuraScore(_ context.Context, _ models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error) {
+	return models.GKEAuraReport{}, nil
+}
+func (m *mockGCPService) GetGCSAuraScore(_ context.Context, _ models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error) {
+	return models.GCSAuraReport{}, nil
+}
 func (m *mockGCPService) ListDatasets(_ context.Context, _ models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
 	return models.ListDatasetsResponse{}, nil
 }

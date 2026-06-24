@@ -51,6 +51,10 @@ func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRe
 		signals, err = a.fetchBigQuerySignals(ctx, req.ProjectID, req.ResourceName)
 	case models.ResourceKindGKE:
 		signals, err = a.fetchGKESignals(ctx, req.ProjectID, req.ResourceName, req.Region)
+	case models.ResourceKindGCS:
+		var details models.GCSAuraDetails
+		signals, details, err = a.fetchGCSSignals(ctx, req.ProjectID, req.ResourceName)
+		_ = details // generic path discards extra fields
 	default:
 		return models.AuraReport{}, fmt.Errorf("aura.GetAuraScore: unsupported resource_kind %q", req.ResourceKind)
 	}
@@ -509,6 +513,213 @@ func (a *gcpAdapter) fetchGKESignals(ctx context.Context, projectID, clusterName
 	}, nil
 }
 
+// fetchGKESignalsRich fans out 5 goroutines: the 3 metric fetches from
+// fetchGKESignals, plus GetCluster (for node-pool autoscaling details) and
+// GetServerConfig (for release-channel version drift). Both cluster API calls
+// are non-fatal — on error they log a warning and fall back to safe defaults.
+func (a *gcpAdapter) fetchGKESignalsRich(ctx context.Context, projectID, clusterName, location string) (
+	[]models.AuraHealthSignal, []models.NodePoolAudit, models.GKEVersionDrift, error,
+) {
+	clusterFilter := fmt.Sprintf(`resource.labels.cluster_name = "%s" AND resource.labels.location = "%s"`, clusterName, location)
+
+	var nodeCPU, nodeMem, restartRate float64
+	var ctrlHealth float64 = 1.0
+	var pools []models.NodePoolAudit
+	var channelName, currentVersion string
+	var serverChannels map[string]string // channel name → latest default version
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		v, err := a.fetchMeanMetric(gctx, projectID, `kubernetes.io/node/cpu/allocatable_utilization`, clusterFilter, 60)
+		if err != nil {
+			return err
+		}
+		nodeCPU = v
+		return nil
+	})
+	g.Go(func() error {
+		v, err := a.fetchMeanMetric(gctx, projectID, `kubernetes.io/node/memory/allocatable_utilization`, clusterFilter, 60)
+		if err != nil {
+			return err
+		}
+		nodeMem = v
+		return nil
+	})
+	g.Go(func() error {
+		v, err := a.fetchRateMetric(gctx, projectID, `kubernetes.io/container/restart_count`, clusterFilter, 60)
+		if err != nil {
+			return err
+		}
+		restartRate = v
+		return nil
+	})
+	g.Go(func() error {
+		if a.clusterMgr == nil {
+			return nil
+		}
+		clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", projectID, location, clusterName)
+		c, err := a.clusterMgr.GetCluster(gctx, &containerpb.GetClusterRequest{Name: clusterPath})
+		if err != nil {
+			a.log.WarnContext(gctx, "aura: GKE GetCluster failed in rich fetch", "cluster", clusterName, "err", err)
+			return nil
+		}
+		switch c.Status {
+		case containerpb.Cluster_RUNNING:
+			ctrlHealth = 1.0
+		case containerpb.Cluster_RECONCILING, containerpb.Cluster_PROVISIONING:
+			ctrlHealth = 0.5
+		default:
+			ctrlHealth = 0.0
+		}
+		currentVersion = c.CurrentMasterVersion
+		if c.ReleaseChannel != nil {
+			channelName = c.ReleaseChannel.Channel.String()
+		}
+		for _, np := range c.NodePools {
+			audit := models.NodePoolAudit{
+				Name:             np.Name,
+				InitialNodeCount: np.InitialNodeCount,
+			}
+			if np.Autoscaling != nil {
+				audit.AutoscalingEnabled = np.Autoscaling.Enabled
+				audit.MinNodeCount = np.Autoscaling.MinNodeCount
+				audit.MaxNodeCount = np.Autoscaling.MaxNodeCount
+				if audit.AutoscalingEnabled && audit.MaxNodeCount > 0 {
+					audit.AtMaxCapacity = np.InitialNodeCount >= audit.MaxNodeCount
+				}
+			}
+			if np.Management != nil {
+				audit.AutoRepair = np.Management.AutoRepair
+				audit.AutoUpgrade = np.Management.AutoUpgrade
+			}
+			pools = append(pools, audit)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		if a.clusterMgr == nil {
+			return nil
+		}
+		cfg, err := a.clusterMgr.GetServerConfig(gctx, &containerpb.GetServerConfigRequest{
+			Name: fmt.Sprintf("projects/%s/locations/%s", projectID, location),
+		})
+		if err != nil {
+			a.log.WarnContext(gctx, "aura: GKE GetServerConfig failed", "location", location, "err", err)
+			return nil
+		}
+		m := make(map[string]string, len(cfg.Channels))
+		for _, ch := range cfg.Channels {
+			m[ch.Channel.String()] = ch.DefaultVersion
+		}
+		serverChannels = m
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, nil, models.GKEVersionDrift{}, err
+	}
+
+	latestVersion := serverChannels[channelName]
+	vd := models.GKEVersionDrift{
+		Channel:        channelName,
+		CurrentVersion: currentVersion,
+		LatestVersion:  latestVersion,
+		IsCurrent:      latestVersion == "" || latestVersion == currentVersion,
+	}
+	driftScore, driftLabel := gkeVersionDriftScore(currentVersion, latestVersion)
+
+	// Autoscaling efficiency: inject boolean sentinel signals only when a problem exists.
+	// These are read by weightedScores to apply efficiency deductions without affecting
+	// the health weighted average (they have no health weight).
+	anyAutoscalingDisabled := false
+	anyAtMax := false
+	for _, p := range pools {
+		if !strings.HasPrefix(p.Name, "default-pool") || len(pools) == 1 {
+			if !p.AutoscalingEnabled {
+				anyAutoscalingDisabled = true
+			}
+		}
+		if p.AtMaxCapacity {
+			anyAtMax = true
+		}
+	}
+
+	cpuScore, cpuLabel := gkeSignalScore("node_cpu_util", nodeCPU)
+	memScore, memLabel := gkeSignalScore("node_mem_util", nodeMem)
+	restartScore, restartLabel := gkeSignalScore("pod_restart_rate", restartRate)
+	ctrlScore, ctrlLabel := gkeSignalScore("control_plane_health", ctrlHealth)
+
+	signals := []models.AuraHealthSignal{
+		{Name: "node_cpu_util", Value: round4(nodeCPU), Score: cpuScore, Label: cpuLabel},
+		{Name: "node_mem_util", Value: round4(nodeMem), Score: memScore, Label: memLabel},
+		{Name: "pod_restart_rate", Value: round4(restartRate), Score: restartScore, Label: restartLabel},
+		{Name: "control_plane_health", Value: ctrlHealth, Score: ctrlScore, Label: ctrlLabel},
+		{Name: "version_drift", Value: boolToFloat(vd.IsCurrent), Score: driftScore, Label: driftLabel},
+	}
+	if anyAutoscalingDisabled {
+		signals = append(signals, models.AuraHealthSignal{Name: "autoscaling_disabled", Value: 1.0, Score: 0, Label: "Warning"})
+	}
+	if anyAtMax {
+		signals = append(signals, models.AuraHealthSignal{Name: "nodepool_at_max", Value: 1.0, Score: 0, Label: "Warning"})
+	}
+	return signals, pools, vd, nil
+}
+
+// GetGKEAuraScore returns a rich GKE Aura Score including node-pool autoscaling
+// audit and version-drift analysis. Results are not cached (use for fresh deep-dives).
+func (a *gcpAdapter) GetGKEAuraScore(ctx context.Context, req models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error) {
+	if err := a.rateWait(ctx, "aura.GetGKEAuraScore"); err != nil {
+		return models.GKEAuraReport{}, err
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	signals, pools, vd, err := a.fetchGKESignalsRich(ctx, req.ProjectID, req.ClusterName, req.Location)
+	if err != nil {
+		return models.GKEAuraReport{}, wrapGCPError("aura.GetGKEAuraScore", err)
+	}
+	base := calculateAura(models.ResourceKindGKE, req.ClusterName, req.Location, signals)
+	return models.GKEAuraReport{AuraReport: base, NodePools: pools, VersionDrift: vd}, nil
+}
+
+// gkeVersionDriftScore maps the gap between a cluster's current master version and the
+// channel's latest default version to a 0-100 score using GKE minor-version distance.
+func gkeVersionDriftScore(current, latest string) (int, string) {
+	if latest == "" || current == "" || current == latest {
+		return 100, "OK"
+	}
+	curMinor := parseGKEMinorVersion(current)
+	latMinor := parseGKEMinorVersion(latest)
+	diff := latMinor - curMinor
+	switch {
+	case diff <= 0:
+		return 100, "OK"
+	case diff == 1:
+		return 70, "Warning"
+	default:
+		return 20, "Critical"
+	}
+}
+
+// parseGKEMinorVersion extracts the minor version integer from a GKE version string
+// such as "1.29.4-gke.100". Returns 0 when the string cannot be parsed.
+func parseGKEMinorVersion(v string) int {
+	// Format: MAJOR.MINOR.PATCH[-gke.BUILD]
+	parts := strings.SplitN(v, ".", 3)
+	if len(parts) < 2 {
+		return 0
+	}
+	minor := 0
+	for _, ch := range parts[1] {
+		if ch < '0' || ch > '9' {
+			break
+		}
+		minor = minor*10 + int(ch-'0')
+	}
+	return minor
+}
+
 // gkeSignalScore returns (score 0-100, label) for a single GKE health signal.
 func gkeSignalScore(name string, value float64) (int, string) {
 	switch name {
@@ -807,17 +1018,54 @@ func weightedScores(kind models.ResourceKind, signals []models.AuraHealthSignal)
 		memScore := byName["node_mem_util"]
 		restartScore := byName["pod_restart_rate"]
 		ctrlScore := byName["control_plane_health"]
-		health := int(math.Round(
-			float64(cpuScore)*0.35 +
-				float64(memScore)*0.35 +
-				float64(restartScore)*0.20 +
-				float64(ctrlScore)*0.10,
-		))
+
+		var health int
+		if driftScore, ok := byName["version_drift"]; ok {
+			// Rich path (5 health signals from fetchGKESignalsRich).
+			health = int(math.Round(
+				float64(cpuScore)*0.25 +
+					float64(memScore)*0.25 +
+					float64(restartScore)*0.20 +
+					float64(ctrlScore)*0.20 +
+					float64(driftScore)*0.10,
+			))
+		} else {
+			// Legacy 4-signal path (fetchGKESignals via generic GetAuraScore).
+			health = int(math.Round(
+				float64(cpuScore)*0.35 +
+					float64(memScore)*0.35 +
+					float64(restartScore)*0.20 +
+					float64(ctrlScore)*0.10,
+			))
+		}
 
 		eff := 90
 		if signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
 			eff = 40 // cluster is idle / over-provisioned
 		}
+		if _, ok := byName["autoscaling_disabled"]; ok {
+			eff = min(eff, 65)
+		}
+		if _, ok := byName["nodepool_at_max"]; ok {
+			eff = min(eff, 75)
+		}
+		return clamp(health), clamp(eff)
+
+	case models.ResourceKindGCS:
+		papScore := byName["public_access_prevention"]
+		ublaScore := byName["uniform_bucket_level_access"]
+		verScore := byName["versioning"]
+		lcScore := byName["lifecycle_policy"]
+		clsScore := byName["storage_class_fit"]
+
+		// Health = security posture: PAP 45%, UBLA 35%, versioning 20%.
+		health := int(math.Round(
+			float64(papScore)*0.45 + float64(ublaScore)*0.35 + float64(verScore)*0.20,
+		))
+		// Efficiency = cost optimisation: lifecycle 60%, storage class fit 40%.
+		eff := int(math.Round(
+			float64(lcScore)*0.60 + float64(clsScore)*0.40,
+		))
 		return clamp(health), clamp(eff)
 	}
 
@@ -983,6 +1231,18 @@ func auraLabel(score int, signals []models.AuraHealthSignal, kind models.Resourc
 		}
 	}
 
+	// GCS-specific labels.
+	if kind == models.ResourceKindGCS {
+		switch band {
+		case models.AuraBandGreen:
+			return "Secure & Optimized"
+		case models.AuraBandYellow:
+			return "Review Needed"
+		default:
+			return "Security Risk"
+		}
+	}
+
 	// GKE-specific labels.
 	if kind == models.ResourceKindGKE {
 		if signalValue(signals, "control_plane_health") < 0.5 {
@@ -1121,6 +1381,29 @@ func buildReasons(kind models.ResourceKind, signals []models.AuraHealthSignal) [
 		if cpu < 0.10 && mem < 0.10 {
 			reasons = append(reasons, fmt.Sprintf("Node CPU %.0f%% and memory %.0f%% — cluster is idle; consider scaling down node pools to reduce cost", cpu*100, mem*100))
 		}
+		if hasSignal(signals, "autoscaling_disabled") {
+			reasons = append(reasons, "One or more node pools have autoscaling disabled — enable cluster autoscaler to right-size node capacity automatically")
+		}
+		if hasSignal(signals, "nodepool_at_max") {
+			reasons = append(reasons, "A node pool is at its maximum autoscaling capacity — increase max node count or add a new pool to absorb demand")
+		}
+		if driftS := signalByName(signals, "version_drift"); driftS != nil && driftS.Label != "OK" {
+			reasons = append(reasons, "Cluster master version lags the channel's latest release — upgrade to reduce security exposure and access new features")
+		}
+
+	case models.ResourceKindGCS:
+		if signalValue(signals, "public_access_prevention") < 1.0 {
+			reasons = append(reasons, "Public access prevention is not enforced — set publicAccessPrevention to 'enforced' to block all public ACLs")
+		}
+		if signalValue(signals, "uniform_bucket_level_access") < 1.0 {
+			reasons = append(reasons, "Uniform bucket-level access is disabled — legacy ACLs may bypass IAM policies; enable UBLA for uniform access control")
+		}
+		if signalValue(signals, "lifecycle_policy") == 0 {
+			reasons = append(reasons, "No lifecycle management rules — add transition rules to NEARLINE/COLDLINE/ARCHIVE to reduce long-term storage costs")
+		}
+		if signalValue(signals, "versioning") < 1.0 {
+			reasons = append(reasons, "Object versioning is disabled — enable it to protect against accidental deletes and overwrites")
+		}
 	}
 
 	if len(reasons) == 0 {
@@ -1143,6 +1426,8 @@ func kindLabel(k models.ResourceKind) string {
 		return "BigQuery"
 	case models.ResourceKindGKE:
 		return "GKE Cluster"
+	case models.ResourceKindGCS:
+		return "GCS Bucket"
 	default:
 		return string(k)
 	}
@@ -1195,4 +1480,125 @@ func clamp(v int) int {
 
 func round4(v float64) float64 {
 	return math.Round(v*10000) / 10000
+}
+
+func boolToFloat(b bool) float64 {
+	if b {
+		return 1.0
+	}
+	return 0.0
+}
+
+// ---------------------------------------------------------------------------
+// GCS scoring
+// ---------------------------------------------------------------------------
+
+// fetchGCSSignals reuses the existing GetBucketMetadata adapter method to build
+// the signal slice for GCS Aura scoring. No new SDK code required.
+func (a *gcpAdapter) fetchGCSSignals(ctx context.Context, projectID, bucketName string) (
+	[]models.AuraHealthSignal, models.GCSAuraDetails, error,
+) {
+	meta, err := a.GetBucketMetadata(ctx, models.GetBucketMetadataRequest{
+		ProjectID:  projectID,
+		BucketName: bucketName,
+	})
+	if err != nil {
+		return nil, models.GCSAuraDetails{}, err
+	}
+
+	details := models.GCSAuraDetails{
+		UniformBucketLevelAccess: meta.UniformBucketLevelAccess,
+		PublicAccessPrevention:   meta.PublicAccessPrevention,
+		VersioningEnabled:        meta.VersioningEnabled,
+		LifecycleRuleCount:       meta.LifecycleRuleCount,
+		StorageClass:             meta.StorageClass,
+	}
+
+	papVal := boolToFloat(meta.PublicAccessPrevention == "enforced")
+	ublaVal := boolToFloat(meta.UniformBucketLevelAccess)
+	verVal := boolToFloat(meta.VersioningEnabled)
+	lcVal := float64(meta.LifecycleRuleCount)
+
+	papScore, papLabel := gcsSignalScore("public_access_prevention", papVal)
+	ublaScore, ublaLabel := gcsSignalScore("uniform_bucket_level_access", ublaVal)
+	verScore, verLabel := gcsSignalScore("versioning", verVal)
+	lcScore, lcLabel := gcsSignalScore("lifecycle_policy", lcVal)
+	clsScore, clsLabel := gcsStorageClassScore(meta.StorageClass, meta.LifecycleRuleCount > 0)
+
+	signals := []models.AuraHealthSignal{
+		{Name: "public_access_prevention", Value: papVal, Score: papScore, Label: papLabel},
+		{Name: "uniform_bucket_level_access", Value: ublaVal, Score: ublaScore, Label: ublaLabel},
+		{Name: "versioning", Value: verVal, Score: verScore, Label: verLabel},
+		{Name: "lifecycle_policy", Value: lcVal, Score: lcScore, Label: lcLabel},
+		{Name: "storage_class_fit", Value: 0, Score: clsScore, Label: clsLabel},
+	}
+	return signals, details, nil
+}
+
+// GetGCSAuraScore returns a security- and cost-focused Aura Score for a single GCS bucket.
+func (a *gcpAdapter) GetGCSAuraScore(ctx context.Context, req models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error) {
+	if err := a.rateWait(ctx, "aura.GetGCSAuraScore"); err != nil {
+		return models.GCSAuraReport{}, err
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	signals, details, err := a.fetchGCSSignals(ctx, req.ProjectID, req.BucketName)
+	if err != nil {
+		return models.GCSAuraReport{}, wrapGCPError("aura.GetGCSAuraScore", err)
+	}
+	base := calculateAura(models.ResourceKindGCS, req.BucketName, "", signals)
+	posture := gcsSecurityPosture(details.UniformBucketLevelAccess, details.PublicAccessPrevention)
+	return models.GCSAuraReport{AuraReport: base, SecurityPosture: posture, Details: details}, nil
+}
+
+func gcsSignalScore(name string, value float64) (int, string) {
+	switch name {
+	case "public_access_prevention":
+		if value == 1.0 {
+			return 100, "OK"
+		}
+		return 15, "Critical"
+	case "uniform_bucket_level_access":
+		if value == 1.0 {
+			return 100, "OK"
+		}
+		return 30, "Warning"
+	case "versioning":
+		if value == 1.0 {
+			return 100, "OK"
+		}
+		return 50, "Warning"
+	case "lifecycle_policy":
+		if value > 0 {
+			return 100, "OK"
+		}
+		return 25, "Warning"
+	}
+	return 100, "OK"
+}
+
+func gcsStorageClassScore(class string, hasLifecycle bool) (int, string) {
+	switch class {
+	case "NEARLINE", "COLDLINE", "ARCHIVE":
+		return 100, "OK" // explicitly cost-optimised archival class
+	case "STANDARD", "MULTI_REGIONAL", "REGIONAL":
+		if hasLifecycle {
+			return 90, "OK"
+		}
+		return 40, "Warning" // standard storage with no transition rules = likely over-paying
+	}
+	return 70, "OK" // unknown class — neutral
+}
+
+func gcsSecurityPosture(ubla bool, pap string) models.GCSSecurityPosture {
+	enforced := pap == "enforced"
+	switch {
+	case enforced && ubla:
+		return models.GCSPostureCompliant
+	case !enforced && !ubla:
+		return models.GCSPostureCritical
+	default:
+		return models.GCSPostureAtRisk
+	}
 }
