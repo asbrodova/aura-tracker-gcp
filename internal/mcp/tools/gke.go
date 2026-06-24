@@ -14,11 +14,11 @@ import (
 
 // GKETools provides MCP tool definitions and handlers for GKE operations.
 type GKETools struct {
-	svc ports.GCPService
+	svc ports.GKEService
 	log *slog.Logger
 }
 
-func NewGKETools(svc ports.GCPService, log *slog.Logger) *GKETools {
+func NewGKETools(svc ports.GKEService, log *slog.Logger) *GKETools {
 	return &GKETools{svc: svc, log: log}
 }
 

@@ -49,7 +49,7 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 			return nil
 		})
 	}
-	g.Wait()
+	_ = g.Wait()
 
 	if triggers == nil {
 		triggers = []models.TriggerSummary{}

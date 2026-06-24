@@ -14,11 +14,11 @@ import (
 
 // AuraTools provides MCP tool definitions and handlers for Aura Score operations.
 type AuraTools struct {
-	svc ports.GCPService
+	svc ports.AuraService
 	log *slog.Logger
 }
 
-func NewAuraTools(svc ports.GCPService, log *slog.Logger) *AuraTools {
+func NewAuraTools(svc ports.AuraService, log *slog.Logger) *AuraTools {
 	return &AuraTools{svc: svc, log: log}
 }
 

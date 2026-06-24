@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/asbrodova/aura-tracker-gcp/internal/gcp"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
@@ -80,7 +79,7 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 	if req.ConfirmPlanID != "" {
 		raw, ok := d.store.take(req.ConfirmPlanID)
 		if !ok {
-			return models.ScaleDeploymentResponse{}, &gcp.ConfirmationRequiredError{
+			return models.ScaleDeploymentResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
 				Message: fmt.Sprintf(
 					"plan_id %q not found or expired (TTL=%s). Run with dry_run=true first.",
@@ -113,7 +112,7 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 	}
 
 	// Path 3: neither flag — block with actionable instructions.
-	return models.ScaleDeploymentResponse{}, &gcp.ConfirmationRequiredError{
+	return models.ScaleDeploymentResponse{}, &ports.ConfirmationRequiredError{
 		Op: op,
 		Message: fmt.Sprintf(
 			"mutations require two-step confirmation. "+
@@ -156,7 +155,7 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 	if req.ConfirmPlanID != "" {
 		raw, ok := d.store.take(req.ConfirmPlanID)
 		if !ok {
-			return models.UpdateTrafficResponse{}, &gcp.ConfirmationRequiredError{
+			return models.UpdateTrafficResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
 				Message: fmt.Sprintf(
 					"plan_id %q not found or expired (TTL=%s). Run with dry_run=true first.",
@@ -187,7 +186,7 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 		return resp, nil
 	}
 
-	return models.UpdateTrafficResponse{}, &gcp.ConfirmationRequiredError{
+	return models.UpdateTrafficResponse{}, &ports.ConfirmationRequiredError{
 		Op: op,
 		Message: fmt.Sprintf(
 			"mutations require two-step confirmation. "+

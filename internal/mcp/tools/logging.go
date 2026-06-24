@@ -14,11 +14,11 @@ import (
 
 // LoggingTools provides MCP tool definitions and handlers for Cloud Logging operations.
 type LoggingTools struct {
-	svc ports.GCPService
+	svc ports.LoggingService
 	log *slog.Logger
 }
 
-func NewLoggingTools(svc ports.GCPService, log *slog.Logger) *LoggingTools {
+func NewLoggingTools(svc ports.LoggingService, log *slog.Logger) *LoggingTools {
 	return &LoggingTools{svc: svc, log: log}
 }
 

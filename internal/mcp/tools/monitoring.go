@@ -14,11 +14,11 @@ import (
 
 // MonitoringTools provides MCP tool definitions and handlers for Cloud Monitoring operations.
 type MonitoringTools struct {
-	svc ports.GCPService
+	svc ports.MonitoringService
 	log *slog.Logger
 }
 
-func NewMonitoringTools(svc ports.GCPService, log *slog.Logger) *MonitoringTools {
+func NewMonitoringTools(svc ports.MonitoringService, log *slog.Logger) *MonitoringTools {
 	return &MonitoringTools{svc: svc, log: log}
 }
 

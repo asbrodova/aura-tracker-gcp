@@ -16,11 +16,11 @@ import (
 // Compute Load Balancers, URL Maps, NEGs, VPC Networks, VPC Subnets,
 // PSC Endpoints, and API Gateway.
 type NetworkingTools struct {
-	svc ports.GCPService
+	svc ports.NetworkingService
 	log *slog.Logger
 }
 
-func NewNetworkingTools(svc ports.GCPService, log *slog.Logger) *NetworkingTools {
+func NewNetworkingTools(svc ports.NetworkingService, log *slog.Logger) *NetworkingTools {
 	return &NetworkingTools{svc: svc, log: log}
 }
 

@@ -14,11 +14,11 @@ import (
 
 // SchedulerTools provides MCP tool definitions and handlers for Cloud Scheduler operations.
 type SchedulerTools struct {
-	svc ports.GCPService
+	svc ports.SchedulerService
 	log *slog.Logger
 }
 
-func NewSchedulerTools(svc ports.GCPService, log *slog.Logger) *SchedulerTools {
+func NewSchedulerTools(svc ports.SchedulerService, log *slog.Logger) *SchedulerTools {
 	return &SchedulerTools{svc: svc, log: log}
 }
 

@@ -14,11 +14,11 @@ import (
 
 // WorkflowsTools provides MCP tool definitions and handlers for Cloud Workflows operations.
 type WorkflowsTools struct {
-	svc ports.GCPService
+	svc ports.WorkflowsService
 	log *slog.Logger
 }
 
-func NewWorkflowsTools(svc ports.GCPService, log *slog.Logger) *WorkflowsTools {
+func NewWorkflowsTools(svc ports.WorkflowsService, log *slog.Logger) *WorkflowsTools {
 	return &WorkflowsTools{svc: svc, log: log}
 }
 

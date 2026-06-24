@@ -14,11 +14,11 @@ import (
 
 // PubSubTools provides MCP tool definitions and handlers for Pub/Sub operations.
 type PubSubTools struct {
-	svc ports.GCPService
+	svc ports.PubSubService
 	log *slog.Logger
 }
 
-func NewPubSubTools(svc ports.GCPService, log *slog.Logger) *PubSubTools {
+func NewPubSubTools(svc ports.PubSubService, log *slog.Logger) *PubSubTools {
 	return &PubSubTools{svc: svc, log: log}
 }
 

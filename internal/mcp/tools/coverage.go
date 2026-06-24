@@ -14,11 +14,11 @@ import (
 
 // CoverageTools provides MCP tool definitions and handlers for observability coverage.
 type CoverageTools struct {
-	svc ports.GCPService
+	svc ports.CoverageService
 	log *slog.Logger
 }
 
-func NewCoverageTools(svc ports.GCPService, log *slog.Logger) *CoverageTools {
+func NewCoverageTools(svc ports.CoverageService, log *slog.Logger) *CoverageTools {
 	return &CoverageTools{svc: svc, log: log}
 }
 

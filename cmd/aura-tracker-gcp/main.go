@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/mark3labs/mcp-go/server"
@@ -101,52 +104,13 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		os.Exit(1)
 	}
 
-	var anon anonymize.Anonymizer = anonymize.NoopAnonymizer{}
+	anon, anonClose, err := buildAnonymizer(ctx, anonCfg, log, projectID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: %v\n", err)
+		os.Exit(1)
+	}
+	defer anonClose()
 	if anonCfg.Enabled {
-		switch anonCfg.Mode {
-		case anonymize.ModeDLP:
-			dlpSvc, err := gcpadapter.NewDLPAdapter(ctx, log)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init dlp adapter: %v\n", err)
-				os.Exit(1)
-			}
-			defer func() {
-				if err := dlpSvc.Close(); err != nil {
-					log.Error("closing dlp adapter", "err", err)
-				}
-			}()
-			anon = anonymize.NewDLPAnonymizer(dlpSvc, anonCfg, projectID)
-
-		case anonymize.ModeBoth:
-			dlpSvc, err := gcpadapter.NewDLPAdapter(ctx, log)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init dlp adapter: %v\n", err)
-				os.Exit(1)
-			}
-			defer func() {
-				if err := dlpSvc.Close(); err != nil {
-					log.Error("closing dlp adapter", "err", err)
-				}
-			}()
-			// Local always masks (auditOnly=false) so its output feeds DLP cleanly.
-			localCfg := anonCfg
-			localCfg.AuditOnly = false
-			local, err := anonymize.NewLocalScrubber(localCfg)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init local scrubber: %v\n", err)
-				os.Exit(1)
-			}
-			dlpAnon := anonymize.NewDLPAnonymizer(dlpSvc, anonCfg, projectID)
-			anon = anonymize.NewChainedAnonymizer(local, dlpAnon)
-
-		default: // ModeLocal
-			scrubber, err := anonymize.NewLocalScrubber(anonCfg)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init scrubber: %v\n", err)
-				os.Exit(1)
-			}
-			anon = scrubber
-		}
 		log.Info("anonymization enabled", "mode", anonCfg.Mode, "audit_only", anonCfg.AuditOnly)
 	}
 
@@ -162,7 +126,7 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 
 	switch os.Getenv("MCP_TRANSPORT") {
 	case "sse":
-		port := os.Getenv("PORT") // Cloud Run sets PORT automatically
+		port := os.Getenv("PORT") // Cloud Run sets PORT automatically.
 		if port == "" {
 			port = "8080"
 		}
@@ -176,16 +140,81 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 			server.WithSSEContextFunc(bearerAuthMiddleware(log)),
 		)
 		log.Info("aura-tracker-gcp starting", "transport", "sse", "version", version, "addr", ":"+port, "base_url", baseURL)
-		if err := sseServer.Start(":" + port); err != nil {
-			fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
-			os.Exit(1)
+
+		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+		defer stop()
+
+		go func() {
+			if err := sseServer.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
+				stop() // unblock the wait below so the process exits cleanly.
+			}
+		}()
+
+		<-sigCtx.Done()
+		log.Info("shutdown signal received; draining connections")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := sseServer.Shutdown(shutdownCtx); err != nil {
+			log.Error("server shutdown", "err", err)
 		}
-	default: // "stdio" or unset — existing behavior preserved
+
+	default: // "stdio" or unset — existing behavior preserved.
 		log.Info("aura-tracker-gcp starting", "transport", "stdio", "version", version)
 		if err := server.ServeStdio(s); err != nil {
 			fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
 			os.Exit(1)
 		}
+	}
+}
+
+// buildAnonymizer constructs the configured Anonymizer and returns a cleanup function.
+// The cleanup function must always be called (defer it immediately after a nil-error check).
+func buildAnonymizer(ctx context.Context, cfg anonymize.Config, log *slog.Logger, projectID string) (anonymize.Anonymizer, func(), error) {
+	if !cfg.Enabled {
+		return anonymize.NoopAnonymizer{}, func() {}, nil
+	}
+
+	switch cfg.Mode {
+	case anonymize.ModeDLP:
+		dlp, err := gcpadapter.NewDLPAdapter(ctx, log)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init dlp adapter: %w", err)
+		}
+		return anonymize.NewDLPAnonymizer(dlp, cfg, projectID),
+			func() {
+				if err := dlp.Close(); err != nil {
+					log.Error("closing dlp adapter", "err", err)
+				}
+			}, nil
+
+	case anonymize.ModeBoth:
+		dlp, err := gcpadapter.NewDLPAdapter(ctx, log)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init dlp adapter: %w", err)
+		}
+		// Local always masks (auditOnly=false) so its output feeds DLP cleanly.
+		localCfg := cfg
+		localCfg.AuditOnly = false
+		local, err := anonymize.NewLocalScrubber(localCfg)
+		if err != nil {
+			_ = dlp.Close()
+			return nil, nil, fmt.Errorf("init local scrubber: %w", err)
+		}
+		chained := anonymize.NewChainedAnonymizer(local, anonymize.NewDLPAnonymizer(dlp, cfg, projectID))
+		return chained,
+			func() {
+				if err := dlp.Close(); err != nil {
+					log.Error("closing dlp adapter", "err", err)
+				}
+			}, nil
+
+	default: // ModeLocal
+		scrubber, err := anonymize.NewLocalScrubber(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init local scrubber: %w", err)
+		}
+		return scrubber, func() {}, nil
 	}
 }
 
@@ -226,6 +255,10 @@ func parseModulesFlag(val string) map[string]bool {
 // injected by bearerAuthMiddleware for audit logging in SSE mode.
 type contextKeyCallerEmail struct{}
 
+// tokenInfoClient is a dedicated HTTP client for Google tokeninfo validation.
+// The 5-second timeout prevents a slow tokeninfo endpoint from hanging an MCP connection.
+var tokenInfoClient = &http.Client{Timeout: 5 * time.Second}
+
 // bearerAuthMiddleware validates an optional Authorization: Bearer token on each
 // MCP request. If valid, it injects the caller's email into the context for audit
 // logging. GCP API calls always use the server's Workload Identity SA regardless.
@@ -236,12 +269,18 @@ func bearerAuthMiddleware(log *slog.Logger) server.SSEContextFunc {
 			return ctx
 		}
 		token := strings.TrimPrefix(auth, "Bearer ")
-		resp, err := http.Get("https://oauth2.googleapis.com/tokeninfo?access_token=" + token) //nolint:noctx
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			"https://oauth2.googleapis.com/tokeninfo?access_token="+token, nil)
+		if err != nil {
+			log.Warn("bearer token validation: build request", "err", err)
+			return ctx
+		}
+		resp, err := tokenInfoClient.Do(req)
 		if err != nil {
 			log.Warn("bearer token validation failed", "err", err)
 			return ctx
 		}
-		defer resp.Body.Close()
+		defer resp.Body.Close() //nolint:errcheck
 		if resp.StatusCode != http.StatusOK {
 			log.Warn("bearer token rejected", "status", resp.StatusCode)
 			return ctx

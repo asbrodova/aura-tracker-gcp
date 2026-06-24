@@ -16,11 +16,11 @@ import (
 // It queries Istio/ASM Cloud Monitoring metrics for caller→callee edges and
 // falls back to Istio proxy access logs when metrics are unavailable.
 type GKEMeshTools struct {
-	svc ports.GCPService
+	svc ports.GKEMeshService
 	log *slog.Logger
 }
 
-func NewGKEMeshTools(svc ports.GCPService, log *slog.Logger) *GKEMeshTools {
+func NewGKEMeshTools(svc ports.GKEMeshService, log *slog.Logger) *GKEMeshTools {
 	return &GKEMeshTools{svc: svc, log: log}
 }
 

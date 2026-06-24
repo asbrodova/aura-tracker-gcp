@@ -14,11 +14,11 @@ import (
 
 // CloudRunTools provides MCP tool definitions and handlers for Cloud Run operations.
 type CloudRunTools struct {
-	svc ports.GCPService
+	svc ports.CloudRunService
 	log *slog.Logger
 }
 
-func NewCloudRunTools(svc ports.GCPService, log *slog.Logger) *CloudRunTools {
+func NewCloudRunTools(svc ports.CloudRunService, log *slog.Logger) *CloudRunTools {
 	return &CloudRunTools{svc: svc, log: log}
 }
 

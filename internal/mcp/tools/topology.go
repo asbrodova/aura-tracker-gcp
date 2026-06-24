@@ -14,11 +14,11 @@ import (
 
 // TopologyTools provides MCP tool definitions and handlers for service topology discovery.
 type TopologyTools struct {
-	svc ports.GCPService
+	svc ports.TopologyService
 	log *slog.Logger
 }
 
-func NewTopologyTools(svc ports.GCPService, log *slog.Logger) *TopologyTools {
+func NewTopologyTools(svc ports.TopologyService, log *slog.Logger) *TopologyTools {
 	return &TopologyTools{svc: svc, log: log}
 }
 

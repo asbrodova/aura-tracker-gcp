@@ -49,7 +49,7 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 			return nil
 		})
 	}
-	g.Wait()
+	_ = g.Wait()
 
 	if jobs == nil {
 		jobs = []models.SchedulerJobSummary{}

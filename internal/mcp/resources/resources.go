@@ -10,40 +10,40 @@ import (
 
 // BigQueryResources serves resources under gcp://{project}/bigquery/...
 type BigQueryResources struct {
-	svc ports.GCPService
+	svc ports.BigQueryService
 	log *slog.Logger
 }
 
-func NewBigQueryResources(svc ports.GCPService, log *slog.Logger) *BigQueryResources {
+func NewBigQueryResources(svc ports.BigQueryService, log *slog.Logger) *BigQueryResources {
 	return &BigQueryResources{svc: svc, log: log}
 }
 
 // CloudRunResources serves resources under gcp://{project}/cloudrun/...
 type CloudRunResources struct {
-	svc ports.GCPService
+	svc ports.CloudRunService
 	log *slog.Logger
 }
 
-func NewCloudRunResources(svc ports.GCPService, log *slog.Logger) *CloudRunResources {
+func NewCloudRunResources(svc ports.CloudRunService, log *slog.Logger) *CloudRunResources {
 	return &CloudRunResources{svc: svc, log: log}
 }
 
 // StorageResources serves resources under gcp://{project}/storage/...
 type StorageResources struct {
-	svc ports.GCPService
+	svc ports.StorageService
 	log *slog.Logger
 }
 
-func NewStorageResources(svc ports.GCPService, log *slog.Logger) *StorageResources {
+func NewStorageResources(svc ports.StorageService, log *slog.Logger) *StorageResources {
 	return &StorageResources{svc: svc, log: log}
 }
 
 // IAMResources serves resources under gcp://{project}/iam/...
 type IAMResources struct {
-	svc ports.GCPService
+	svc ports.IAMService
 	log *slog.Logger
 }
 
-func NewIAMResources(svc ports.GCPService, log *slog.Logger) *IAMResources {
+func NewIAMResources(svc ports.IAMService, log *slog.Logger) *IAMResources {
 	return &IAMResources{svc: svc, log: log}
 }

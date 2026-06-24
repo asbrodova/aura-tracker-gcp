@@ -7,7 +7,8 @@ import (
 )
 
 // mockGCPService is a hand-written test double that implements ports.GCPService.
-// Set the return* fields before calling.
+// Set the return* fields before calling. After the call, assert the captured* fields
+// to verify the handler passed the correct arguments to the service.
 type mockGCPService struct {
 	returnListClusters         models.ListClustersResponse
 	returnListClustersErr      error
@@ -33,9 +34,16 @@ type mockGCPService struct {
 	returnGetMetricsErr        error
 	returnTestPermissions      models.TestPermissionsResponse
 	returnTestPermissionsErr   error
+
+	// captured args — assert these after a handler call to verify arg propagation.
+	capturedListClusters    models.ListClustersRequest
+	capturedScaleDeployment models.ScaleDeploymentRequest
+	capturedUpdateTraffic   models.UpdateTrafficRequest
+	capturedGetAuraScore    models.GetAuraScoreRequest
 }
 
-func (m *mockGCPService) ListClusters(_ context.Context, _ models.ListClustersRequest) (models.ListClustersResponse, error) {
+func (m *mockGCPService) ListClusters(_ context.Context, req models.ListClustersRequest) (models.ListClustersResponse, error) {
+	m.capturedListClusters = req
 	return m.returnListClusters, m.returnListClustersErr
 }
 func (m *mockGCPService) GetClusterDetails(_ context.Context, _ models.GetClusterDetailsRequest) (models.ClusterDetails, error) {
@@ -44,7 +52,8 @@ func (m *mockGCPService) GetClusterDetails(_ context.Context, _ models.GetCluste
 func (m *mockGCPService) GetClusterBottlenecks(_ context.Context, _ models.GetClusterBottlenecksRequest) (models.ClusterBottleneckReport, error) {
 	return m.returnGetBottlenecks, m.returnGetBottlenecksErr
 }
-func (m *mockGCPService) ScaleDeployment(_ context.Context, _ models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
+func (m *mockGCPService) ScaleDeployment(_ context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
+	m.capturedScaleDeployment = req
 	return m.returnScaleDeployment, m.returnScaleDeploymentErr
 }
 func (m *mockGCPService) ListServices(_ context.Context, _ models.ListServicesRequest) (models.ListServicesResponse, error) {
@@ -53,7 +62,8 @@ func (m *mockGCPService) ListServices(_ context.Context, _ models.ListServicesRe
 func (m *mockGCPService) GetServiceDetails(_ context.Context, _ models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
 	return m.returnGetServiceDetails, m.returnGetServiceDetailsErr
 }
-func (m *mockGCPService) UpdateTraffic(_ context.Context, _ models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
+func (m *mockGCPService) UpdateTraffic(_ context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
+	m.capturedUpdateTraffic = req
 	return m.returnUpdateTraffic, m.returnUpdateTrafficErr
 }
 func (m *mockGCPService) ListJobs(_ context.Context, _ models.ListJobsRequest) (models.ListJobsResponse, error) {
@@ -83,7 +93,8 @@ func (m *mockGCPService) TestPermissions(_ context.Context, _ models.TestPermiss
 func (m *mockGCPService) GetServiceTopology(_ context.Context, _ models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
 	return models.ServiceTopologyReport{}, nil
 }
-func (m *mockGCPService) GetAuraScore(_ context.Context, _ models.GetAuraScoreRequest) (models.AuraReport, error) {
+func (m *mockGCPService) GetAuraScore(_ context.Context, req models.GetAuraScoreRequest) (models.AuraReport, error) {
+	m.capturedGetAuraScore = req
 	return models.AuraReport{}, nil
 }
 func (m *mockGCPService) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {

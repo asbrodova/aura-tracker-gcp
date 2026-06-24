@@ -47,7 +47,7 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 			return nil
 		})
 	}
-	g.Wait()
+	_ = g.Wait()
 
 	if queues == nil {
 		queues = []models.TaskQueueSummary{}

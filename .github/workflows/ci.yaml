@@ -24,8 +24,27 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Build
+        run: go build -o /dev/null ./cmd/aura-tracker-gcp
+
       - name: Test
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+          args: --timeout=5m
 
   goreleaser-check:
     name: GoReleaser config check

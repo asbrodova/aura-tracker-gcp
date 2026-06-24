@@ -14,11 +14,11 @@ import (
 
 // VPCAccessTools provides MCP tool definitions and handlers for Serverless VPC Access.
 type VPCAccessTools struct {
-	svc ports.GCPService
+	svc ports.VPCAccessService
 	log *slog.Logger
 }
 
-func NewVPCAccessTools(svc ports.GCPService, log *slog.Logger) *VPCAccessTools {
+func NewVPCAccessTools(svc ports.VPCAccessService, log *slog.Logger) *VPCAccessTools {
 	return &VPCAccessTools{svc: svc, log: log}
 }
 

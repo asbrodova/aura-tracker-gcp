@@ -44,6 +44,7 @@ import (
 	"google.golang.org/api/vpcaccess/v1"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 // Option configures a gcpAdapter created by New.
@@ -105,53 +106,64 @@ func WithGraphTimeout(d time.Duration) Option {
 
 // gcpAdapter is the single concrete implementation of ports.GCPService.
 // SDK clients are lazily initialised based on the enabledModules set.
+//
+// Field order: pointer/interface-sized types first (8 bytes each on amd64),
+// then time.Duration (8 bytes), then slices/maps/string (24/16/16 bytes),
+// then bool fields last to avoid padding between same-size groups.
 type gcpAdapter struct {
-	clusterMgr        *container.ClusterManagerClient
-	runSvc            *run.ServicesClient
-	runJobs           *run.JobsClient
-	runExecs          *run.ExecutionsClient
-	fnGen1          *cloudfunctions.Service
-	eventarcClient     *eventarc.Client
-	schedulerClient    *scheduler.CloudSchedulerClient
-	workflowsClient    *workflows.Client
-	workflowExecClient *workflowexecutions.Client
-	tasksClient        *cloudtasks.Client
-	secretMgrClient    *secretmanager.Client
-	vpcAccess          *vpcaccess.Service
-	sqlAdmin           *sqladmin.Service
-	computeSvc              *compute.Service
-	apiGatewaySvc           *apigateway.Service
-	artifactRegistrySvc     *artifactregistry.Service
-	cloudBuildSvc           *cloudbuild.Service
-	serviceDirectorySvc     *servicedirectory.APIService
-	traceClient        *cloudtrace.Service
-	traceBackend       string
-	pubsub             *pubsub.Client
-	logAdmin          *logadmin.Client
-	metric            *monitoring.MetricClient
-	crm               *cloudresourcemanager.Service
-	bq                *bigquery.Client
-	gcs               *storage.Client
-	spannerSvc     *spanner.Service
-	alloydbSvc     *alloydb.Service
-	firestoreSvc   *firestore.Service
-	redisSvc       *redis.Service
-	iamAdminSvc      *iam.Service
-	monitoringSvc    *monitoringv3.Service
-	monitoringV1Svc  *monitoringv1.Service
-	crmV3Svc         *crmv3.Service
-	rec               *recommender.Client
+	// --- GCP SDK clients (pointer-sized, 8 bytes each) ---
+	clusterMgr          *container.ClusterManagerClient
+	runSvc              *run.ServicesClient
+	runJobs             *run.JobsClient
+	runExecs            *run.ExecutionsClient
+	fnGen1              *cloudfunctions.Service
+	eventarcClient      *eventarc.Client
+	schedulerClient     *scheduler.CloudSchedulerClient
+	workflowsClient     *workflows.Client
+	workflowExecClient  *workflowexecutions.Client
+	tasksClient         *cloudtasks.Client
+	secretMgrClient     *secretmanager.Client
+	vpcAccess           *vpcaccess.Service
+	sqlAdmin            *sqladmin.Service
+	computeSvc          *compute.Service
+	apiGatewaySvc       *apigateway.Service
+	artifactRegistrySvc *artifactregistry.Service
+	cloudBuildSvc       *cloudbuild.Service
+	serviceDirectorySvc *servicedirectory.APIService
+	traceClient         *cloudtrace.Service
+	pubsub              *pubsub.Client
+	logAdmin            *logadmin.Client
+	metric              *monitoring.MetricClient
+	crm                 *cloudresourcemanager.Service
+	bq                  *bigquery.Client
+	gcs                 *storage.Client
+	spannerSvc          *spanner.Service
+	alloydbSvc          *alloydb.Service
+	firestoreSvc        *firestore.Service
+	redisSvc            *redis.Service
+	iamAdminSvc         *iam.Service
+	monitoringSvc       *monitoringv3.Service
+	monitoringV1Svc     *monitoringv1.Service
+	crmV3Svc            *crmv3.Service
+	rec                 *recommender.Client
+	limiter             *rate.Limiter
+	log                 *slog.Logger
+	auraCache           *ttlCache[models.AuraReport]
+	regionsCache        *ttlCache[[]string]
+	graphCache          *ttlCache[models.ServerlessGraph]
+	// --- time.Duration (8 bytes each) ---
+	callTimeout  time.Duration
+	graphTimeout time.Duration
+	// --- slice / map / string (16–24 bytes each) ---
+	clientOpts     []option.ClientOption
+	enabledModules map[string]bool
+	traceBackend   string
+	// --- bool (1 byte, grouped at end to minimise padding) ---
 	enableRecommender bool
-	enabledModules    map[string]bool
-	limiter           *rate.Limiter
-	callTimeout       time.Duration
-	graphTimeout      time.Duration
-	log               *slog.Logger
-	clientOpts        []option.ClientOption
-	auraCache         *ttlCache[models.AuraReport]
-	regionsCache      *ttlCache[[]string]
-	graphCache        *ttlCache[models.ServerlessGraph]
 }
+
+// Compile-time assertion that gcpAdapter satisfies the full composite port.
+var _ ports.GCPService = (*gcpAdapter)(nil)
 
 // New creates a gcpAdapter, initialises the required GCP SDK clients using
 // Application Default Credentials, and returns it as a ports.GCPService.

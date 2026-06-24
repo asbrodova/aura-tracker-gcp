@@ -27,8 +27,6 @@ func (a *gcpAdapter) ListTraceDependencyEdges(ctx context.Context, req models.Li
 
 	startTime := time.Now().UTC().Add(-time.Duration(lookback) * time.Hour).Format(time.RFC3339)
 
-	// spanService maps spanId → service name (extracted from the span's root label or name).
-	spanService := map[string]string{}
 	// edgeCount maps "caller|callee" → count.
 	edgeCount := map[string]int{}
 
@@ -51,7 +49,8 @@ func (a *gcpAdapter) ListTraceDependencyEdges(ctx context.Context, req models.Li
 
 		for _, t := range resp.Traces {
 			tracesScanned++
-			spanService = map[string]string{}
+			// spanService maps spanId → service name (extracted from the span's root label or name).
+			spanService := map[string]string{}
 
 			// First pass: collect span service name per span ID.
 			for _, span := range t.Spans {

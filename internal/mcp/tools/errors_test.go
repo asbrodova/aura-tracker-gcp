@@ -4,11 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/asbrodova/aura-tracker-gcp/internal/gcp"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 func TestHandleServiceError_PermissionDenied(t *testing.T) {
-	pde := &gcp.PermissionDeniedError{Op: "gke.ListClusters", Err: errors.New("denied")}
+	pde := &ports.PermissionDeniedError{Op: "gke.ListClusters", Err: errors.New("denied")}
 
 	result, err := handleServiceError("gcp_gke_list_clusters", pde)
 	if err != nil {
@@ -23,7 +23,7 @@ func TestHandleServiceError_PermissionDenied(t *testing.T) {
 }
 
 func TestHandleServiceError_NotFound(t *testing.T) {
-	nfe := &gcp.NotFoundError{Op: "gke.GetClusterDetails", Err: errors.New("not found")}
+	nfe := &ports.NotFoundError{Op: "gke.GetClusterDetails", Err: errors.New("not found")}
 
 	result, err := handleServiceError("gcp_gke_get_cluster_details", nfe)
 	if err != nil {
@@ -50,7 +50,7 @@ func TestHandleServiceError_Unexpected(t *testing.T) {
 }
 
 func TestHandleServiceError_WrappedPermissionDenied(t *testing.T) {
-	pde := &gcp.PermissionDeniedError{Op: "op", Err: errors.New("x")}
+	pde := &ports.PermissionDeniedError{Op: "op", Err: errors.New("x")}
 	wrapped := errors.Join(errors.New("outer"), pde)
 
 	result, goErr := handleServiceError("op", wrapped)

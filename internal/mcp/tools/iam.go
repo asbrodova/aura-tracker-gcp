@@ -14,11 +14,11 @@ import (
 
 // IAMTools provides MCP tool definitions and handlers for IAM operations.
 type IAMTools struct {
-	svc ports.GCPService
+	svc ports.IAMService
 	log *slog.Logger
 }
 
-func NewIAMTools(svc ports.GCPService, log *slog.Logger) *IAMTools {
+func NewIAMTools(svc ports.IAMService, log *slog.Logger) *IAMTools {
 	return &IAMTools{svc: svc, log: log}
 }
 

@@ -14,11 +14,11 @@ import (
 
 // StorageTools provides MCP tool definitions and handlers for Cloud Storage operations.
 type StorageTools struct {
-	svc ports.GCPService
+	svc ports.StorageService
 	log *slog.Logger
 }
 
-func NewStorageTools(svc ports.GCPService, log *slog.Logger) *StorageTools {
+func NewStorageTools(svc ports.StorageService, log *slog.Logger) *StorageTools {
 	return &StorageTools{svc: svc, log: log}
 }
 
