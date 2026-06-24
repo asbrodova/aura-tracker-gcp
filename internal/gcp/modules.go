@@ -59,7 +59,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"monitoring": {clientMetric, clientTrace, clientMonitoringV3, clientMonitoringV1},
 	"iam":        {clientCRM, clientIAMAdmin},
 	"topology":   {clientRunSvc, clientPubSub}, // scans run annotations + pubsub push subscriptions
-	"aura":       {clientMetric, clientRunSvc, clientClusterMgr}, // GKE cluster discovery + control-plane health
+	"aura":       {clientMetric, clientRunSvc, clientClusterMgr, clientGCS}, // GKE cluster discovery + control-plane health + GCS bucket scoring
 	"storage":     {clientGCS},
 	"datastores":  {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
 	"supplychain": {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
