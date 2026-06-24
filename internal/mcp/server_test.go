@@ -58,6 +58,12 @@ func (m *mockSvc) GetAuraScore(_ context.Context, _ models.GetAuraScoreRequest) 
 func (m *mockSvc) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
 	return models.ProjectAuraSummaryResponse{}, nil
 }
+func (m *mockSvc) GetGKEAuraScore(_ context.Context, _ models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error) {
+	return models.GKEAuraReport{}, nil
+}
+func (m *mockSvc) GetGCSAuraScore(_ context.Context, _ models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error) {
+	return models.GCSAuraReport{}, nil
+}
 func (m *mockSvc) ListDatasets(_ context.Context, _ models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
 	return models.ListDatasetsResponse{}, nil
 }
@@ -207,6 +213,8 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_get_service_topology",
 		"gcp_get_aura_score",
 		"gcp_project_aura_summary",
+		"gcp_gke_get_aura_score",
+		"gcp_gcs_get_aura_score",
 		"gcp_storage_list_buckets",
 		"gcp_storage_get_bucket_metadata",
 		"gcp_storage_list_bucket_objects",

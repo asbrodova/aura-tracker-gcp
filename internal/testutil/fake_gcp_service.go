@@ -144,6 +144,10 @@ type FakeGCPService struct {
 
 	// ArchGraph
 	ExportArchitectureGraphFunc func(context.Context, models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error)
+
+	// Additional Aura scores (added in main after branch cut)
+	GetGKEAuraScoreFunc func(context.Context, models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error)
+	GetGCSAuraScoreFunc func(context.Context, models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error)
 }
 
 func (f *FakeGCPService) ListClusters(ctx context.Context, req models.ListClustersRequest) (models.ListClustersResponse, error) {
@@ -565,4 +569,16 @@ func (f *FakeGCPService) ExportArchitectureGraph(ctx context.Context, req models
 		return f.ExportArchitectureGraphFunc(ctx, req)
 	}
 	return models.ServerlessGraph{}, nil
+}
+func (f *FakeGCPService) GetGKEAuraScore(ctx context.Context, req models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error) {
+	if f.GetGKEAuraScoreFunc != nil {
+		return f.GetGKEAuraScoreFunc(ctx, req)
+	}
+	return models.GKEAuraReport{}, nil
+}
+func (f *FakeGCPService) GetGCSAuraScore(ctx context.Context, req models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error) {
+	if f.GetGCSAuraScoreFunc != nil {
+		return f.GetGCSAuraScoreFunc(ctx, req)
+	}
+	return models.GCSAuraReport{}, nil
 }

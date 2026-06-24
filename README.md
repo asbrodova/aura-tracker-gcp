@@ -11,7 +11,7 @@
 
 **Talk to your GCP infrastructure in plain English.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **67 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **69 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
 
 The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
 
@@ -92,7 +92,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 67 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 69 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -269,8 +269,10 @@ Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now 
 | Tool | Description | Mutation |
 |------|-------------|----------|
 | `gcp_get_service_topology` | Infer Cloud Run service dependencies: Cloud SQL, Pub/Sub, VPC, secrets. Supports `depth=1` and `depth=2`. | No |
-| `gcp_get_aura_score` | Composite 0–100 health + efficiency score for a single resource. Cached 5 min. | No |
+| `gcp_get_aura_score` | Composite 0–100 health + efficiency score for a single resource (Cloud Run, Cloud SQL, BigQuery, GKE, GCS). Cached 5 min. | No |
 | `gcp_project_aura_summary` | Auto-discover and score all Cloud Run, Cloud SQL, BigQuery, and GKE resources. Sorted worst-first with 🟢/🟡/🔴 display. | No |
+| `gcp_gke_get_aura_score` | Deep GKE Aura Score: health signals (CPU, memory, pod restarts, control-plane), version drift vs. release channel, and per-node-pool autoscaling audit. Not cached. | No |
+| `gcp_gcs_get_aura_score` | Security + cost Aura Score for a GCS bucket: PAP, UBLA, versioning, lifecycle rules, storage class fit. Returns `security_posture` enum (COMPLIANT / AT_RISK / CRITICAL). | No |
 
 ### Cloud Storage
 
@@ -375,8 +377,10 @@ Prompt Templates pre-configure the AI for complex multi-step GCP workflows. Invo
 The Aura Score is a composite 0–100 metric that tells an LLM not just that a resource *exists*, but whether it is **healthy** and **cost-effective** — two things that previously required separate queries to Cloud Monitoring, the Recommender API, and manual judgment to combine.
 
 Two tools expose it:
-- **`gcp_get_aura_score`** — scores a single named resource on demand (Cloud Run, Cloud SQL, BigQuery, or GKE cluster)
+- **`gcp_get_aura_score`** — scores a single named resource on demand (Cloud Run, Cloud SQL, BigQuery, GKE cluster, or GCS bucket)
 - **`gcp_project_aura_summary`** — auto-discovers all Cloud Run services, Cloud SQL instances, BigQuery datasets, and GKE clusters in a project, scores each, and returns them sorted worst-first with a pre-formatted block the LLM can read at a glance
+- **`gcp_gke_get_aura_score`** — deep GKE analysis: 5 health signals including version drift against the release channel, plus a per-node-pool autoscaling audit
+- **`gcp_gcs_get_aura_score`** — security-posture and cost-efficiency score for a GCS bucket, including PAP enforcement, UBLA status, lifecycle rule presence, and storage class fit
 
 ### Example output
 
@@ -726,7 +730,7 @@ The server runs under a specific service account (Application Default Credential
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
 - **Read-only guarantees**: all 34 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 67 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 69 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---

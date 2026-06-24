@@ -371,6 +371,14 @@ func (d *SafetyDecorator) GetProjectAuraSummary(ctx context.Context, req models.
 	return d.inner.GetProjectAuraSummary(ctx, req)
 }
 
+func (d *SafetyDecorator) GetGKEAuraScore(ctx context.Context, req models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error) {
+	return d.inner.GetGKEAuraScore(ctx, req)
+}
+
+func (d *SafetyDecorator) GetGCSAuraScore(ctx context.Context, req models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error) {
+	return d.inner.GetGCSAuraScore(ctx, req)
+}
+
 func (d *SafetyDecorator) ListDatasets(ctx context.Context, req models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
 	return d.inner.ListDatasets(ctx, req)
 }

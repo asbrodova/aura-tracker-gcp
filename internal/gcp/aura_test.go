@@ -586,3 +586,303 @@ func TestTTLCache(t *testing.T) {
 		t.Error("expected cache miss for unknown key")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GCS signal scores
+// ---------------------------------------------------------------------------
+
+func TestGCSSignalScore(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     float64
+		wantScore int
+		wantLabel string
+	}{
+		{"public_access_prevention", 1.0, 100, "OK"},
+		{"public_access_prevention", 0.0, 15, "Critical"},
+		{"uniform_bucket_level_access", 1.0, 100, "OK"},
+		{"uniform_bucket_level_access", 0.0, 30, "Warning"},
+		{"versioning", 1.0, 100, "OK"},
+		{"versioning", 0.0, 50, "Warning"},
+		{"lifecycle_policy", 3.0, 100, "OK"},
+		{"lifecycle_policy", 0.0, 25, "Warning"},
+	}
+	for _, tt := range tests {
+		score, label := gcsSignalScore(tt.name, tt.value)
+		if score != tt.wantScore || label != tt.wantLabel {
+			t.Errorf("gcsSignalScore(%q, %v) = (%d, %q), want (%d, %q)",
+				tt.name, tt.value, score, label, tt.wantScore, tt.wantLabel)
+		}
+	}
+}
+
+func TestGCSStorageClassScore(t *testing.T) {
+	tests := []struct {
+		class       string
+		hasLifecycle bool
+		wantScore   int
+		wantLabel   string
+	}{
+		{"NEARLINE", false, 100, "OK"},
+		{"COLDLINE", false, 100, "OK"},
+		{"ARCHIVE", false, 100, "OK"},
+		{"STANDARD", true, 90, "OK"},
+		{"STANDARD", false, 40, "Warning"},
+		{"MULTI_REGIONAL", true, 90, "OK"},
+		{"MULTI_REGIONAL", false, 40, "Warning"},
+		{"REGIONAL", false, 40, "Warning"},
+		{"UNKNOWN_CLASS", false, 70, "OK"},
+	}
+	for _, tt := range tests {
+		score, label := gcsStorageClassScore(tt.class, tt.hasLifecycle)
+		if score != tt.wantScore || label != tt.wantLabel {
+			t.Errorf("gcsStorageClassScore(%q, %v) = (%d, %q), want (%d, %q)",
+				tt.class, tt.hasLifecycle, score, label, tt.wantScore, tt.wantLabel)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GCS weighted scores
+// ---------------------------------------------------------------------------
+
+func TestGCSWeightedScores(t *testing.T) {
+	// COMPLIANT bucket: PAP enforced, UBLA enabled, versioning on, lifecycle rules, archival class.
+	compliantSignals := []models.AuraHealthSignal{
+		{Name: "public_access_prevention", Value: 1.0, Score: 100},
+		{Name: "uniform_bucket_level_access", Value: 1.0, Score: 100},
+		{Name: "versioning", Value: 1.0, Score: 100},
+		{Name: "lifecycle_policy", Value: 2.0, Score: 100},
+		{Name: "storage_class_fit", Value: 0, Score: 100},
+	}
+	health, eff := weightedScores(models.ResourceKindGCS, compliantSignals)
+	if health != 100 {
+		t.Errorf("compliant bucket health = %d, want 100", health)
+	}
+	if eff != 100 {
+		t.Errorf("compliant bucket efficiency = %d, want 100", eff)
+	}
+
+	// CRITICAL bucket: no PAP, no UBLA, no versioning, no lifecycle, STANDARD.
+	criticalSignals := []models.AuraHealthSignal{
+		{Name: "public_access_prevention", Value: 0.0, Score: 15},
+		{Name: "uniform_bucket_level_access", Value: 0.0, Score: 30},
+		{Name: "versioning", Value: 0.0, Score: 50},
+		{Name: "lifecycle_policy", Value: 0, Score: 25},
+		{Name: "storage_class_fit", Value: 0, Score: 40},
+	}
+	health, eff = weightedScores(models.ResourceKindGCS, criticalSignals)
+	// health = 15*0.45 + 30*0.35 + 50*0.20 = 6.75 + 10.5 + 10 = 27.25 → 27
+	wantHealth := 27
+	if health != wantHealth {
+		t.Errorf("critical bucket health = %d, want %d", health, wantHealth)
+	}
+	// eff = 25*0.60 + 40*0.40 = 15 + 16 = 31
+	wantEff := 31
+	if eff != wantEff {
+		t.Errorf("critical bucket efficiency = %d, want %d", eff, wantEff)
+	}
+
+	// Composite score for critical bucket = 27*0.6 + 31*0.4 = 16.2 + 12.4 = 28.6 → 29 → red
+	report := calculateAura(models.ResourceKindGCS, "my-bucket", "", criticalSignals)
+	if report.Band != models.AuraBandRed {
+		t.Errorf("critical bucket band = %q, want red", report.Band)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GCS security posture
+// ---------------------------------------------------------------------------
+
+func TestGCSSecurityPosture(t *testing.T) {
+	tests := []struct {
+		ubla bool
+		pap  string
+		want models.GCSSecurityPosture
+	}{
+		{true, "enforced", models.GCSPostureCompliant},
+		{false, "enforced", models.GCSPostureAtRisk},
+		{true, "inherited", models.GCSPostureAtRisk},
+		{false, "inherited", models.GCSPostureCritical},
+	}
+	for _, tt := range tests {
+		got := gcsSecurityPosture(tt.ubla, tt.pap)
+		if got != tt.want {
+			t.Errorf("gcsSecurityPosture(ubla=%v, pap=%q) = %q, want %q", tt.ubla, tt.pap, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GCS reasons
+// ---------------------------------------------------------------------------
+
+func TestGCSBuildReasons(t *testing.T) {
+	// Bucket with all problems.
+	signals := []models.AuraHealthSignal{
+		{Name: "public_access_prevention", Value: 0.0, Score: 15, Label: "Critical"},
+		{Name: "uniform_bucket_level_access", Value: 0.0, Score: 30, Label: "Warning"},
+		{Name: "versioning", Value: 0.0, Score: 50, Label: "Warning"},
+		{Name: "lifecycle_policy", Value: 0, Score: 25, Label: "Warning"},
+		{Name: "storage_class_fit", Value: 0, Score: 40, Label: "Warning"},
+	}
+	reasons := buildReasons(models.ResourceKindGCS, signals)
+	checkReason := func(substr string) {
+		t.Helper()
+		for _, r := range reasons {
+			if strings.Contains(r, substr) {
+				return
+			}
+		}
+		t.Errorf("expected reason containing %q, got: %v", substr, reasons)
+	}
+	checkReason("Public access prevention")
+	checkReason("Uniform bucket-level access")
+	checkReason("lifecycle")
+	checkReason("versioning")
+
+	// Healthy bucket: no reasons except the nominal message.
+	healthySignals := []models.AuraHealthSignal{
+		{Name: "public_access_prevention", Value: 1.0, Score: 100, Label: "OK"},
+		{Name: "uniform_bucket_level_access", Value: 1.0, Score: 100, Label: "OK"},
+		{Name: "versioning", Value: 1.0, Score: 100, Label: "OK"},
+		{Name: "lifecycle_policy", Value: 2.0, Score: 100, Label: "OK"},
+		{Name: "storage_class_fit", Value: 0, Score: 100, Label: "OK"},
+	}
+	healthyReasons := buildReasons(models.ResourceKindGCS, healthySignals)
+	if len(healthyReasons) != 1 || !strings.Contains(healthyReasons[0], "nominal") {
+		t.Errorf("healthy bucket expected nominal message, got: %v", healthyReasons)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GKE version drift scoring
+// ---------------------------------------------------------------------------
+
+func TestGKEVersionDriftScore(t *testing.T) {
+	tests := []struct {
+		current   string
+		latest    string
+		wantScore int
+		wantLabel string
+	}{
+		{"1.29.4-gke.100", "1.29.4-gke.100", 100, "OK"},   // exact match
+		{"1.29.4-gke.50", "1.29.9-gke.200", 100, "OK"},    // same minor, newer patch — still current
+		{"1.28.6-gke.100", "1.29.4-gke.100", 70, "Warning"},  // 1 minor behind
+		{"1.27.3-gke.100", "1.29.4-gke.100", 20, "Critical"}, // 2 minor behind
+		{"1.29.4-gke.100", "", 100, "OK"},                    // no latest known → neutral
+		{"", "1.29.4-gke.100", 100, "OK"},                   // empty current → treat as current
+	}
+	for _, tt := range tests {
+		score, label := gkeVersionDriftScore(tt.current, tt.latest)
+		if score != tt.wantScore || label != tt.wantLabel {
+			t.Errorf("gkeVersionDriftScore(%q, %q) = (%d, %q), want (%d, %q)",
+				tt.current, tt.latest, score, label, tt.wantScore, tt.wantLabel)
+		}
+	}
+}
+
+func TestParseGKEMinorVersion(t *testing.T) {
+	tests := []struct {
+		v    string
+		want int
+	}{
+		{"1.29.4-gke.100", 29},
+		{"1.30.0-gke.1", 30},
+		{"1.27.3", 27},
+		{"bad", 0},
+		{"", 0},
+	}
+	for _, tt := range tests {
+		if got := parseGKEMinorVersion(tt.v); got != tt.want {
+			t.Errorf("parseGKEMinorVersion(%q) = %d, want %d", tt.v, got, tt.want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GKE enhanced weighted scores (rich 5-signal path)
+// ---------------------------------------------------------------------------
+
+func TestGKEEnhancedWeightedScores(t *testing.T) {
+	// All-healthy rich signals.
+	healthy := []models.AuraHealthSignal{
+		{Name: "node_cpu_util", Value: 0.5, Score: 100},
+		{Name: "node_mem_util", Value: 0.4, Score: 100},
+		{Name: "pod_restart_rate", Value: 0.0, Score: 100},
+		{Name: "control_plane_health", Value: 1.0, Score: 100},
+		{Name: "version_drift", Value: 1.0, Score: 100},
+	}
+	health, eff := weightedScores(models.ResourceKindGKE, healthy)
+	if health != 100 {
+		t.Errorf("rich healthy GKE health = %d, want 100", health)
+	}
+	if eff != 90 {
+		t.Errorf("rich healthy GKE efficiency = %d, want 90", eff)
+	}
+
+	// Idle cluster (both cpu+mem < 10%) — efficiency should drop to 40.
+	idleSignals := []models.AuraHealthSignal{
+		{Name: "node_cpu_util", Value: 0.05, Score: 50},
+		{Name: "node_mem_util", Value: 0.04, Score: 50},
+		{Name: "pod_restart_rate", Value: 0.0, Score: 100},
+		{Name: "control_plane_health", Value: 1.0, Score: 100},
+		{Name: "version_drift", Value: 1.0, Score: 100},
+	}
+	_, eff = weightedScores(models.ResourceKindGKE, idleSignals)
+	if eff != 40 {
+		t.Errorf("idle GKE efficiency = %d, want 40", eff)
+	}
+
+	// Autoscaling disabled signal — efficiency capped at 65.
+	autoscalingDisabled := append(healthy, models.AuraHealthSignal{Name: "autoscaling_disabled", Value: 1.0, Score: 0})
+	_, eff = weightedScores(models.ResourceKindGKE, autoscalingDisabled)
+	if eff != 65 {
+		t.Errorf("autoscaling_disabled GKE efficiency = %d, want 65", eff)
+	}
+
+	// Nodepool at max signal — efficiency capped at 75.
+	atMax := append(healthy, models.AuraHealthSignal{Name: "nodepool_at_max", Value: 1.0, Score: 0})
+	_, eff = weightedScores(models.ResourceKindGKE, atMax)
+	if eff != 75 {
+		t.Errorf("nodepool_at_max GKE efficiency = %d, want 75", eff)
+	}
+
+	// Both autoscaling_disabled AND at_max — efficiency capped at the lower of 65, 75 → 65.
+	both := append(healthy,
+		models.AuraHealthSignal{Name: "autoscaling_disabled", Value: 1.0, Score: 0},
+		models.AuraHealthSignal{Name: "nodepool_at_max", Value: 1.0, Score: 0},
+	)
+	_, eff = weightedScores(models.ResourceKindGKE, both)
+	if eff != 65 {
+		t.Errorf("both autoscaling+atmax GKE efficiency = %d, want 65", eff)
+	}
+
+	// Legacy 4-signal path: version_drift absent — original weights, no efficiency deductions.
+	legacySignals := []models.AuraHealthSignal{
+		{Name: "node_cpu_util", Value: 0.5, Score: 100},
+		{Name: "node_mem_util", Value: 0.4, Score: 100},
+		{Name: "pod_restart_rate", Value: 0.0, Score: 100},
+		{Name: "control_plane_health", Value: 1.0, Score: 100},
+	}
+	health, eff = weightedScores(models.ResourceKindGKE, legacySignals)
+	if health != 100 {
+		t.Errorf("legacy GKE health = %d, want 100", health)
+	}
+	if eff != 90 {
+		t.Errorf("legacy GKE efficiency = %d, want 90", eff)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// boolToFloat
+// ---------------------------------------------------------------------------
+
+func TestBoolToFloat(t *testing.T) {
+	if boolToFloat(true) != 1.0 {
+		t.Error("boolToFloat(true) should be 1.0")
+	}
+	if boolToFloat(false) != 0.0 {
+		t.Error("boolToFloat(false) should be 0.0")
+	}
+}

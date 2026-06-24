@@ -91,6 +91,12 @@ func (s *stubService) GetAuraScore(_ context.Context, _ models.GetAuraScoreReque
 func (s *stubService) GetProjectAuraSummary(_ context.Context, _ models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
 	return models.ProjectAuraSummaryResponse{}, nil
 }
+func (s *stubService) GetGKEAuraScore(_ context.Context, _ models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error) {
+	return models.GKEAuraReport{}, nil
+}
+func (s *stubService) GetGCSAuraScore(_ context.Context, _ models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error) {
+	return models.GCSAuraReport{}, nil
+}
 func (s *stubService) ListDatasets(_ context.Context, _ models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
 	return models.ListDatasetsResponse{}, nil
 }

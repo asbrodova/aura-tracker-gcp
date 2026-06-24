@@ -141,6 +141,8 @@ type TopologyService interface {
 type AuraService interface {
 	GetAuraScore(ctx context.Context, req models.GetAuraScoreRequest) (models.AuraReport, error)
 	GetProjectAuraSummary(ctx context.Context, req models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error)
+	GetGKEAuraScore(ctx context.Context, req models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error)
+	GetGCSAuraScore(ctx context.Context, req models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error)
 }
 
 // BigQueryService covers BigQuery dataset and table discovery.
