@@ -14,11 +14,11 @@ import (
 
 // FunctionsTools provides MCP tool definitions and handlers for Cloud Functions operations.
 type FunctionsTools struct {
-	svc ports.GCPService
+	svc ports.FunctionsService
 	log *slog.Logger
 }
 
-func NewFunctionsTools(svc ports.GCPService, log *slog.Logger) *FunctionsTools {
+func NewFunctionsTools(svc ports.FunctionsService, log *slog.Logger) *FunctionsTools {
 	return &FunctionsTools{svc: svc, log: log}
 }
 

@@ -14,11 +14,11 @@ import (
 
 // CloudSQLTools provides MCP tool definitions and handlers for Cloud SQL operations.
 type CloudSQLTools struct {
-	svc ports.GCPService
+	svc ports.CloudSQLService
 	log *slog.Logger
 }
 
-func NewCloudSQLTools(svc ports.GCPService, log *slog.Logger) *CloudSQLTools {
+func NewCloudSQLTools(svc ports.CloudSQLService, log *slog.Logger) *CloudSQLTools {
 	return &CloudSQLTools{svc: svc, log: log}
 }
 

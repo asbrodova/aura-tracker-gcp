@@ -14,11 +14,11 @@ import (
 
 // TasksTools provides MCP tool definitions and handlers for Cloud Tasks operations.
 type TasksTools struct {
-	svc ports.GCPService
+	svc ports.TasksService
 	log *slog.Logger
 }
 
-func NewTasksTools(svc ports.GCPService, log *slog.Logger) *TasksTools {
+func NewTasksTools(svc ports.TasksService, log *slog.Logger) *TasksTools {
 	return &TasksTools{svc: svc, log: log}
 }
 

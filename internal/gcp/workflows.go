@@ -48,7 +48,7 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 			return nil
 		})
 	}
-	g.Wait()
+	_ = g.Wait()
 
 	if workflows == nil {
 		workflows = []models.WorkflowSummary{}

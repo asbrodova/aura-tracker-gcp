@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asbrodova/aura-tracker-gcp/internal/gcp"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -281,7 +281,7 @@ func TestScaleDeployment_NoFlags_Blocked(t *testing.T) {
 	_, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
 		NodeCount: 5,
 	})
-	var cre *gcp.ConfirmationRequiredError
+	var cre *ports.ConfirmationRequiredError
 	if !errors.As(err, &cre) {
 		t.Errorf("expected ConfirmationRequiredError, got %T: %v", err, err)
 	}
@@ -301,7 +301,7 @@ func TestScaleDeployment_ExpiredPlan_Blocked(t *testing.T) {
 	_, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
 		ConfirmPlanID: "expired-id",
 	})
-	var cre *gcp.ConfirmationRequiredError
+	var cre *ports.ConfirmationRequiredError
 	if !errors.As(err, &cre) {
 		t.Errorf("expected ConfirmationRequiredError for expired plan, got %T: %v", err, err)
 	}
@@ -388,7 +388,7 @@ func TestUpdateTraffic_NoFlags_Blocked(t *testing.T) {
 	_, err := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{
 		ServiceName: "svc-a",
 	})
-	var cre *gcp.ConfirmationRequiredError
+	var cre *ports.ConfirmationRequiredError
 	if !errors.As(err, &cre) {
 		t.Errorf("expected ConfirmationRequiredError, got %T: %v", err, err)
 	}
@@ -418,7 +418,7 @@ func TestScaleDeployment_PlanCannotBeConfirmedTwice(t *testing.T) {
 	_, err = d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{
 		ConfirmPlanID: dryResp.PlanID,
 	})
-	var cre *gcp.ConfirmationRequiredError
+	var cre *ports.ConfirmationRequiredError
 	if !errors.As(err, &cre) {
 		t.Errorf("expected ConfirmationRequiredError on replay, got %T: %v", err, err)
 	}

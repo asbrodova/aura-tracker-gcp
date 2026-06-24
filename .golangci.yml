@@ -1,0 +1,36 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - bodyclose       # response Body.Close() not deferred → resource leak
+    - contextcheck    # context passed through call chains correctly
+    - errcheck        # unchecked errors are latent bugs
+    - gochecknoinits  # init() functions complicate dependency ordering
+    - noctx           # http calls must carry a context
+    - staticcheck     # SA*/ST* misuse of sync, context, API correctness
+    - unused          # dead code detection
+
+  settings:
+    staticcheck:
+      checks:
+        - "all"
+        - "-SA1019"   # GCP SDK proto deprecations — upgrade tracked separately
+        - "-S1011"    # loop vs append — cosmetic
+        - "-S1016"    # struct conversion — cosmetic
+
+issues:
+  exclude-rules:
+    # Test files: relax errcheck (t.Fatal chains are intentional).
+    - path: "_test\\.go"
+      linters: [errcheck]
+
+    # defer resp.Body.Close() — the error is not actionable inside a defer.
+    - source: "defer resp\\.Body\\.Close"
+      linters: [errcheck]
+
+    # Phase 2 skeleton — DLP adapter is intentionally incomplete.
+    - path: "internal/gcp/dlp\\.go"
+      linters: [unused]
+    - path: "internal/anonymize/dlp\\.go"
+      linters: [unused]

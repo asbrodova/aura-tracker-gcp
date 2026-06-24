@@ -14,11 +14,11 @@ import (
 
 // EventarcTools provides MCP tool definitions and handlers for Eventarc operations.
 type EventarcTools struct {
-	svc ports.GCPService
+	svc ports.EventarcService
 	log *slog.Logger
 }
 
-func NewEventarcTools(svc ports.GCPService, log *slog.Logger) *EventarcTools {
+func NewEventarcTools(svc ports.EventarcService, log *slog.Logger) *EventarcTools {
 	return &EventarcTools{svc: svc, log: log}
 }
 

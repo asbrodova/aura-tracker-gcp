@@ -1,6 +1,10 @@
 # aura-tracker-gcp
 
 [![CI](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml/badge.svg)](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/asbrodova/aura-tracker-gcp)](go.mod)
+[![Go Report Card](https://goreportcard.com/badge/github.com/asbrodova/aura-tracker-gcp)](https://goreportcard.com/report/github.com/asbrodova/aura-tracker-gcp)
+[![GoDoc](https://pkg.go.dev/badge/github.com/asbrodova/aura-tracker-gcp.svg)](https://pkg.go.dev/github.com/asbrodova/aura-tracker-gcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 <!-- Add your social preview image here: -->
 <!-- ![aura-tracker-gcp banner](docs/banner.png) -->
@@ -907,6 +911,28 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 
 **Dependency rule:** `internal/mcp` never imports `internal/gcp`. Both depend only on `ports/`. `internal/safety` sits at the port boundary — it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
 
+```mermaid
+flowchart TD
+    LLM["Claude / Cursor / any MCP client"]
+    MCP["internal/mcp · Protocol Layer\ntools · resources · prompts"]
+    MW["Middleware chain\ncorrelation ID → anonymize → handler"]
+    HEX["ports/GCPService\nHexagon Boundary"]
+    SAFE["internal/safety\nTwo-step HITL Decorator"]
+    ADAPT["internal/gcp · Adapter Layer\nrate limiter 10 rps · 30 s timeout"]
+    GCP["GCP APIs\ngRPC / REST"]
+
+    LLM -->|"JSON-RPC (stdio / SSE)"| MCP
+    MCP --> MW
+    MW --> HEX
+    HEX --> SAFE
+    SAFE --> ADAPT
+    ADAPT --> GCP
+
+    style HEX fill:#f9f,stroke:#333,stroke-width:2px
+    style SAFE fill:#bbf,stroke:#333
+    style MW  fill:#bfb,stroke:#333
+```
+
 ### Transport Flows
 
 Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. The MCP protocol layer is identical in both modes.
@@ -936,17 +962,21 @@ MCP Client ──HTTPS──► Cloud Run (PORT=$PORT)
 ## Development
 
 ```bash
-# Build
+make build        # compile the binary
+make test         # run all tests with race detector
+make lint         # golangci-lint (auto-installs on first run)
+make smoke        # stdio round-trip — prints "OK — N tools registered"
+make test-cover   # generate coverage.html
+```
+
+See `CONTRIBUTING.md` for the full contribution guide and architectural rules.
+
+Raw commands (if you prefer not to use `make`):
+
+```bash
 go build ./...
-
-# Test (always with race detector)
 go test -race ./...
-
-# Vet
 go vet ./...
-
-# Run against real GCP
-GCP_PROJECT_ID=my-project go run ./cmd/aura-tracker-gcp
 
 # Smoke-test tools/list via stdin
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \

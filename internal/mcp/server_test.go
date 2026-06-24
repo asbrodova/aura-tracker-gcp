@@ -267,6 +267,46 @@ func TestServerRegistersAllTools(t *testing.T) {
 	}
 }
 
+// TestToolsListProtocolCompliance sends a raw JSON-RPC request via HandleMessage
+// and verifies the wire format is valid MCP: correct jsonrpc version, matching id,
+// and a non-empty tools array. This catches regressions in the mcp-go wiring.
+func TestToolsListProtocolCompliance(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test")
+
+	req := json.RawMessage(`{"jsonrpc":"2.0","id":42,"method":"tools/list","params":{}}`)
+	raw, err := json.Marshal(s.HandleMessage(context.Background(), req))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	var resp struct {
+		JSONRPC string `json:"jsonrpc"`
+		ID      int    `json:"id"`
+		Result  struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+		Error *struct{ Code int } `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		t.Fatalf("unmarshal response: %v\nraw: %s", err, raw)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected JSON-RPC error: code=%d, raw=%s", resp.Error.Code, raw)
+	}
+	if resp.JSONRPC != "2.0" {
+		t.Errorf("jsonrpc: want 2.0, got %q", resp.JSONRPC)
+	}
+	if resp.ID != 42 {
+		t.Errorf("id: want 42, got %d", resp.ID)
+	}
+	if len(resp.Result.Tools) == 0 {
+		t.Error("result.tools must be non-empty")
+	}
+	t.Logf("OK — %d tools registered", len(resp.Result.Tools))
+}
+
 func TestServerRegistersResourcesAndPrompts(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test")
 

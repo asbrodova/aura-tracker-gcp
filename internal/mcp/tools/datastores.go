@@ -14,11 +14,11 @@ import (
 
 // DatastoreTools provides MCP tool definitions and handlers for managed data store services.
 type DatastoreTools struct {
-	svc ports.GCPService
+	svc ports.DatastoreService
 	log *slog.Logger
 }
 
-func NewDatastoreTools(svc ports.GCPService, log *slog.Logger) *DatastoreTools {
+func NewDatastoreTools(svc ports.DatastoreService, log *slog.Logger) *DatastoreTools {
 	return &DatastoreTools{svc: svc, log: log}
 }
 

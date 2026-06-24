@@ -14,11 +14,11 @@ import (
 
 // ServerlessGraphTools provides the gcp_export_serverless_graph tool.
 type ServerlessGraphTools struct {
-	svc ports.GCPService
+	svc ports.ServerlessGraphService
 	log *slog.Logger
 }
 
-func NewServerlessGraphTools(svc ports.GCPService, log *slog.Logger) *ServerlessGraphTools {
+func NewServerlessGraphTools(svc ports.ServerlessGraphService, log *slog.Logger) *ServerlessGraphTools {
 	return &ServerlessGraphTools{svc: svc, log: log}
 }
 

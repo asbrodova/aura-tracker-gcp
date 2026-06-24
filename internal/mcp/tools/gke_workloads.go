@@ -17,11 +17,11 @@ import (
 // GKE management API), so they surface Deployments, Services, Ingresses, and
 // NetworkPolicies rather than cluster-level metadata.
 type GKEWorkloadTools struct {
-	svc ports.GCPService
+	svc ports.GKEWorkloadService
 	log *slog.Logger
 }
 
-func NewGKEWorkloadTools(svc ports.GCPService, log *slog.Logger) *GKEWorkloadTools {
+func NewGKEWorkloadTools(svc ports.GKEWorkloadService, log *slog.Logger) *GKEWorkloadTools {
 	return &GKEWorkloadTools{svc: svc, log: log}
 }
 

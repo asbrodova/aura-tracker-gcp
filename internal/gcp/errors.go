@@ -2,69 +2,40 @@ package gcp
 
 import (
 	"fmt"
+	"strings"
 
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
-// RetriableError wraps a transient GCP error (quota exhaustion, service
-// unavailable) that the caller may safely retry after a back-off.
-type RetriableError struct {
-	Op  string
-	Err error
-}
+// RetriableError aliases ports.RetriableError for adapter-internal use.
+type RetriableError = ports.RetriableError
 
-func (e *RetriableError) Error() string {
-	return fmt.Sprintf("%s: retriable: %v", e.Op, e.Err)
-}
+// PermissionDeniedError aliases ports.PermissionDeniedError for adapter-internal use.
+type PermissionDeniedError = ports.PermissionDeniedError
 
-func (e *RetriableError) Unwrap() error { return e.Err }
+// NotFoundError aliases ports.NotFoundError for adapter-internal use.
+type NotFoundError = ports.NotFoundError
 
-// PermissionDeniedError wraps a GCP PermissionDenied error.
-// MCP tool handlers check for this type and surface it as a user-visible tool error.
-type PermissionDeniedError struct {
-	Op  string
-	Err error
-}
-
-func (e *PermissionDeniedError) Error() string {
-	return fmt.Sprintf("%s: permission denied: %v", e.Op, e.Err)
-}
-
-func (e *PermissionDeniedError) Unwrap() error { return e.Err }
-
-// NotFoundError wraps a GCP NotFound error.
-type NotFoundError struct {
-	Op  string
-	Err error
-}
-
-func (e *NotFoundError) Error() string {
-	return fmt.Sprintf("%s: not found: %v", e.Op, e.Err)
-}
-
-func (e *NotFoundError) Unwrap() error { return e.Err }
-
-// ConfirmationRequiredError is returned by the SafetyDecorator when a mutation
-// is attempted without a valid plan confirmation.
-type ConfirmationRequiredError struct {
-	Op      string
-	Message string
-}
-
-func (e *ConfirmationRequiredError) Error() string {
-	return fmt.Sprintf("%s: confirmation required: %s", e.Op, e.Message)
-}
+// ConfirmationRequiredError aliases ports.ConfirmationRequiredError for adapter-internal use.
+type ConfirmationRequiredError = ports.ConfirmationRequiredError
 
 // wrapGCPError maps gRPC status codes to typed errors.
-// op should be a dot-separated call path, e.g. "gke.ListClusters".
+// The op argument should be a dot-separated call path, e.g. "gke.ListClusters".
 func wrapGCPError(op string, err error) error {
 	if err == nil {
 		return nil
 	}
 	switch status.Code(err) {
 	case codes.PermissionDenied:
-		return &PermissionDeniedError{Op: op, Err: err}
+		return &PermissionDeniedError{
+			Op:                 op,
+			Err:                err,
+			MissingPermissions: extractMissingPermissions(err),
+		}
 	case codes.NotFound:
 		return &NotFoundError{Op: op, Err: err}
 	case codes.ResourceExhausted, codes.Unavailable:
@@ -72,4 +43,30 @@ func wrapGCPError(op string, err error) error {
 	default:
 		return fmt.Errorf("%s: %w", op, err)
 	}
+}
+
+// extractMissingPermissions parses the gRPC status details to find any IAM
+// permission names that caused the PermissionDenied error. GCP APIs typically
+// embed these in an ErrorInfo.Metadata["permission"] field.
+func extractMissingPermissions(err error) []string {
+	st, ok := status.FromError(err)
+	if !ok {
+		return nil
+	}
+	var perms []string
+	for _, detail := range st.Details() {
+		switch d := detail.(type) {
+		case *errdetails.ErrorInfo:
+			if p, ok := d.Metadata["permission"]; ok && p != "" {
+				perms = append(perms, p)
+			}
+		case *errdetails.PreconditionFailure:
+			for _, v := range d.Violations {
+				if strings.HasPrefix(v.Subject, "Permission") && v.Description != "" {
+					perms = append(perms, v.Description)
+				}
+			}
+		}
+	}
+	return perms
 }

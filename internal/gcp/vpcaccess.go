@@ -49,7 +49,7 @@ func (a *gcpAdapter) ListVPCConnectors(ctx context.Context, req models.ListVPCCo
 			return nil
 		})
 	}
-	g.Wait()
+	_ = g.Wait()
 
 	if connectors == nil {
 		connectors = []models.VPCConnectorSummary{}

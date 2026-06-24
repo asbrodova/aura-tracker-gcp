@@ -4,12 +4,15 @@
 package mcp
 
 import (
+	"context"
 	"log/slog"
 	"os"
 
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
+	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/middleware"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/resources"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/tools"
@@ -55,6 +58,11 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	)
 
 	wrap := func(t server.ServerTool) server.ServerTool {
+		// Inject a fresh correlation ID so every log line for one tool call shares a cid.
+		orig := t.Handler
+		t.Handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return orig(middleware.WithCorrelationID(ctx), req)
+		}
 		return anonymize.WrapHandler(t, o.anonymizer)
 	}
 

@@ -88,7 +88,7 @@ func (c *k8sClient) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return fmt.Errorf("k8s: GET %s: %w", path, err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("k8s: GET %s: HTTP %d", path, resp.StatusCode)

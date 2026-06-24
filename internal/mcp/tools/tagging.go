@@ -14,11 +14,11 @@ import (
 
 // TaggingTools provides MCP tool definitions and handlers for GCP resource tags.
 type TaggingTools struct {
-	svc ports.GCPService
+	svc ports.TaggingService
 	log *slog.Logger
 }
 
-func NewTaggingTools(svc ports.GCPService, log *slog.Logger) *TaggingTools {
+func NewTaggingTools(svc ports.TaggingService, log *slog.Logger) *TaggingTools {
 	return &TaggingTools{svc: svc, log: log}
 }
 

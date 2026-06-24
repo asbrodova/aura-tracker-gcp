@@ -15,11 +15,11 @@ import (
 // SecretManagerTools provides MCP tool definitions and handlers for Secret Manager operations.
 // Only secret metadata is returned — secret values are never read or exposed.
 type SecretManagerTools struct {
-	svc ports.GCPService
+	svc ports.SecretManagerService
 	log *slog.Logger
 }
 
-func NewSecretManagerTools(svc ports.GCPService, log *slog.Logger) *SecretManagerTools {
+func NewSecretManagerTools(svc ports.SecretManagerService, log *slog.Logger) *SecretManagerTools {
 	return &SecretManagerTools{svc: svc, log: log}
 }
 

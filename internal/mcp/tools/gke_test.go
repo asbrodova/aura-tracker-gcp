@@ -7,7 +7,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/asbrodova/aura-tracker-gcp/internal/gcp"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -38,7 +38,7 @@ func TestListClustersHandler_Success(t *testing.T) {
 
 func TestListClustersHandler_PermissionDenied(t *testing.T) {
 	mock := &mockGCPService{
-		returnListClustersErr: &gcp.PermissionDeniedError{Op: "gke.ListClusters"},
+		returnListClustersErr: &ports.PermissionDeniedError{Op: "gke.ListClusters"},
 	}
 	tools := NewGKETools(mock, slog.Default())
 
@@ -130,5 +130,47 @@ func TestGetClusterBottlenecksHandler_Success(t *testing.T) {
 	}
 	if result == nil || result.IsError {
 		t.Error("expected success result")
+	}
+}
+
+func TestListClustersHandler_PropagatesArgs(t *testing.T) {
+	mock := &mockGCPService{}
+	tools := NewGKETools(mock, slog.Default())
+
+	_, _ = tools.listClustersHandler(context.Background(), mcp.CallToolRequest{},
+		models.ListClustersRequest{ProjectID: "target-proj", Location: "us-central1"},
+	)
+
+	if mock.capturedListClusters.ProjectID != "target-proj" {
+		t.Errorf("ProjectID: want target-proj, got %q", mock.capturedListClusters.ProjectID)
+	}
+	if mock.capturedListClusters.Location != "us-central1" {
+		t.Errorf("Location: want us-central1, got %q", mock.capturedListClusters.Location)
+	}
+}
+
+func TestScaleDeploymentHandler_PropagatesArgs(t *testing.T) {
+	mock := &mockGCPService{}
+	tools := NewGKETools(mock, slog.Default())
+
+	_, _ = tools.scaleDeploymentHandler(context.Background(), mcp.CallToolRequest{},
+		models.ScaleDeploymentRequest{
+			ProjectID:    "proj-x",
+			ClusterName:  "cluster-y",
+			NodePoolName: "pool-z",
+			NodeCount:    7,
+			DryRun:       true,
+		},
+	)
+
+	got := mock.capturedScaleDeployment
+	if got.ProjectID != "proj-x" {
+		t.Errorf("ProjectID: want proj-x, got %q", got.ProjectID)
+	}
+	if got.NodeCount != 7 {
+		t.Errorf("NodeCount: want 7, got %d", got.NodeCount)
+	}
+	if !got.DryRun {
+		t.Error("DryRun: want true, got false")
 	}
 }

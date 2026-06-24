@@ -15,11 +15,11 @@ import (
 // SupplyChainTools provides MCP tool definitions for GCP supply chain resources:
 // Artifact Registry, Cloud Build, and Service Directory.
 type SupplyChainTools struct {
-	svc ports.GCPService
+	svc ports.SupplyChainService
 	log *slog.Logger
 }
 
-func NewSupplyChainTools(svc ports.GCPService, log *slog.Logger) *SupplyChainTools {
+func NewSupplyChainTools(svc ports.SupplyChainService, log *slog.Logger) *SupplyChainTools {
 	return &SupplyChainTools{svc: svc, log: log}
 }
 

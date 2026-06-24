@@ -15,11 +15,11 @@ import (
 // ArchGraphTools provides the MCP tool definition and handler for the master
 // architecture graph export.
 type ArchGraphTools struct {
-	svc ports.GCPService
+	svc ports.ArchGraphService
 	log *slog.Logger
 }
 
-func NewArchGraphTools(svc ports.GCPService, log *slog.Logger) *ArchGraphTools {
+func NewArchGraphTools(svc ports.ArchGraphService, log *slog.Logger) *ArchGraphTools {
 	return &ArchGraphTools{svc: svc, log: log}
 }
 
