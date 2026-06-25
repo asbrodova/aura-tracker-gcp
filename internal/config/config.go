@@ -1,3 +1,4 @@
+// Package config loads optional user-level defaults from ~/.aura-tracker.yaml.
 package config
 
 import (
