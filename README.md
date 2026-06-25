@@ -20,6 +20,8 @@
 <!-- Add a demo GIF here: -->
 <!-- ![Demo: Claude calling gcp_project_aura_summary](docs/demo.gif) -->
 
+**[→ Jump to Quick Start](#quick-start)**
+
 ---
 
 ## Why Aura Tracker GCP?
@@ -65,15 +67,6 @@ All 69 tools are registered by default, which consumes LLM context on every turn
 | Full toolkit | *(omit flag)* | 69 |
 
 See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
-
-### Roadmap
-
-Planned enhancements — contributions welcome:
-
-- **GKE cluster scoring enhancements:** extend `gcp_gke_get_aura_score` with cluster-level autoscaling efficiency signals and control-plane version drift detection across node pools
-- **Storage bucket cost-efficiency scoring:** `gcp_gcs_get_aura_score` currently covers security posture (PAP, UBLA, versioning); lifecycle policy analysis and storage-class-vs-access-frequency scoring are planned
-- **GCP DLP Phase 2:** `DLPAnonymizer` is scaffolded in `internal/anonymize/dlp.go` with a compile-time interface check; production wiring to the GCP DLP API is a planned contribution point
-- **Kubernetes Deployment scaling:** `gcp_gke_scale_deployment` currently resizes GKE **node pools** via the GKE management API; scaling individual Kubernetes Deployments requires `k8s.io/client-go` and is not yet implemented
 
 ---
 
