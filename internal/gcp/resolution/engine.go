@@ -30,11 +30,11 @@ func Resolve(in models.ResolutionInput) models.ResolutionOutput {
 	}
 
 	ctx := &resolveCtx{
-		in:      in,
-		byID:    nodeByID,
-		byName:  buildNameIndex(in.Nodes),
-		edges:   map[edgeKey]models.GraphEdge{},
-		minted:  map[string]models.GraphNode{},
+		in:     in,
+		byID:   nodeByID,
+		byName: buildNameIndex(in.Nodes),
+		edges:  map[edgeKey]models.GraphEdge{},
+		minted: map[string]models.GraphNode{},
 	}
 
 	runPass1(ctx)

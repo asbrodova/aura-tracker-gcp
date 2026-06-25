@@ -103,7 +103,7 @@ func (t *CloudRunTools) getServiceDetailsHandler(ctx context.Context, _ mcp.Call
 func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_update_traffic",
 		mcp.WithDescription(
-			"Update the traffic split for a Cloud Run service. " +
+			"Update the traffic split for a Cloud Run service. "+
 				"Mutation: dry_run=true → plan_id + before/after preview; confirm_plan_id=<id> executes (TTL 10 min).",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),

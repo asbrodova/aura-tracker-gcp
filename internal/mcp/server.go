@@ -54,7 +54,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		version,
 		server.WithToolCapabilities(false),
 		server.WithResourceCapabilities(false, true), // subscribe=false, listChanged=true
-		server.WithPromptCapabilities(true),           // listChanged=true
+		server.WithPromptCapabilities(true),          // listChanged=true
 	)
 
 	wrap := func(t server.ServerTool) server.ServerTool {

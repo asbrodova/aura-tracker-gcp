@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	archGraphCacheTTL   = 5 * time.Minute
-	archGraphTimeout    = 240 * time.Second
-	batch1Concurrency   = 20
-	batch2Concurrency   = 6
+	archGraphCacheTTL = 5 * time.Minute
+	archGraphTimeout  = 240 * time.Second
+	batch1Concurrency = 20
+	batch2Concurrency = 6
 )
 
 func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
@@ -76,10 +76,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	// Phase 1 listers
 	b1.Go(func() error {
 		r, err := a.ListServices(b1ctx, models.ListServicesRequest{ProjectID: req.ProjectID, Region: region})
-		if err != nil { collectErr("run.services.list", err); return nil }
+		if err != nil {
+			collectErr("run.services.list", err)
+			return nil
+		}
 		for _, s := range r.Services {
 			node := models.GraphNode{
-				ID: graphURN("run", s.Region, req.ProjectID, models.KindCloudRunService, s.Name),
+				ID:   graphURN("run", s.Region, req.ProjectID, models.KindCloudRunService, s.Name),
 				Kind: models.KindCloudRunService, Name: s.Name,
 				Region: s.Region, ProjectID: req.ProjectID, URL: s.URL,
 			}
@@ -89,10 +92,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListJobs(b1ctx, models.ListJobsRequest{ProjectID: req.ProjectID, Region: region})
-		if err != nil { collectErr("run.jobs.list", err); return nil }
+		if err != nil {
+			collectErr("run.jobs.list", err)
+			return nil
+		}
 		for _, j := range r.Jobs {
 			addNode(models.GraphNode{
-				ID: graphURN("run", j.Region, req.ProjectID, models.KindCloudRunJob, j.Name),
+				ID:   graphURN("run", j.Region, req.ProjectID, models.KindCloudRunJob, j.Name),
 				Kind: models.KindCloudRunJob, Name: j.Name,
 				Region: j.Region, ProjectID: req.ProjectID,
 			})
@@ -101,14 +107,17 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListFunctions(b1ctx, models.ListFunctionsRequest{ProjectID: req.ProjectID, Region: region, Generation: "both"})
-		if err != nil { collectErr("cloudfunctions.list", err); return nil }
+		if err != nil {
+			collectErr("cloudfunctions.list", err)
+			return nil
+		}
 		for _, f := range r.Functions {
 			kind := models.KindCloudFunctionV1
 			if f.Generation == 2 {
 				kind = models.KindCloudFunctionV2
 			}
 			addNode(models.GraphNode{
-				ID: graphURN("cloudfunctions", f.Region, req.ProjectID, kind, f.Name),
+				ID:   graphURN("cloudfunctions", f.Region, req.ProjectID, kind, f.Name),
 				Kind: kind, Name: f.Name,
 				Region: f.Region, ProjectID: req.ProjectID,
 			})
@@ -117,10 +126,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListTriggers(b1ctx, models.ListTriggersRequest{ProjectID: req.ProjectID, Region: region})
-		if err != nil { collectErr("eventarc.triggers.list", err); return nil }
+		if err != nil {
+			collectErr("eventarc.triggers.list", err)
+			return nil
+		}
 		for _, t := range r.Triggers {
 			addNode(models.GraphNode{
-				ID: graphURN("eventarc", t.Region, req.ProjectID, models.KindEventarcTrigger, t.Name),
+				ID:   graphURN("eventarc", t.Region, req.ProjectID, models.KindEventarcTrigger, t.Name),
 				Kind: models.KindEventarcTrigger, Name: t.Name,
 				Region: t.Region, ProjectID: req.ProjectID,
 			})
@@ -129,10 +141,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListSchedulerJobs(b1ctx, models.ListSchedulerJobsRequest{ProjectID: req.ProjectID, Region: region})
-		if err != nil { collectErr("cloudscheduler.jobs.list", err); return nil }
+		if err != nil {
+			collectErr("cloudscheduler.jobs.list", err)
+			return nil
+		}
 		for _, j := range r.Jobs {
 			addNode(models.GraphNode{
-				ID: graphURN("scheduler", j.Region, req.ProjectID, models.KindSchedulerJob, j.Name),
+				ID:   graphURN("scheduler", j.Region, req.ProjectID, models.KindSchedulerJob, j.Name),
 				Kind: models.KindSchedulerJob, Name: j.Name,
 				Region: j.Region, ProjectID: req.ProjectID,
 			})
@@ -141,10 +156,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListWorkflows(b1ctx, models.ListWorkflowsRequest{ProjectID: req.ProjectID, Region: region})
-		if err != nil { collectErr("workflows.list", err); return nil }
+		if err != nil {
+			collectErr("workflows.list", err)
+			return nil
+		}
 		for _, w := range r.Workflows {
 			addNode(models.GraphNode{
-				ID: graphURN("workflows", w.Region, req.ProjectID, models.KindWorkflow, w.Name),
+				ID:   graphURN("workflows", w.Region, req.ProjectID, models.KindWorkflow, w.Name),
 				Kind: models.KindWorkflow, Name: w.Name,
 				Region: w.Region, ProjectID: req.ProjectID,
 			})
@@ -153,10 +171,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListTaskQueues(b1ctx, models.ListTaskQueuesRequest{ProjectID: req.ProjectID, Region: region})
-		if err != nil { collectErr("tasks.queues.list", err); return nil }
+		if err != nil {
+			collectErr("tasks.queues.list", err)
+			return nil
+		}
 		for _, q := range r.Queues {
 			addNode(models.GraphNode{
-				ID: graphURN("tasks", q.Region, req.ProjectID, models.KindTasksQueue, q.Name),
+				ID:   graphURN("tasks", q.Region, req.ProjectID, models.KindTasksQueue, q.Name),
 				Kind: models.KindTasksQueue, Name: q.Name,
 				Region: q.Region, ProjectID: req.ProjectID,
 			})
@@ -165,10 +186,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListSecrets(b1ctx, models.ListSecretsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("secretmanager.secrets.list", err); return nil }
+		if err != nil {
+			collectErr("secretmanager.secrets.list", err)
+			return nil
+		}
 		for _, s := range r.Secrets {
 			addNode(models.GraphNode{
-				ID: graphURN("secretmanager", "-", req.ProjectID, models.KindSecret, s.Name),
+				ID:   graphURN("secretmanager", "-", req.ProjectID, models.KindSecret, s.Name),
 				Kind: models.KindSecret, Name: s.Name, ProjectID: req.ProjectID,
 			})
 		}
@@ -176,22 +200,30 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListSubscriptions(b1ctx, models.ListSubscriptionsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("pubsub.subscriptions.list", err); return nil }
+		if err != nil {
+			collectErr("pubsub.subscriptions.list", err)
+			return nil
+		}
 		for _, s := range r.Subscriptions {
 			addNode(models.GraphNode{
-				ID: graphURN("pubsub", "-", req.ProjectID, models.KindPubSubSubscription, s.Name),
+				ID:   graphURN("pubsub", "-", req.ProjectID, models.KindPubSubSubscription, s.Name),
 				Kind: models.KindPubSubSubscription, Name: s.Name, ProjectID: req.ProjectID,
 			})
 		}
-		mu.Lock(); subscriptions = r.Subscriptions; mu.Unlock()
+		mu.Lock()
+		subscriptions = r.Subscriptions
+		mu.Unlock()
 		return nil
 	})
 	b1.Go(func() error {
 		r, err := a.ListVPCConnectors(b1ctx, models.ListVPCConnectorsRequest{ProjectID: req.ProjectID, Region: region})
-		if err != nil { collectErr("vpcaccess.connectors.list", err); return nil }
+		if err != nil {
+			collectErr("vpcaccess.connectors.list", err)
+			return nil
+		}
 		for _, c := range r.Connectors {
 			addNode(models.GraphNode{
-				ID: graphURN("vpcaccess", c.Region, req.ProjectID, models.KindVPCConnector, c.Name),
+				ID:   graphURN("vpcaccess", c.Region, req.ProjectID, models.KindVPCConnector, c.Name),
 				Kind: models.KindVPCConnector, Name: c.Name,
 				Region: c.Region, ProjectID: req.ProjectID,
 			})
@@ -200,10 +232,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListSQLInstances(b1ctx, models.ListSQLInstancesRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("sqladmin.instances.list", err); return nil }
+		if err != nil {
+			collectErr("sqladmin.instances.list", err)
+			return nil
+		}
 		for _, s := range r.Instances {
 			addNode(models.GraphNode{
-				ID: graphURN("sqladmin", s.Region, req.ProjectID, models.KindCloudSQLInstance, s.Name),
+				ID:   graphURN("sqladmin", s.Region, req.ProjectID, models.KindCloudSQLInstance, s.Name),
 				Kind: models.KindCloudSQLInstance, Name: s.Name,
 				Region: s.Region, ProjectID: req.ProjectID,
 			})
@@ -212,10 +247,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListTopics(b1ctx, models.ListTopicsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("pubsub.topics.list", err); return nil }
+		if err != nil {
+			collectErr("pubsub.topics.list", err)
+			return nil
+		}
 		for _, t := range r.Topics {
 			addNode(models.GraphNode{
-				ID: graphURN("pubsub", "-", req.ProjectID, models.KindPubSubTopic, t.Name),
+				ID:   graphURN("pubsub", "-", req.ProjectID, models.KindPubSubTopic, t.Name),
 				Kind: models.KindPubSubTopic, Name: t.Name, ProjectID: req.ProjectID,
 			})
 		}
@@ -225,10 +263,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	// Phase 2 listers
 	b1.Go(func() error {
 		r, err := a.ListSpannerInstances(b1ctx, models.ListSpannerInstancesRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("spanner.instances.list", err); return nil }
+		if err != nil {
+			collectErr("spanner.instances.list", err)
+			return nil
+		}
 		for _, s := range r.Instances {
 			addNode(models.GraphNode{
-				ID: graphURN("spanner", "-", req.ProjectID, models.KindSpannerInstance, s.Name),
+				ID:   graphURN("spanner", "-", req.ProjectID, models.KindSpannerInstance, s.Name),
 				Kind: models.KindSpannerInstance, Name: s.Name, ProjectID: req.ProjectID,
 			})
 		}
@@ -236,10 +277,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListAlloyDBClusters(b1ctx, models.ListAlloyDBClustersRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("alloydb.clusters.list", err); return nil }
+		if err != nil {
+			collectErr("alloydb.clusters.list", err)
+			return nil
+		}
 		for _, c := range r.Clusters {
 			addNode(models.GraphNode{
-				ID: graphURN("alloydb", c.Location, req.ProjectID, models.KindAlloyDBCluster, c.Name),
+				ID:   graphURN("alloydb", c.Location, req.ProjectID, models.KindAlloyDBCluster, c.Name),
 				Kind: models.KindAlloyDBCluster, Name: c.Name,
 				Region: c.Location, ProjectID: req.ProjectID,
 			})
@@ -248,10 +292,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListFirestoreDatabases(b1ctx, models.ListFirestoreDatabasesRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("firestore.databases.list", err); return nil }
+		if err != nil {
+			collectErr("firestore.databases.list", err)
+			return nil
+		}
 		for _, d := range r.Databases {
 			addNode(models.GraphNode{
-				ID: graphURN("firestore", d.LocationID, req.ProjectID, models.KindFirestoreDatabase, d.Name),
+				ID:   graphURN("firestore", d.LocationID, req.ProjectID, models.KindFirestoreDatabase, d.Name),
 				Kind: models.KindFirestoreDatabase, Name: d.Name,
 				Region: d.LocationID, ProjectID: req.ProjectID,
 			})
@@ -260,10 +307,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListMemorystoreInstances(b1ctx, models.ListMemorystoreInstancesRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("redis.instances.list", err); return nil }
+		if err != nil {
+			collectErr("redis.instances.list", err)
+			return nil
+		}
 		for _, m := range r.Instances {
 			addNode(models.GraphNode{
-				ID: graphURN("redis", m.LocationID, req.ProjectID, models.KindMemorystoreInstance, m.Name),
+				ID:   graphURN("redis", m.LocationID, req.ProjectID, models.KindMemorystoreInstance, m.Name),
 				Kind: models.KindMemorystoreInstance, Name: m.Name,
 				Region: m.LocationID, ProjectID: req.ProjectID,
 			})
@@ -272,10 +322,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListArtifactRegistryRepos(b1ctx, models.ListArtifactRegistryReposRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("artifactregistry.repositories.list", err); return nil }
+		if err != nil {
+			collectErr("artifactregistry.repositories.list", err)
+			return nil
+		}
 		for _, repo := range r.Repositories {
 			addNode(models.GraphNode{
-				ID: graphURN("artifactregistry", repo.Location, req.ProjectID, models.KindArtifactRegistryRepo, repo.Name),
+				ID:   graphURN("artifactregistry", repo.Location, req.ProjectID, models.KindArtifactRegistryRepo, repo.Name),
 				Kind: models.KindArtifactRegistryRepo, Name: repo.Name,
 				Region: repo.Location, ProjectID: req.ProjectID,
 			})
@@ -284,10 +337,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListCloudBuildTriggers(b1ctx, models.ListCloudBuildTriggersRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("cloudbuild.triggers.list", err); return nil }
+		if err != nil {
+			collectErr("cloudbuild.triggers.list", err)
+			return nil
+		}
 		for _, t := range r.Triggers {
 			addNode(models.GraphNode{
-				ID: graphURN("cloudbuild", "-", req.ProjectID, models.KindCloudBuildTrigger, t.Name),
+				ID:   graphURN("cloudbuild", "-", req.ProjectID, models.KindCloudBuildTrigger, t.Name),
 				Kind: models.KindCloudBuildTrigger, Name: t.Name, ProjectID: req.ProjectID,
 			})
 		}
@@ -295,10 +351,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListServiceDirectoryNamespaces(b1ctx, models.ListServiceDirectoryNamespacesRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("servicedirectory.namespaces.list", err); return nil }
+		if err != nil {
+			collectErr("servicedirectory.namespaces.list", err)
+			return nil
+		}
 		for _, ns := range r.Namespaces {
 			addNode(models.GraphNode{
-				ID: graphURN("servicedirectory", ns.Location, req.ProjectID, models.KindServiceDirectoryNamespace, ns.Name),
+				ID:   graphURN("servicedirectory", ns.Location, req.ProjectID, models.KindServiceDirectoryNamespace, ns.Name),
 				Kind: models.KindServiceDirectoryNamespace, Name: ns.Name,
 				Region: ns.Location, ProjectID: req.ProjectID,
 			})
@@ -307,10 +366,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListLoadBalancers(b1ctx, models.ListLoadBalancersRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("compute.forwardingRules.list", err); return nil }
+		if err != nil {
+			collectErr("compute.forwardingRules.list", err)
+			return nil
+		}
 		for _, lb := range r.LoadBalancers {
 			addNode(models.GraphNode{
-				ID: graphURN("compute", lb.Region, req.ProjectID, models.KindComputeLB, lb.Name),
+				ID:   graphURN("compute", lb.Region, req.ProjectID, models.KindComputeLB, lb.Name),
 				Kind: models.KindComputeLB, Name: lb.Name,
 				Region: lb.Region, ProjectID: req.ProjectID,
 			})
@@ -319,10 +381,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListURLMaps(b1ctx, models.ListURLMapsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("compute.urlMaps.list", err); return nil }
+		if err != nil {
+			collectErr("compute.urlMaps.list", err)
+			return nil
+		}
 		for _, u := range r.URLMaps {
 			addNode(models.GraphNode{
-				ID: graphURN("compute", u.Region, req.ProjectID, models.KindComputeURLMap, u.Name),
+				ID:   graphURN("compute", u.Region, req.ProjectID, models.KindComputeURLMap, u.Name),
 				Kind: models.KindComputeURLMap, Name: u.Name,
 				Region: u.Region, ProjectID: req.ProjectID,
 			})
@@ -331,10 +396,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListNEGs(b1ctx, models.ListNEGsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("compute.networkEndpointGroups.list", err); return nil }
+		if err != nil {
+			collectErr("compute.networkEndpointGroups.list", err)
+			return nil
+		}
 		for _, n := range r.NEGs {
 			node := models.GraphNode{
-				ID: graphURN("compute", n.Region, req.ProjectID, models.KindComputeNEG, n.Name),
+				ID:   graphURN("compute", n.Region, req.ProjectID, models.KindComputeNEG, n.Name),
 				Kind: models.KindComputeNEG, Name: n.Name,
 				Region: n.Region, ProjectID: req.ProjectID,
 			}
@@ -347,10 +415,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListAPIGateways(b1ctx, models.ListAPIGatewaysRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("apigateway.gateways.list", err); return nil }
+		if err != nil {
+			collectErr("apigateway.gateways.list", err)
+			return nil
+		}
 		for _, gw := range r.Gateways {
 			addNode(models.GraphNode{
-				ID: graphURN("apigateway", gw.Location, req.ProjectID, models.KindAPIGateway, gw.Name),
+				ID:   graphURN("apigateway", gw.Location, req.ProjectID, models.KindAPIGateway, gw.Name),
 				Kind: models.KindAPIGateway, Name: gw.Name,
 				Region: gw.Location, ProjectID: req.ProjectID,
 			})
@@ -359,10 +430,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListVPCNetworks(b1ctx, models.ListVPCNetworksRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("compute.networks.list", err); return nil }
+		if err != nil {
+			collectErr("compute.networks.list", err)
+			return nil
+		}
 		for _, n := range r.Networks {
 			addNode(models.GraphNode{
-				ID: graphURN("compute", "-", req.ProjectID, models.KindVPCNetwork, n.Name),
+				ID:   graphURN("compute", "-", req.ProjectID, models.KindVPCNetwork, n.Name),
 				Kind: models.KindVPCNetwork, Name: n.Name, ProjectID: req.ProjectID,
 				Network: n.SelfLink,
 			})
@@ -371,10 +445,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListVPCSubnets(b1ctx, models.ListVPCSubnetsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("compute.subnetworks.list", err); return nil }
+		if err != nil {
+			collectErr("compute.subnetworks.list", err)
+			return nil
+		}
 		for _, s := range r.Subnets {
 			addNode(models.GraphNode{
-				ID: graphURN("compute", s.Region, req.ProjectID, models.KindVPCSubnet, s.Name),
+				ID:   graphURN("compute", s.Region, req.ProjectID, models.KindVPCSubnet, s.Name),
 				Kind: models.KindVPCSubnet, Name: s.Name,
 				Region: s.Region, ProjectID: req.ProjectID,
 				Network: s.Network,
@@ -384,10 +461,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListPSCEndpoints(b1ctx, models.ListPSCEndpointsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("compute.forwardingRules.psc.list", err); return nil }
+		if err != nil {
+			collectErr("compute.forwardingRules.psc.list", err)
+			return nil
+		}
 		for _, p := range r.Endpoints {
 			node := models.GraphNode{
-				ID: graphURN("compute", p.Region, req.ProjectID, models.KindPSCEndpoint, p.Name),
+				ID:   graphURN("compute", p.Region, req.ProjectID, models.KindPSCEndpoint, p.Name),
 				Kind: models.KindPSCEndpoint, Name: p.Name,
 				Region: p.Region, ProjectID: req.ProjectID,
 			}
@@ -400,10 +480,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListServiceAccounts(b1ctx, models.ListServiceAccountsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("iam.serviceAccounts.list", err); return nil }
+		if err != nil {
+			collectErr("iam.serviceAccounts.list", err)
+			return nil
+		}
 		for _, sa := range r.ServiceAccounts {
 			addNode(models.GraphNode{
-				ID: graphURN("iam", "-", req.ProjectID, models.KindIAMServiceAccount, sa.Email),
+				ID:   graphURN("iam", "-", req.ProjectID, models.KindIAMServiceAccount, sa.Email),
 				Kind: models.KindIAMServiceAccount, Name: sa.Email, ProjectID: req.ProjectID,
 			})
 		}
@@ -411,10 +494,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	})
 	b1.Go(func() error {
 		r, err := a.ListClusters(b1ctx, models.ListClustersRequest{ProjectID: req.ProjectID, Location: "-"})
-		if err != nil { collectErr("container.clusters.list", err); return nil }
+		if err != nil {
+			collectErr("container.clusters.list", err)
+			return nil
+		}
 		for _, c := range r.Clusters {
 			addNode(models.GraphNode{
-				ID: graphURN("container", c.Location, req.ProjectID, "gke_cluster", c.Name),
+				ID:   graphURN("container", c.Location, req.ProjectID, "gke_cluster", c.Name),
 				Kind: "gke_cluster", Name: c.Name,
 				Region: c.Location, ProjectID: req.ProjectID,
 			})
@@ -448,13 +534,16 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 				wr, err := a.ListGKEWorkloads(b2ctx, models.ListGKEWorkloadsRequest{
 					ProjectID: req.ProjectID, Location: cl.Region, ClusterName: cl.Name,
 				})
-				if err != nil { collectErr("container.workloads.list."+cl.Name, err); return nil }
+				if err != nil {
+					collectErr("container.workloads.list."+cl.Name, err)
+					return nil
+				}
 				mu.Lock()
 				workloads = append(workloads, wr.Workloads...)
 				mu.Unlock()
 				for _, w := range wr.Workloads {
 					addNode(models.GraphNode{
-						ID: graphURN("k8s", cl.Region, req.ProjectID, w.Kind, cl.Name+"/"+w.Namespace+"/"+w.Name),
+						ID:   graphURN("k8s", cl.Region, req.ProjectID, w.Kind, cl.Name+"/"+w.Namespace+"/"+w.Name),
 						Kind: w.Kind, Name: w.Name,
 						Region: cl.Region, ProjectID: req.ProjectID,
 						Namespace: w.Namespace, ClusterName: cl.Name,
@@ -468,13 +557,16 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 				sr, err := a.ListGKEServices(b2ctx, models.ListGKEServicesRequest{
 					ProjectID: req.ProjectID, Location: cl.Region, ClusterName: cl.Name,
 				})
-				if err != nil { collectErr("container.k8sServices.list."+cl.Name, err); return nil }
+				if err != nil {
+					collectErr("container.k8sServices.list."+cl.Name, err)
+					return nil
+				}
 				mu.Lock()
 				k8sServices = append(k8sServices, sr.Services...)
 				mu.Unlock()
 				for _, svc := range sr.Services {
 					addNode(models.GraphNode{
-						ID: graphURN("k8s", cl.Region, req.ProjectID, models.KindGKEService, cl.Name+"/"+svc.Namespace+"/"+svc.Name),
+						ID:   graphURN("k8s", cl.Region, req.ProjectID, models.KindGKEService, cl.Name+"/"+svc.Namespace+"/"+svc.Name),
 						Kind: models.KindGKEService, Name: svc.Name,
 						Region: cl.Region, ProjectID: req.ProjectID,
 						Namespace: svc.Namespace, ClusterName: cl.Name,
@@ -486,13 +578,16 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 				ir, err := a.ListGKEIngresses(b2ctx, models.ListGKEIngressesRequest{
 					ProjectID: req.ProjectID, Location: cl.Region, ClusterName: cl.Name,
 				})
-				if err != nil { collectErr("container.ingresses.list."+cl.Name, err); return nil }
+				if err != nil {
+					collectErr("container.ingresses.list."+cl.Name, err)
+					return nil
+				}
 				mu.Lock()
 				ingresses = append(ingresses, ir.Ingresses...)
 				mu.Unlock()
 				for _, ing := range ir.Ingresses {
 					addNode(models.GraphNode{
-						ID: graphURN("k8s", cl.Region, req.ProjectID, ing.Kind, cl.Name+"/"+ing.Namespace+"/"+ing.Name),
+						ID:   graphURN("k8s", cl.Region, req.ProjectID, ing.Kind, cl.Name+"/"+ing.Namespace+"/"+ing.Name),
 						Kind: ing.Kind, Name: ing.Name,
 						Region: cl.Region, ProjectID: req.ProjectID,
 						Namespace: ing.Namespace, ClusterName: cl.Name,
@@ -517,8 +612,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			ProjectID:     req.ProjectID,
 			LookbackHours: lookbackHours,
 		})
-		if err != nil { collectErr("cloudtrace.traces.list", err); return nil }
-		mu.Lock(); traceEdges = r.Edges; mu.Unlock()
+		if err != nil {
+			collectErr("cloudtrace.traces.list", err)
+			return nil
+		}
+		mu.Lock()
+		traceEdges = r.Edges
+		mu.Unlock()
 		return nil
 	})
 
@@ -526,13 +626,18 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 		cl := cl
 		b3.Go(func() error {
 			r, err := a.GetGKEMeshTopology(b3ctx, models.GetGKEMeshTopologyRequest{
-				ProjectID:    req.ProjectID,
-				Location:     cl.Region,
-				ClusterName:  cl.Name,
+				ProjectID:     req.ProjectID,
+				Location:      cl.Region,
+				ClusterName:   cl.Name,
 				LookbackHours: lookbackHours,
 			})
-			if err != nil { collectErr("mesh.topology."+cl.Name, err); return nil }
-			mu.Lock(); meshEdges = append(meshEdges, r.Edges...); mu.Unlock()
+			if err != nil {
+				collectErr("mesh.topology."+cl.Name, err)
+				return nil
+			}
+			mu.Lock()
+			meshEdges = append(meshEdges, r.Edges...)
+			mu.Unlock()
 			return nil
 		})
 	}
@@ -553,14 +658,14 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	sort.Slice(nodeSlice, func(i, j int) bool { return nodeSlice[i].ID < nodeSlice[j].ID })
 
 	resOut := resolution.Resolve(models.ResolutionInput{
-		Nodes:           nodeSlice,
-		Workloads:       workloads,
-		K8sServices:     k8sServices,
-		Ingresses:       ingresses,
-		Subscriptions:   subscriptions,
-		MeshEdges:       meshEdges,
-		TraceEdges:      traceEdges,
-		IncludeExternal: req.IncludeExternal,
+		Nodes:                  nodeSlice,
+		Workloads:              workloads,
+		K8sServices:            k8sServices,
+		Ingresses:              ingresses,
+		Subscriptions:          subscriptions,
+		MeshEdges:              meshEdges,
+		TraceEdges:             traceEdges,
+		IncludeExternal:        req.IncludeExternal,
 		EnableFlowLogInference: req.EnableFlowLogInference,
 	})
 
@@ -580,14 +685,14 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	groups := buildArchGroups(req.ProjectID, nodeSlice)
 
 	graph := models.ServerlessGraph{
-		Nodes:          nodeSlice,
-		Edges:          resOut.Edges,
-		Groups:         groups,
-		Errors:         errs,
-		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
-		ProjectID:      req.ProjectID,
-		LookbackHours:  lookbackHours,
-		ToolVersion:    "phase2",
+		Nodes:         nodeSlice,
+		Edges:         resOut.Edges,
+		Groups:        groups,
+		Errors:        errs,
+		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
+		ProjectID:     req.ProjectID,
+		LookbackHours: lookbackHours,
+		ToolVersion:   "phase2",
 	}
 	if len(req.Regions) > 0 {
 		graph.RegionsScanned = req.Regions

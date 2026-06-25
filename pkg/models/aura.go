@@ -105,7 +105,7 @@ const (
 // GCSAuraDetails contains the raw GCS configuration signals for inspection.
 type GCSAuraDetails struct {
 	UniformBucketLevelAccess bool   `json:"ubla"`
-	PublicAccessPrevention   string `json:"pap"`               // "enforced" | "inherited"
+	PublicAccessPrevention   string `json:"pap"` // "enforced" | "inherited"
 	VersioningEnabled        bool   `json:"versioning"`
 	LifecycleRuleCount       int    `json:"lifecycle_rule_count"`
 	StorageClass             string `json:"storage_class"`
@@ -127,8 +127,8 @@ type GCSAuraReport struct {
 // ProjectAuraSummaryResponse lists all discovered resources with their Aura Scores.
 type ProjectAuraSummaryResponse struct {
 	ProjectID     string       `json:"project_id"`
-	Resources     []AuraReport `json:"resources"`      // sorted worst-first
-	Summary       string       `json:"summary"`        // pre-formatted emoji block for LLM display
+	Resources     []AuraReport `json:"resources"` // sorted worst-first
+	Summary       string       `json:"summary"`   // pre-formatted emoji block for LLM display
 	TotalCount    int          `json:"total_count"`
 	CriticalCount int          `json:"critical_count"`
 	WarningCount  int          `json:"warning_count"`

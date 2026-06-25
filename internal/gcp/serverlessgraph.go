@@ -18,18 +18,18 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 	// --- Fan out all listers in parallel ---
 
 	type listResult struct {
-		services     []models.ServiceSummary
-		jobs         []models.JobSummary
-		functions    []models.FunctionSummary
-		triggers     []models.TriggerSummary
+		services      []models.ServiceSummary
+		jobs          []models.JobSummary
+		functions     []models.FunctionSummary
+		triggers      []models.TriggerSummary
 		schedulerJobs []models.SchedulerJobSummary
-		workflows    []models.WorkflowSummary
-		queues       []models.TaskQueueSummary
-		secrets      []models.SecretSummary
+		workflows     []models.WorkflowSummary
+		queues        []models.TaskQueueSummary
+		secrets       []models.SecretSummary
 		subscriptions []models.SubscriptionSummary
-		connectors   []models.VPCConnectorSummary
-		sqlInstances []models.SQLInstanceSummary
-		topics       []models.TopicSummary
+		connectors    []models.VPCConnectorSummary
+		sqlInstances  []models.SQLInstanceSummary
+		topics        []models.TopicSummary
 	}
 
 	var res listResult
@@ -54,74 +54,134 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 
 	g.Go(func() error {
 		r, err := a.ListServices(gctx, models.ListServicesRequest{ProjectID: req.ProjectID, Region: regionFilter})
-		if err != nil { collectErr("run.services.list", err); return nil }
-		mu.Lock(); res.services = r.Services; mu.Unlock()
+		if err != nil {
+			collectErr("run.services.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.services = r.Services
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListJobs(gctx, models.ListJobsRequest{ProjectID: req.ProjectID, Region: regionFilter})
-		if err != nil { collectErr("run.jobs.list", err); return nil }
-		mu.Lock(); res.jobs = r.Jobs; mu.Unlock()
+		if err != nil {
+			collectErr("run.jobs.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.jobs = r.Jobs
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListFunctions(gctx, models.ListFunctionsRequest{ProjectID: req.ProjectID, Region: regionFilter, Generation: "both"})
-		if err != nil { collectErr("cloudfunctions.list", err); return nil }
-		mu.Lock(); res.functions = r.Functions; mu.Unlock()
+		if err != nil {
+			collectErr("cloudfunctions.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.functions = r.Functions
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListTriggers(gctx, models.ListTriggersRequest{ProjectID: req.ProjectID, Region: regionFilter})
-		if err != nil { collectErr("eventarc.triggers.list", err); return nil }
-		mu.Lock(); res.triggers = r.Triggers; mu.Unlock()
+		if err != nil {
+			collectErr("eventarc.triggers.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.triggers = r.Triggers
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListSchedulerJobs(gctx, models.ListSchedulerJobsRequest{ProjectID: req.ProjectID, Region: regionFilter})
-		if err != nil { collectErr("cloudscheduler.jobs.list", err); return nil }
-		mu.Lock(); res.schedulerJobs = r.Jobs; mu.Unlock()
+		if err != nil {
+			collectErr("cloudscheduler.jobs.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.schedulerJobs = r.Jobs
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListWorkflows(gctx, models.ListWorkflowsRequest{ProjectID: req.ProjectID, Region: regionFilter})
-		if err != nil { collectErr("workflows.list", err); return nil }
-		mu.Lock(); res.workflows = r.Workflows; mu.Unlock()
+		if err != nil {
+			collectErr("workflows.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.workflows = r.Workflows
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListTaskQueues(gctx, models.ListTaskQueuesRequest{ProjectID: req.ProjectID, Region: regionFilter})
-		if err != nil { collectErr("cloudtasks.queues.list", err); return nil }
-		mu.Lock(); res.queues = r.Queues; mu.Unlock()
+		if err != nil {
+			collectErr("cloudtasks.queues.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.queues = r.Queues
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListSecrets(gctx, models.ListSecretsRequest{ProjectID: req.ProjectID, IncludeReferences: req.IncludeReferences})
-		if err != nil { collectErr("secretmanager.secrets.list", err); return nil }
-		mu.Lock(); res.secrets = r.Secrets; mu.Unlock()
+		if err != nil {
+			collectErr("secretmanager.secrets.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.secrets = r.Secrets
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListSubscriptions(gctx, models.ListSubscriptionsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("pubsub.subscriptions.list", err); return nil }
-		mu.Lock(); res.subscriptions = r.Subscriptions; mu.Unlock()
+		if err != nil {
+			collectErr("pubsub.subscriptions.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.subscriptions = r.Subscriptions
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListVPCConnectors(gctx, models.ListVPCConnectorsRequest{ProjectID: req.ProjectID, Region: regionFilter})
-		if err != nil { collectErr("vpcaccess.connectors.list", err); return nil }
-		mu.Lock(); res.connectors = r.Connectors; mu.Unlock()
+		if err != nil {
+			collectErr("vpcaccess.connectors.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.connectors = r.Connectors
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListSQLInstances(gctx, models.ListSQLInstancesRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("sqladmin.instances.list", err); return nil }
-		mu.Lock(); res.sqlInstances = r.Instances; mu.Unlock()
+		if err != nil {
+			collectErr("sqladmin.instances.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.sqlInstances = r.Instances
+		mu.Unlock()
 		return nil
 	})
 	g.Go(func() error {
 		r, err := a.ListTopics(gctx, models.ListTopicsRequest{ProjectID: req.ProjectID})
-		if err != nil { collectErr("pubsub.topics.list", err); return nil }
-		mu.Lock(); res.topics = r.Topics; mu.Unlock()
+		if err != nil {
+			collectErr("pubsub.topics.list", err)
+			return nil
+		}
+		mu.Lock()
+		res.topics = r.Topics
+		mu.Unlock()
 		return nil
 	})
 
@@ -151,12 +211,12 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 		}
 		urn := graphURN(svc, fn.Region, req.ProjectID, kind, fn.Name)
 		addNode(models.GraphNode{
-			ID:        urn,
-			Kind:      kind,
-			Name:      fn.Name,
-			Region:    fn.Region,
-			ProjectID: req.ProjectID,
-			URL:       fn.URL,
+			ID:         urn,
+			Kind:       kind,
+			Name:       fn.Name,
+			Region:     fn.Region,
+			ProjectID:  req.ProjectID,
+			URL:        fn.URL,
 			Generation: fn.Generation,
 		})
 	}
@@ -293,8 +353,12 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 	var edges []models.GraphEdge
 
 	addEdge := func(src, tgt, edgeType, evidence string, confidence float64) {
-		if _, ok := nodeByURN[src]; !ok { return }
-		if _, ok := nodeByURN[tgt]; !ok { return }
+		if _, ok := nodeByURN[src]; !ok {
+			return
+		}
+		if _, ok := nodeByURN[tgt]; !ok {
+			return
+		}
 		edges = append(edges, models.GraphEdge{
 			Source:     src,
 			Target:     tgt,

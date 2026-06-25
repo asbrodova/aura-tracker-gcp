@@ -31,7 +31,7 @@ func (t *TopologyTools) GetTools() []server.ServerTool {
 func (t *TopologyTools) GetServiceTopology() server.ServerTool {
 	tool := mcp.NewTool("gcp_get_service_topology",
 		mcp.WithDescription(
-			"Infer Cloud Run service dependencies from Cloud SQL annotations, VPC connector, env vars, " +
+			"Infer Cloud Run service dependencies from Cloud SQL annotations, VPC connector, env vars, "+
 				"Secret Manager refs, and Pub/Sub subscriptions. depth=2 resolves transitive deps.",
 		),
 		mcp.WithString("project", mcp.Required(), mcp.Description("GCP project ID")),

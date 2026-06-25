@@ -84,7 +84,10 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 		region string
 	}
 	var (
-		mu        = new(interface{ Lock(); Unlock() })
+		mu = new(interface {
+			Lock()
+			Unlock()
+		})
 		resources []resource
 	)
 	_ = mu // use a plain slice guarded by errgroup serialisation below

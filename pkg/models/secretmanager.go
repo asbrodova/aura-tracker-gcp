@@ -15,7 +15,7 @@ type SecretSummary struct {
 // ListSecretsRequest lists secrets (metadata only — values are never accessed).
 type ListSecretsRequest struct {
 	ProjectID         string `json:"project_id"`
-	Filter            string `json:"filter,omitempty"`            // optional API-side filter
+	Filter            string `json:"filter,omitempty"`             // optional API-side filter
 	IncludeReferences bool   `json:"include_references,omitempty"` // scan Cloud Run for secretKeyRef usage
 }
 

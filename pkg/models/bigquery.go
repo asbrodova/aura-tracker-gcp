@@ -11,7 +11,7 @@ type DatasetSummary struct {
 }
 
 type ListDatasetsResponse struct {
-	ProjectID string          `json:"project_id"`
+	ProjectID string           `json:"project_id"`
 	Datasets  []DatasetSummary `json:"datasets"`
 }
 

@@ -36,7 +36,7 @@ func (t *AuraTools) GetTools() []server.ServerTool {
 func (t *AuraTools) GetAuraScore() server.ServerTool {
 	tool := mcp.NewTool("gcp_get_aura_score",
 		mcp.WithDescription(
-			"Return an Aura Score (0-100) combining Cloud Monitoring health signals and utilization " +
+			"Return an Aura Score (0-100) combining Cloud Monitoring health signals and utilization "+
 				"efficiency for a resource. Cached 5 min. Bands: green ≥80, yellow 50-79, red <50.",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
@@ -85,7 +85,7 @@ func (t *AuraTools) getAuraScoreHandler(ctx context.Context, _ mcp.CallToolReque
 func (t *AuraTools) ProjectAuraSummary() server.ServerTool {
 	tool := mcp.NewTool("gcp_project_aura_summary",
 		mcp.WithDescription(
-			"Score all Cloud Run, Cloud SQL, BigQuery, and GKE resources with Aura Scores, sorted worst-first. " +
+			"Score all Cloud Run, Cloud SQL, BigQuery, and GKE resources with Aura Scores, sorted worst-first. "+
 				"Includes a pre-formatted summary block.",
 		),
 		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),

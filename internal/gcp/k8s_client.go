@@ -71,7 +71,7 @@ func dialClusterWithTokenSource(endpoint, caCertBase64 string, tokenSrc oauth2.T
 		tokenSrc: tokenSrc,
 	}
 	return &k8sClient{
-		baseURL: "https://" + strings.TrimPrefix(endpoint, "https://"),
+		baseURL:    "https://" + strings.TrimPrefix(endpoint, "https://"),
 		httpClient: &http.Client{Transport: transport},
 	}, nil
 }
@@ -328,16 +328,16 @@ func toWorkloadSummary(w k8sWorkload, kind string) models.GKEWorkloadSummary {
 	kindConst := workloadKindConst(kind)
 
 	return models.GKEWorkloadSummary{
-		Name:          w.Metadata.Name,
-		Namespace:     w.Metadata.Namespace,
-		Kind:          kindConst,
-		Replicas:      replicas,
-		ReadyReplicas: w.Status.ReadyReplicas,
-		Image:         image,
+		Name:           w.Metadata.Name,
+		Namespace:      w.Metadata.Namespace,
+		Kind:           kindConst,
+		Replicas:       replicas,
+		ReadyReplicas:  w.Status.ReadyReplicas,
+		Image:          image,
 		ServiceAccount: sa,
-		SecretRefs:    extractSecretRefs(podSpec),
-		Labels:        w.Metadata.Labels,
-		OtelSidecar:   detectOtelSidecar(podSpec, podMeta),
+		SecretRefs:     extractSecretRefs(podSpec),
+		Labels:         w.Metadata.Labels,
+		OtelSidecar:    detectOtelSidecar(podSpec, podMeta),
 	}
 }
 
@@ -366,9 +366,9 @@ func toWorkloadDetails(w k8sWorkload, kind string) models.GKEWorkloadDetails {
 			envVars = append(envVars, ev)
 		}
 		containers = append(containers, models.GKEContainerSummary{
-			Name:  c.Name,
-			Image: c.Image,
-			Ports: ports,
+			Name:    c.Name,
+			Image:   c.Image,
+			Ports:   ports,
 			EnvVars: envVars,
 			Resources: models.GKEResourceRequirements{
 				CPURequest:    c.Resources.Requests["cpu"],

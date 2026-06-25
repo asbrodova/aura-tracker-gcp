@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	monitoringpb "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"cloud.google.com/go/logging/logadmin"
+	monitoringpb "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"

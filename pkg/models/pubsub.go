@@ -35,11 +35,11 @@ type TopicHealthReport struct {
 
 // SubscriptionSummary is a lightweight view of a Pub/Sub subscription.
 type SubscriptionSummary struct {
-	Name           string `json:"name"`
-	Topic          string `json:"topic"`
-	PushEndpoint   string `json:"push_endpoint,omitempty"`
+	Name            string `json:"name"`
+	Topic           string `json:"topic"`
+	PushEndpoint    string `json:"push_endpoint,omitempty"`
 	DeadLetterTopic string `json:"dead_letter_topic,omitempty"`
-	Filter         string `json:"filter,omitempty"`
+	Filter          string `json:"filter,omitempty"`
 }
 
 // ListSubscriptionsRequest lists subscriptions in a project.
