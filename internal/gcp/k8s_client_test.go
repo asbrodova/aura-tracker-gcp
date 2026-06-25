@@ -193,9 +193,9 @@ func TestDetectOtelSidecar(t *testing.T) {
 		expected bool
 	}{
 		{
-			name: "no otel signals",
-			spec: k8sPodSpec{Containers: []k8sContainer{{Name: "app", Image: "img"}}},
-			meta: k8sMeta{},
+			name:     "no otel signals",
+			spec:     k8sPodSpec{Containers: []k8sContainer{{Name: "app", Image: "img"}}},
+			meta:     k8sMeta{},
 			expected: false,
 		},
 		{
@@ -225,15 +225,15 @@ func TestDetectOtelSidecar(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "sidecar inject annotation",
-			spec: k8sPodSpec{Containers: []k8sContainer{{Name: "app"}}},
-			meta: k8sMeta{Annotations: map[string]string{"sidecar.opentelemetry.io/inject": "true"}},
+			name:     "sidecar inject annotation",
+			spec:     k8sPodSpec{Containers: []k8sContainer{{Name: "app"}}},
+			meta:     k8sMeta{Annotations: map[string]string{"sidecar.opentelemetry.io/inject": "true"}},
 			expected: true,
 		},
 		{
-			name: "instrumentation inject label",
-			spec: k8sPodSpec{Containers: []k8sContainer{{Name: "app"}}},
-			meta: k8sMeta{Labels: map[string]string{"instrumentation.opentelemetry.io/inject-java": "true"}},
+			name:     "instrumentation inject label",
+			spec:     k8sPodSpec{Containers: []k8sContainer{{Name: "app"}}},
+			meta:     k8sMeta{Labels: map[string]string{"instrumentation.opentelemetry.io/inject-java": "true"}},
 			expected: true,
 		},
 		{

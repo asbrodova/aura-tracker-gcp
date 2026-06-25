@@ -73,10 +73,10 @@ func LoadConfig() (Config, error) {
 			return cfg, fmt.Errorf("anonymize: read config %q: %w", path, err)
 		}
 		dec := yaml.NewDecoder(bytes.NewReader(data))
-			dec.KnownFields(true)
-			if err := dec.Decode(&cfg); err != nil {
-				return cfg, fmt.Errorf("anonymize: parse config %q: %w", path, err)
-			}
+		dec.KnownFields(true)
+		if err := dec.Decode(&cfg); err != nil {
+			return cfg, fmt.Errorf("anonymize: parse config %q: %w", path, err)
+		}
 	}
 
 	// Env var takes precedence over YAML field.

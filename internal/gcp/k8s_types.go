@@ -19,17 +19,17 @@ type k8sWorkloadList struct {
 }
 
 type k8sWorkload struct {
-	Metadata k8sMeta      `json:"metadata"`
-	Spec     k8sWorkloadSpec `json:"spec"`
+	Metadata k8sMeta           `json:"metadata"`
+	Spec     k8sWorkloadSpec   `json:"spec"`
 	Status   k8sWorkloadStatus `json:"status"`
 }
 
 type k8sWorkloadSpec struct {
-	Replicas               *int32       `json:"replicas"` // pointer: absent for DaemonSet
-	ServiceAccountName     string       `json:"serviceAccountName"` // top-level (Job/CronJob)
-	Template               k8sPodTemplate `json:"template"`
+	Replicas           *int32         `json:"replicas"`           // pointer: absent for DaemonSet
+	ServiceAccountName string         `json:"serviceAccountName"` // top-level (Job/CronJob)
+	Template           k8sPodTemplate `json:"template"`
 	// CronJob wraps the pod template one level deeper.
-	JobTemplate            *k8sCronJobTemplate `json:"jobTemplate"`
+	JobTemplate *k8sCronJobTemplate `json:"jobTemplate"`
 }
 
 type k8sCronJobTemplate struct {
@@ -39,26 +39,26 @@ type k8sCronJobTemplate struct {
 }
 
 type k8sPodTemplate struct {
-	Metadata k8sMeta     `json:"metadata"`
-	Spec     k8sPodSpec  `json:"spec"`
+	Metadata k8sMeta    `json:"metadata"`
+	Spec     k8sPodSpec `json:"spec"`
 }
 
 type k8sPodSpec struct {
-	ServiceAccountName string         `json:"serviceAccountName"`
-	Containers         []k8sContainer `json:"containers"`
-	InitContainers     []k8sContainer `json:"initContainers"`
-	Volumes            []k8sVolume    `json:"volumes"`
+	ServiceAccountName string            `json:"serviceAccountName"`
+	Containers         []k8sContainer    `json:"containers"`
+	InitContainers     []k8sContainer    `json:"initContainers"`
+	Volumes            []k8sVolume       `json:"volumes"`
 	NodeSelector       map[string]string `json:"nodeSelector"`
 	Tolerations        []k8sToleration   `json:"tolerations"`
 }
 
 type k8sContainer struct {
-	Name      string          `json:"name"`
-	Image     string          `json:"image"`
+	Name      string             `json:"name"`
+	Image     string             `json:"image"`
 	Ports     []k8sContainerPort `json:"ports"`
-	Env       []k8sEnvVar     `json:"env"`
-	EnvFrom   []k8sEnvFrom    `json:"envFrom"`
-	Resources k8sResources    `json:"resources"`
+	Env       []k8sEnvVar        `json:"env"`
+	EnvFrom   []k8sEnvFrom       `json:"envFrom"`
+	Resources k8sResources       `json:"resources"`
 }
 
 type k8sContainerPort struct {
@@ -67,8 +67,8 @@ type k8sContainerPort struct {
 }
 
 type k8sEnvVar struct {
-	Name      string        `json:"name"`
-	Value     string        `json:"value"`
+	Name      string           `json:"name"`
+	Value     string           `json:"value"`
 	ValueFrom *k8sEnvVarSource `json:"valueFrom"`
 }
 
@@ -90,7 +90,7 @@ type k8sSecretEnvSource struct {
 }
 
 type k8sVolume struct {
-	Name   string          `json:"name"`
+	Name   string                 `json:"name"`
 	Secret *k8sSecretVolumeSource `json:"secret"`
 }
 
@@ -121,7 +121,7 @@ type k8sServiceList struct {
 }
 
 type k8sService struct {
-	Metadata k8sMeta       `json:"metadata"`
+	Metadata k8sMeta        `json:"metadata"`
 	Spec     k8sServiceSpec `json:"spec"`
 }
 
@@ -148,7 +148,7 @@ type k8sIngressList struct {
 }
 
 type k8sIngress struct {
-	Metadata k8sMeta      `json:"metadata"`
+	Metadata k8sMeta        `json:"metadata"`
 	Spec     k8sIngressSpec `json:"spec"`
 }
 
@@ -158,7 +158,7 @@ type k8sIngressSpec struct {
 }
 
 type k8sIngressRule struct {
-	Host string        `json:"host"`
+	Host string                   `json:"host"`
 	HTTP *k8sHTTPIngressRuleValue `json:"http"`
 }
 
@@ -167,9 +167,9 @@ type k8sHTTPIngressRuleValue struct {
 }
 
 type k8sHTTPIngressPath struct {
-	Path     string              `json:"path"`
-	PathType string              `json:"pathType"`
-	Backend  k8sIngressBackend  `json:"backend"`
+	Path     string            `json:"path"`
+	PathType string            `json:"pathType"`
+	Backend  k8sIngressBackend `json:"backend"`
 }
 
 type k8sIngressBackend struct {
@@ -177,7 +177,7 @@ type k8sIngressBackend struct {
 }
 
 type k8sIngressServiceBackend struct {
-	Name string             `json:"name"`
+	Name string                `json:"name"`
 	Port k8sServiceBackendPort `json:"port"`
 }
 
@@ -198,14 +198,14 @@ type k8sHTTPRouteList struct {
 }
 
 type k8sHTTPRoute struct {
-	Metadata k8sMeta         `json:"metadata"`
+	Metadata k8sMeta          `json:"metadata"`
 	Spec     k8sHTTPRouteSpec `json:"spec"`
 }
 
 type k8sHTTPRouteSpec struct {
-	Hostnames  []string              `json:"hostnames"`
-	ParentRefs []k8sParentReference  `json:"parentRefs"`
-	Rules      []k8sHTTPRouteRule    `json:"rules"`
+	Hostnames  []string             `json:"hostnames"`
+	ParentRefs []k8sParentReference `json:"parentRefs"`
+	Rules      []k8sHTTPRouteRule   `json:"rules"`
 }
 
 type k8sParentReference struct {
@@ -236,14 +236,14 @@ type k8sNetworkPolicy struct {
 }
 
 type k8sNetworkPolicySpec struct {
-	PodSelector k8sLabelSelector        `json:"podSelector"`
+	PodSelector k8sLabelSelector              `json:"podSelector"`
 	Ingress     []k8sNetworkPolicyIngressRule `json:"ingress"`
 	Egress      []k8sNetworkPolicyEgressRule  `json:"egress"`
-	PolicyTypes []string                `json:"policyTypes"`
+	PolicyTypes []string                      `json:"policyTypes"`
 }
 
 type k8sLabelSelector struct {
-	MatchLabels      map[string]string   `json:"matchLabels"`
+	MatchLabels      map[string]string             `json:"matchLabels"`
 	MatchExpressions []k8sLabelSelectorRequirement `json:"matchExpressions"`
 }
 
@@ -272,4 +272,3 @@ type k8sNetworkPolicyPort struct {
 	Port     any    `json:"port"` // int or string
 	Protocol string `json:"protocol"`
 }
-

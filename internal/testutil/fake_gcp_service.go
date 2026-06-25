@@ -22,24 +22,24 @@ import (
 // zero values and nil errors.
 type FakeGCPService struct {
 	// GKE
-	ListClustersFunc         func(context.Context, models.ListClustersRequest) (models.ListClustersResponse, error)
-	GetClusterDetailsFunc    func(context.Context, models.GetClusterDetailsRequest) (models.ClusterDetails, error)
+	ListClustersFunc          func(context.Context, models.ListClustersRequest) (models.ListClustersResponse, error)
+	GetClusterDetailsFunc     func(context.Context, models.GetClusterDetailsRequest) (models.ClusterDetails, error)
 	GetClusterBottlenecksFunc func(context.Context, models.GetClusterBottlenecksRequest) (models.ClusterBottleneckReport, error)
-	ScaleDeploymentFunc      func(context.Context, models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error)
+	ScaleDeploymentFunc       func(context.Context, models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error)
 
 	// GKE Workloads
-	ListGKEWorkloadsFunc        func(context.Context, models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error)
-	GetGKEWorkloadDetailsFunc   func(context.Context, models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error)
-	ListGKEServicesFunc         func(context.Context, models.ListGKEServicesRequest) (models.ListGKEServicesResponse, error)
-	ListGKEIngressesFunc        func(context.Context, models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error)
-	ListGKENetworkPoliciesFunc  func(context.Context, models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error)
+	ListGKEWorkloadsFunc       func(context.Context, models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error)
+	GetGKEWorkloadDetailsFunc  func(context.Context, models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error)
+	ListGKEServicesFunc        func(context.Context, models.ListGKEServicesRequest) (models.ListGKEServicesResponse, error)
+	ListGKEIngressesFunc       func(context.Context, models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error)
+	ListGKENetworkPoliciesFunc func(context.Context, models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error)
 
 	// GKE Mesh
 	GetGKEMeshTopologyFunc func(context.Context, models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error)
 
 	// Networking
-	ListLoadBalancersFunc  func(context.Context, models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error)
-	ListURLMapsFunc        func(context.Context, models.ListURLMapsRequest) (models.ListURLMapsResponse, error)
+	ListLoadBalancersFunc func(context.Context, models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error)
+	ListURLMapsFunc       func(context.Context, models.ListURLMapsRequest) (models.ListURLMapsResponse, error)
 	ListNEGsFunc          func(context.Context, models.ListNEGsRequest) (models.ListNEGsResponse, error)
 	ListAPIGatewaysFunc   func(context.Context, models.ListAPIGatewaysRequest) (models.ListAPIGatewaysResponse, error)
 	ListVPCNetworksFunc   func(context.Context, models.ListVPCNetworksRequest) (models.ListVPCNetworksResponse, error)
@@ -55,7 +55,7 @@ type FakeGCPService struct {
 	ListJobExecutionsFunc func(context.Context, models.ListJobExecutionsRequest) (models.ListJobExecutionsResponse, error)
 
 	// Functions
-	ListFunctionsFunc    func(context.Context, models.ListFunctionsRequest) (models.ListFunctionsResponse, error)
+	ListFunctionsFunc      func(context.Context, models.ListFunctionsRequest) (models.ListFunctionsResponse, error)
 	GetFunctionDetailsFunc func(context.Context, models.GetFunctionDetailsRequest) (models.FunctionDetails, error)
 
 	// Eventarc
@@ -82,9 +82,9 @@ type FakeGCPService struct {
 	ListSQLInstancesFunc func(context.Context, models.ListSQLInstancesRequest) (models.ListSQLInstancesResponse, error)
 
 	// Pub/Sub
-	ListTopicsFunc       func(context.Context, models.ListTopicsRequest) (models.ListTopicsResponse, error)
+	ListTopicsFunc         func(context.Context, models.ListTopicsRequest) (models.ListTopicsResponse, error)
 	InspectTopicHealthFunc func(context.Context, models.InspectTopicHealthRequest) (models.TopicHealthReport, error)
-	ListSubscriptionsFunc func(context.Context, models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error)
+	ListSubscriptionsFunc  func(context.Context, models.ListSubscriptionsRequest) (models.ListSubscriptionsResponse, error)
 
 	// Logging
 	QueryRecentLogsFunc func(context.Context, models.QueryRecentLogsRequest) (models.QueryRecentLogsResponse, error)
@@ -95,29 +95,29 @@ type FakeGCPService struct {
 	ListTraceServicesFunc        func(context.Context, models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error)
 	ListAlertPoliciesFunc        func(context.Context, models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error)
 	ListUptimeChecksFunc         func(context.Context, models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error)
-	ListSLOsFunc                func(context.Context, models.ListSLOsRequest) (models.ListSLOsResponse, error)
+	ListSLOsFunc                 func(context.Context, models.ListSLOsRequest) (models.ListSLOsResponse, error)
 	ListDashboardsFunc           func(context.Context, models.ListDashboardsRequest) (models.ListDashboardsResponse, error)
 	ListTraceDependencyEdgesFunc func(context.Context, models.ListTraceDependencyEdgesRequest) (models.ListTraceDependencyEdgesResponse, error)
 
 	// IAM
-	TestPermissionsFunc       func(context.Context, models.TestPermissionsRequest) (models.TestPermissionsResponse, error)
+	TestPermissionsFunc        func(context.Context, models.TestPermissionsRequest) (models.TestPermissionsResponse, error)
 	GetResourceIAMBindingsFunc func(context.Context, models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error)
-	ListServiceAccountsFunc   func(context.Context, models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error)
+	ListServiceAccountsFunc    func(context.Context, models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error)
 
 	// Topology
 	GetServiceTopologyFunc func(context.Context, models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error)
 
 	// Aura
-	GetAuraScoreFunc         func(context.Context, models.GetAuraScoreRequest) (models.AuraReport, error)
+	GetAuraScoreFunc          func(context.Context, models.GetAuraScoreRequest) (models.AuraReport, error)
 	GetProjectAuraSummaryFunc func(context.Context, models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error)
 
 	// BigQuery
-	ListDatasetsFunc  func(context.Context, models.ListDatasetsRequest) (models.ListDatasetsResponse, error)
-	ListTablesFunc    func(context.Context, models.ListTablesRequest) (models.ListTablesResponse, error)
+	ListDatasetsFunc   func(context.Context, models.ListDatasetsRequest) (models.ListDatasetsResponse, error)
+	ListTablesFunc     func(context.Context, models.ListTablesRequest) (models.ListTablesResponse, error)
 	GetTableSchemaFunc func(context.Context, models.GetTableSchemaRequest) (models.TableSchemaResponse, error)
 
 	// Storage
-	ListBucketsFunc      func(context.Context, models.ListBucketsRequest) (models.ListBucketsResponse, error)
+	ListBucketsFunc       func(context.Context, models.ListBucketsRequest) (models.ListBucketsResponse, error)
 	GetBucketMetadataFunc func(context.Context, models.GetBucketMetadataRequest) (models.BucketMetadataResponse, error)
 	ListBucketObjectsFunc func(context.Context, models.ListBucketObjectsRequest) (models.ListBucketObjectsResponse, error)
 
@@ -125,16 +125,16 @@ type FakeGCPService struct {
 	ExportServerlessGraphFunc func(context.Context, models.ExportServerlessGraphRequest) (models.ServerlessGraph, error)
 
 	// Datastores
-	ListSpannerInstancesFunc   func(context.Context, models.ListSpannerInstancesRequest) (models.ListSpannerInstancesResponse, error)
-	ListAlloyDBClustersFunc    func(context.Context, models.ListAlloyDBClustersRequest) (models.ListAlloyDBClustersResponse, error)
-	ListFirestoreDatabasesFunc func(context.Context, models.ListFirestoreDatabasesRequest) (models.ListFirestoreDatabasesResponse, error)
+	ListSpannerInstancesFunc     func(context.Context, models.ListSpannerInstancesRequest) (models.ListSpannerInstancesResponse, error)
+	ListAlloyDBClustersFunc      func(context.Context, models.ListAlloyDBClustersRequest) (models.ListAlloyDBClustersResponse, error)
+	ListFirestoreDatabasesFunc   func(context.Context, models.ListFirestoreDatabasesRequest) (models.ListFirestoreDatabasesResponse, error)
 	ListMemorystoreInstancesFunc func(context.Context, models.ListMemorystoreInstancesRequest) (models.ListMemorystoreInstancesResponse, error)
 
 	// Supply Chain
-	ListArtifactRegistryReposFunc       func(context.Context, models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error)
-	ListArtifactRegistryImagesFunc      func(context.Context, models.ListArtifactRegistryImagesRequest) (models.ListArtifactRegistryImagesResponse, error)
-	ListCloudBuildTriggersFunc          func(context.Context, models.ListCloudBuildTriggersRequest) (models.ListCloudBuildTriggersResponse, error)
-	ListServiceDirectoryNamespacesFunc  func(context.Context, models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error)
+	ListArtifactRegistryReposFunc      func(context.Context, models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error)
+	ListArtifactRegistryImagesFunc     func(context.Context, models.ListArtifactRegistryImagesRequest) (models.ListArtifactRegistryImagesResponse, error)
+	ListCloudBuildTriggersFunc         func(context.Context, models.ListCloudBuildTriggersRequest) (models.ListCloudBuildTriggersResponse, error)
+	ListServiceDirectoryNamespacesFunc func(context.Context, models.ListServiceDirectoryNamespacesRequest) (models.ListServiceDirectoryNamespacesResponse, error)
 
 	// Tagging
 	ListTaggedResourcesFunc func(context.Context, models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error)

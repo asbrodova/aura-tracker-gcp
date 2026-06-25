@@ -199,4 +199,3 @@ func parseEventarcResourceName(fullName string) (region, name string) {
 	}
 	return "", fullName
 }
-

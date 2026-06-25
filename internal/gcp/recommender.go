@@ -20,7 +20,7 @@ const (
 
 // recommenderInsight holds the extracted fields from a single active Recommender API recommendation.
 type recommenderInsight struct {
-	subtype        string  // "idle" | "overprovisioned"
+	subtype        string // "idle" | "overprovisioned"
 	description    string
 	monthlySavings float64 // USD — positive means money saved
 }

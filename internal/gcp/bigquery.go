@@ -135,4 +135,3 @@ func convertSchema(schema bigquery.Schema) []models.FieldSchema {
 	}
 	return fields
 }
-

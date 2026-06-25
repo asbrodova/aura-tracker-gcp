@@ -16,13 +16,13 @@ type NodeCoverage struct {
 
 // CoverageSummary aggregates signal presence across all compute nodes.
 type CoverageSummary struct {
-	TotalNodes        int      `json:"total_nodes"`
-	WithMetrics       int      `json:"with_metrics"`
-	WithTraces        int      `json:"with_traces"`
-	WithLogs          int      `json:"with_logs"`
-	WithAlerts        int      `json:"with_alerts"`
-	WithOtelSidecar   int      `json:"with_otel_sidecar"`
-	MeanCoverageScore float64  `json:"mean_coverage_score"`
+	TotalNodes        int     `json:"total_nodes"`
+	WithMetrics       int     `json:"with_metrics"`
+	WithTraces        int     `json:"with_traces"`
+	WithLogs          int     `json:"with_logs"`
+	WithAlerts        int     `json:"with_alerts"`
+	WithOtelSidecar   int     `json:"with_otel_sidecar"`
+	MeanCoverageScore float64 `json:"mean_coverage_score"`
 	// GapNodes lists node URNs with CoverageScore < 0.5, sorted worst-first.
 	GapNodes []string `json:"gap_nodes"`
 }

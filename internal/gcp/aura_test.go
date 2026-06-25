@@ -64,7 +64,7 @@ func TestCloudRunSignalScore_CPU(t *testing.T) {
 		wantScore int
 		wantLabel string
 	}{
-		{0.03, 55, "Warning"},  // over-provisioned
+		{0.03, 55, "Warning"}, // over-provisioned
 		{0.30, 100, "OK"},
 		{0.70, 80, "OK"},
 		{0.85, 50, "Warning"},
@@ -110,7 +110,7 @@ func TestSQLSignalScore(t *testing.T) {
 		wantScore int
 		wantLabel string
 	}{
-		{0.05, 60, "Warning"},  // idle
+		{0.05, 60, "Warning"}, // idle
 		{0.50, 100, "OK"},
 		{0.80, 75, "OK"},
 		{0.90, 40, "Warning"},
@@ -276,10 +276,10 @@ func TestRecommenderSignal_Overprovisioned(t *testing.T) {
 
 func TestApplyRecommenderEfficiency(t *testing.T) {
 	tests := []struct {
-		name      string
-		byName    map[string]int
-		baseEff   int
-		wantEff   int
+		name    string
+		byName  map[string]int
+		baseEff int
+		wantEff int
 	}{
 		{"no recommender", map[string]int{}, 90, 90},
 		{"idle overrides high eff", map[string]int{"recommender_idle": 20}, 90, 20},
@@ -618,10 +618,10 @@ func TestGCSSignalScore(t *testing.T) {
 
 func TestGCSStorageClassScore(t *testing.T) {
 	tests := []struct {
-		class       string
+		class        string
 		hasLifecycle bool
-		wantScore   int
-		wantLabel   string
+		wantScore    int
+		wantLabel    string
 	}{
 		{"NEARLINE", false, 100, "OK"},
 		{"COLDLINE", false, 100, "OK"},
@@ -766,12 +766,12 @@ func TestGKEVersionDriftScore(t *testing.T) {
 		wantScore int
 		wantLabel string
 	}{
-		{"1.29.4-gke.100", "1.29.4-gke.100", 100, "OK"},   // exact match
-		{"1.29.4-gke.50", "1.29.9-gke.200", 100, "OK"},    // same minor, newer patch — still current
+		{"1.29.4-gke.100", "1.29.4-gke.100", 100, "OK"},      // exact match
+		{"1.29.4-gke.50", "1.29.9-gke.200", 100, "OK"},       // same minor, newer patch — still current
 		{"1.28.6-gke.100", "1.29.4-gke.100", 70, "Warning"},  // 1 minor behind
 		{"1.27.3-gke.100", "1.29.4-gke.100", 20, "Critical"}, // 2 minor behind
 		{"1.29.4-gke.100", "", 100, "OK"},                    // no latest known → neutral
-		{"", "1.29.4-gke.100", 100, "OK"},                   // empty current → treat as current
+		{"", "1.29.4-gke.100", 100, "OK"},                    // empty current → treat as current
 	}
 	for _, tt := range tests {
 		score, label := gkeVersionDriftScore(tt.current, tt.latest)

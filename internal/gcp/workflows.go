@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	executionspb "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	workflowspb "cloud.google.com/go/workflows/apiv1/workflowspb"
+	executionspb "cloud.google.com/go/workflows/executions/apiv1/executionspb"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"

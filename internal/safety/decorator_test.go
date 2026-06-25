@@ -7,16 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/asbrodova/aura-tracker-gcp/ports"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 // stubService is a minimal fake ports.GCPService for safety tests.
 // Only the two mutation methods have meaningful implementations; all
 // read methods return zero values.
 type stubService struct {
-	scaleResp models.ScaleDeploymentResponse
-	scaleErr  error
+	scaleResp   models.ScaleDeploymentResponse
+	scaleErr    error
 	trafficResp models.UpdateTrafficResponse
 	trafficErr  error
 }

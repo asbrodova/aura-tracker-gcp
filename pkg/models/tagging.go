@@ -4,7 +4,7 @@ package models
 type TaggedResourceSummary struct {
 	// ResourceName is the full resource name (e.g. "//run.googleapis.com/projects/p/locations/us-central1/services/svc")
 	ResourceName string `json:"resource_name"`
-	TagValue     string `json:"tag_value"`              // e.g. "tagValues/456"
+	TagValue     string `json:"tag_value"`               // e.g. "tagValues/456"
 	TagNamespace string `json:"tag_namespace,omitempty"` // e.g. "123456789/env/prod"
 }
 

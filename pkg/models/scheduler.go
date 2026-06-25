@@ -7,8 +7,8 @@ type SchedulerJobSummary struct {
 	Schedule    string `json:"schedule,omitempty"`
 	TimeZone    string `json:"time_zone,omitempty"`
 	State       string `json:"state,omitempty"`
-	TargetKind  string `json:"target_kind"`  // http | pubsub | app_engine
-	TargetRef   string `json:"target_ref"`   // URI or topic name
+	TargetKind  string `json:"target_kind"` // http | pubsub | app_engine
+	TargetRef   string `json:"target_ref"`  // URI or topic name
 	Description string `json:"description,omitempty"`
 }
 

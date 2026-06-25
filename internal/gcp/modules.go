@@ -4,49 +4,49 @@ package gcp
 type clientKey string
 
 const (
-	clientClusterMgr  clientKey = "clusterMgr"
-	clientRunSvc      clientKey = "runSvc"
-	clientRunJobs     clientKey = "runJobs" // Cloud Run Jobs + Executions clients
-	clientFunctionsV1 clientKey = "functionsV1"
-	clientEventarc       clientKey = "eventarc"
-	clientScheduler      clientKey = "scheduler"
-	clientWorkflows      clientKey = "workflows"
-	clientWorkflowExec   clientKey = "workflowExec"
-	clientTasks          clientKey = "tasks"
-	clientSecretMgr      clientKey = "secretMgr"
-	clientVPCAccess      clientKey = "vpcAccess"
-	clientSQLAdmin       clientKey = "sqlAdmin"
-	clientTrace          clientKey = "trace"
-	clientPubSub         clientKey = "pubsub"
-	clientLogAdmin    clientKey = "logAdmin"
-	clientCompute     clientKey = "compute"
-	clientAPIGateway  clientKey = "apiGateway"
-	clientMetric      clientKey = "metric"
-	clientCRM         clientKey = "crm"
-	clientBQ                 clientKey = "bq"
-	clientGCS                clientKey = "gcs"
-	clientSpanner            clientKey = "spanner"
-	clientAlloyDB            clientKey = "alloydb"
-	clientFirestore          clientKey = "firestore"
-	clientMemorystore        clientKey = "memorystore"
-	clientArtifactRegistry  clientKey = "artifactRegistry"
-	clientCloudBuild         clientKey = "cloudBuild"
-	clientServiceDirectory   clientKey = "serviceDirectory"
-	clientIAMAdmin           clientKey = "iamAdmin"
-	clientMonitoringV3       clientKey = "monitoringV3"
-	clientMonitoringV1       clientKey = "monitoringV1"
-	clientCRMv3              clientKey = "crmV3"
+	clientClusterMgr       clientKey = "clusterMgr"
+	clientRunSvc           clientKey = "runSvc"
+	clientRunJobs          clientKey = "runJobs" // Cloud Run Jobs + Executions clients
+	clientFunctionsV1      clientKey = "functionsV1"
+	clientEventarc         clientKey = "eventarc"
+	clientScheduler        clientKey = "scheduler"
+	clientWorkflows        clientKey = "workflows"
+	clientWorkflowExec     clientKey = "workflowExec"
+	clientTasks            clientKey = "tasks"
+	clientSecretMgr        clientKey = "secretMgr"
+	clientVPCAccess        clientKey = "vpcAccess"
+	clientSQLAdmin         clientKey = "sqlAdmin"
+	clientTrace            clientKey = "trace"
+	clientPubSub           clientKey = "pubsub"
+	clientLogAdmin         clientKey = "logAdmin"
+	clientCompute          clientKey = "compute"
+	clientAPIGateway       clientKey = "apiGateway"
+	clientMetric           clientKey = "metric"
+	clientCRM              clientKey = "crm"
+	clientBQ               clientKey = "bq"
+	clientGCS              clientKey = "gcs"
+	clientSpanner          clientKey = "spanner"
+	clientAlloyDB          clientKey = "alloydb"
+	clientFirestore        clientKey = "firestore"
+	clientMemorystore      clientKey = "memorystore"
+	clientArtifactRegistry clientKey = "artifactRegistry"
+	clientCloudBuild       clientKey = "cloudBuild"
+	clientServiceDirectory clientKey = "serviceDirectory"
+	clientIAMAdmin         clientKey = "iamAdmin"
+	clientMonitoringV3     clientKey = "monitoringV3"
+	clientMonitoringV1     clientKey = "monitoringV1"
+	clientCRMv3            clientKey = "crmV3"
 )
 
 // moduleClientDeps maps each module name to the GCP clients it requires.
 // "_resources" is a pseudo-module for always-on MCP Resources (BigQuery, Storage, IAM).
 var moduleClientDeps = map[string][]clientKey{
-	"gke":          {clientClusterMgr, clientMetric, clientLogAdmin}, // GetClusterBottlenecks fans out to metric+logAdmin
-	"gke_workloads": {clientClusterMgr}, // dialK8s fetches cluster endpoint; K8s calls use thin HTTP client
-	"gke_mesh":      {clientMetric, clientLogAdmin},             // Istio metrics primary; log-based fallback
-	"networking":    {clientCompute, clientAPIGateway},          // LBs, URL maps, NEGs, VPC, PSC, API Gateway
-	"cloudrun":   {clientRunSvc, clientRunJobs},
-	"functions":  {clientFunctionsV1, clientRunSvc},
+	"gke":           {clientClusterMgr, clientMetric, clientLogAdmin}, // GetClusterBottlenecks fans out to metric+logAdmin
+	"gke_workloads": {clientClusterMgr},                               // dialK8s fetches cluster endpoint; K8s calls use thin HTTP client
+	"gke_mesh":      {clientMetric, clientLogAdmin},                   // Istio metrics primary; log-based fallback
+	"networking":    {clientCompute, clientAPIGateway},                // LBs, URL maps, NEGs, VPC, PSC, API Gateway
+	"cloudrun":      {clientRunSvc, clientRunJobs},
+	"functions":     {clientFunctionsV1, clientRunSvc},
 	"eventarc":      {clientEventarc},
 	"scheduler":     {clientScheduler},
 	"workflows":     {clientWorkflows, clientWorkflowExec},
@@ -54,19 +54,19 @@ var moduleClientDeps = map[string][]clientKey{
 	"secretmanager": {clientSecretMgr, clientRunSvc},
 	"vpcaccess":     {clientVPCAccess},
 	"cloudsql":      {clientSQLAdmin},
-	"pubsub":     {clientPubSub},
-	"logging":    {clientLogAdmin},
-	"monitoring": {clientMetric, clientTrace, clientMonitoringV3, clientMonitoringV1},
-	"iam":        {clientCRM, clientIAMAdmin},
-	"topology":   {clientRunSvc, clientPubSub}, // scans run annotations + pubsub push subscriptions
-	"aura":       {clientMetric, clientRunSvc, clientClusterMgr, clientGCS}, // GKE cluster discovery + control-plane health + GCS bucket scoring
-	"storage":     {clientGCS},
-	"datastores":  {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
-	"supplychain": {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
-	"coverage":    {clientRunSvc, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
-	"archgraph":   {clientRunSvc, clientRunJobs, clientFunctionsV1, clientEventarc, clientScheduler, clientWorkflows, clientWorkflowExec, clientTasks, clientSecretMgr, clientVPCAccess, clientSQLAdmin, clientPubSub, clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore, clientArtifactRegistry, clientCloudBuild, clientServiceDirectory, clientCompute, clientAPIGateway, clientIAMAdmin, clientClusterMgr, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
-	"tagging":     {clientCRMv3},
-	"_resources":  {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
+	"pubsub":        {clientPubSub},
+	"logging":       {clientLogAdmin},
+	"monitoring":    {clientMetric, clientTrace, clientMonitoringV3, clientMonitoringV1},
+	"iam":           {clientCRM, clientIAMAdmin},
+	"topology":      {clientRunSvc, clientPubSub},                              // scans run annotations + pubsub push subscriptions
+	"aura":          {clientMetric, clientRunSvc, clientClusterMgr, clientGCS}, // GKE cluster discovery + control-plane health + GCS bucket scoring
+	"storage":       {clientGCS},
+	"datastores":    {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
+	"supplychain":   {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
+	"coverage":      {clientRunSvc, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
+	"archgraph":     {clientRunSvc, clientRunJobs, clientFunctionsV1, clientEventarc, clientScheduler, clientWorkflows, clientWorkflowExec, clientTasks, clientSecretMgr, clientVPCAccess, clientSQLAdmin, clientPubSub, clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore, clientArtifactRegistry, clientCloudBuild, clientServiceDirectory, clientCompute, clientAPIGateway, clientIAMAdmin, clientClusterMgr, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
+	"tagging":       {clientCRMv3},
+	"_resources":    {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
 }
 
 // neededClients returns the union of client keys for the given module set,

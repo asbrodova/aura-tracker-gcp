@@ -5,7 +5,7 @@ package models
 // envFrom secretRef), allowing the graph layer to mint reads_secret edges.
 type GKEEnvVar struct {
 	Name      string `json:"name"`
-	Value     string `json:"value,omitempty"`    // literal value; empty for secret/configmap refs
+	Value     string `json:"value,omitempty"`      // literal value; empty for secret/configmap refs
 	SecretRef string `json:"secret_ref,omitempty"` // Secret name if sourced from a Secret
 }
 
@@ -31,27 +31,27 @@ type GKEContainerSummary struct {
 // GKEWorkloadSummary is the list-level view of a GKE workload (Deployment,
 // StatefulSet, DaemonSet, CronJob, or Job).
 type GKEWorkloadSummary struct {
-	Name           string            `json:"name"`
-	Namespace      string            `json:"namespace"`
-	Kind           string            `json:"kind"` // one of the KindGKE* constants
-	Replicas       int32             `json:"replicas,omitempty"`
-	ReadyReplicas  int32             `json:"ready_replicas,omitempty"`
-	Image          string            `json:"image"` // primary container image (first container)
-	ServiceAccount string            `json:"service_account,omitempty"`
-	SecretRefs     []string          `json:"secret_refs,omitempty"` // Secret names referenced by any container
-	Labels         map[string]string `json:"labels,omitempty"`
-	OtelSidecar    bool              `json:"otel_sidecar"` // true if OTel instrumentation detected
-	WorkloadAPIFallback bool         `json:"workload_api_fallback,omitempty"` // true if returned via GKE Workloads API fallback
+	Name                string            `json:"name"`
+	Namespace           string            `json:"namespace"`
+	Kind                string            `json:"kind"` // one of the KindGKE* constants
+	Replicas            int32             `json:"replicas,omitempty"`
+	ReadyReplicas       int32             `json:"ready_replicas,omitempty"`
+	Image               string            `json:"image"` // primary container image (first container)
+	ServiceAccount      string            `json:"service_account,omitempty"`
+	SecretRefs          []string          `json:"secret_refs,omitempty"` // Secret names referenced by any container
+	Labels              map[string]string `json:"labels,omitempty"`
+	OtelSidecar         bool              `json:"otel_sidecar"`                    // true if OTel instrumentation detected
+	WorkloadAPIFallback bool              `json:"workload_api_fallback,omitempty"` // true if returned via GKE Workloads API fallback
 }
 
 // GKEWorkloadDetails extends GKEWorkloadSummary with full container specs,
 // probes, volume mounts, and all environment variables.
 type GKEWorkloadDetails struct {
 	GKEWorkloadSummary
-	Containers    []GKEContainerSummary `json:"containers"`
-	NodeSelector  map[string]string     `json:"node_selector,omitempty"`
-	Tolerations   []string              `json:"tolerations,omitempty"` // key=value strings
-	Annotations   map[string]string     `json:"annotations,omitempty"`
+	Containers   []GKEContainerSummary `json:"containers"`
+	NodeSelector map[string]string     `json:"node_selector,omitempty"`
+	Tolerations  []string              `json:"tolerations,omitempty"` // key=value strings
+	Annotations  map[string]string     `json:"annotations,omitempty"`
 }
 
 // ListGKEWorkloadsRequest is the input for gcp_gke_list_workloads.
@@ -59,9 +59,9 @@ type ListGKEWorkloadsRequest struct {
 	ProjectID   string `json:"project_id"`
 	Location    string `json:"location"`
 	ClusterName string `json:"cluster_name"`
-	Namespace   string `json:"namespace,omitempty"`  // empty = all namespaces
-	Kind        string `json:"kind,omitempty"`       // filter by kind; empty = all workload kinds
-	PageSize    int    `json:"page_size,omitempty"`  // default 500
+	Namespace   string `json:"namespace,omitempty"` // empty = all namespaces
+	Kind        string `json:"kind,omitempty"`      // filter by kind; empty = all workload kinds
+	PageSize    int    `json:"page_size,omitempty"` // default 500
 }
 
 // ListGKEWorkloadsResponse is the output for gcp_gke_list_workloads.
@@ -140,13 +140,13 @@ type GKEIngressRule struct {
 // HTTPRoute resources. GCPLBName is non-empty when GKE has linked this
 // ingress to a Compute load balancer (from annotations or status).
 type GKEIngressSummary struct {
-	Name       string           `json:"name"`
-	Namespace  string           `json:"namespace"`
-	Kind       string           `json:"kind"` // "Ingress" or "HTTPRoute"
-	Hosts      []string         `json:"hosts,omitempty"`
-	TLSEnabled bool             `json:"tls_enabled,omitempty"`
-	Rules      []GKEIngressRule `json:"rules,omitempty"`
-	GCPLBName  string           `json:"gcp_lb_name,omitempty"` // linked Compute LB name
+	Name       string            `json:"name"`
+	Namespace  string            `json:"namespace"`
+	Kind       string            `json:"kind"` // "Ingress" or "HTTPRoute"
+	Hosts      []string          `json:"hosts,omitempty"`
+	TLSEnabled bool              `json:"tls_enabled,omitempty"`
+	Rules      []GKEIngressRule  `json:"rules,omitempty"`
+	GCPLBName  string            `json:"gcp_lb_name,omitempty"` // linked Compute LB name
 	Labels     map[string]string `json:"labels,omitempty"`
 }
 
@@ -197,9 +197,9 @@ type ListGKENetworkPoliciesResponse struct {
 
 // GKEMeshEdge is a single caller→callee edge from service mesh telemetry.
 type GKEMeshEdge struct {
-	Caller            string  `json:"caller"`             // workload name
+	Caller            string  `json:"caller"` // workload name
 	CallerNamespace   string  `json:"caller_namespace"`
-	Callee            string  `json:"callee"`             // workload name
+	Callee            string  `json:"callee"` // workload name
 	CalleeNamespace   string  `json:"callee_namespace"`
 	RequestsPerMinute float64 `json:"requests_per_minute"`
 	P99LatencyMs      float64 `json:"p99_latency_ms"`
@@ -218,8 +218,8 @@ type GKEMeshTopologyResponse struct {
 
 // GetGKEMeshTopologyRequest is the input for gcp_gke_get_mesh_topology.
 type GetGKEMeshTopologyRequest struct {
-	ProjectID    string `json:"project_id"`
-	Location     string `json:"location"`
-	ClusterName  string `json:"cluster_name"`
-	LookbackHours int   `json:"lookback_hours,omitempty"` // default 24
+	ProjectID     string `json:"project_id"`
+	Location      string `json:"location"`
+	ClusterName   string `json:"cluster_name"`
+	LookbackHours int    `json:"lookback_hours,omitempty"` // default 24
 }

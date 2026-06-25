@@ -235,4 +235,3 @@ func (s *LocalScrubber) scrubText(text string, reg *tokenRegistry, contentIdx in
 	}
 	return result, findings
 }
-

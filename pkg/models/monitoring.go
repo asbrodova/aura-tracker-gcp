@@ -80,10 +80,10 @@ type ListUptimeChecksResponse struct {
 // --- SLOs ---
 
 type SLOSummary struct {
-	Name        string  `json:"name"`
-	DisplayName string  `json:"display_name,omitempty"`
-	Goal        float64 `json:"goal,omitempty"`
-	CalendarPeriod string `json:"calendar_period,omitempty"`
+	Name           string  `json:"name"`
+	DisplayName    string  `json:"display_name,omitempty"`
+	Goal           float64 `json:"goal,omitempty"`
+	CalendarPeriod string  `json:"calendar_period,omitempty"`
 }
 
 type ListSLOsRequest struct {
@@ -113,9 +113,9 @@ type ListDashboardsResponse struct {
 
 // TraceDependencyEdge represents a caller→callee relationship inferred from Cloud Trace spans.
 type TraceDependencyEdge struct {
-	Caller     string `json:"caller"`
-	Callee     string `json:"callee"`
-	SampleCount int   `json:"sample_count"`
+	Caller      string `json:"caller"`
+	Callee      string `json:"callee"`
+	SampleCount int    `json:"sample_count"`
 }
 
 // ListTraceDependencyEdgesRequest requests trace-derived service dependency edges.

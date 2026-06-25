@@ -22,9 +22,9 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 
 	// ── Step 1: enumerate compute nodes ──────────────────────────────────
 	type computeNode struct {
-		urn        string
-		kind       string
-		name       string
+		urn         string
+		kind        string
+		name        string
 		otelSidecar bool
 	}
 
