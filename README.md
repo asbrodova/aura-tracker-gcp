@@ -9,14 +9,69 @@
 <!-- Add your social preview image here: -->
 <!-- ![aura-tracker-gcp banner](docs/banner.png) -->
 
-**Talk to your GCP infrastructure in plain English.**
+**Give your LLM the full aura of your GCP infrastructure — and the confidence to act on it safely.**
 
-Manually checking GKE cluster health, IAM permissions, or Cloud Run traffic splits via the console or CLI is slow. `aura-tracker-gcp` is a [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server that exposes **69 Tools**, **10 Resources**, and **3 Prompts** — so you can ask Claude (or any LLM) to do it for you, in natural language, with built-in two-step HITL confirmation for every mutation.
+`aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with mandatory human approval before any infrastructure change.
 
-The AI **browses** your GCP state via Resources first (BigQuery schemas, Cloud Run config, IAM permissions, GCS buckets), then **acts** via Tools — avoiding costly mistakes and hallucinated SQL from unknown column types.
+**69 Tools · 10 Resources · 3 Prompts · 26 Modules**
 
-<!-- Add a demo GIF or screenshot here showing Claude Desktop calling a tool: -->
-<!-- ![Demo: Claude Desktop calling gcp_gke_get_cluster_bottlenecks](docs/demo.gif) -->
+<!-- Add a demo GIF here: -->
+<!-- ![Demo: Claude calling gcp_project_aura_summary](docs/demo.gif) -->
+
+---
+
+## Why Aura Tracker GCP?
+
+### Safety First, by Default
+
+Every opt-in feature that costs money or could expose sensitive data is **off by default**:
+
+| Feature | Env var | Default |
+|---|---|---|
+| Cloud Recommender API integration | `RECOMMENDER_ENABLED` | off |
+| PII / credential scrubbing | `ANONYMIZE_ENABLED` | off |
+| HITL mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
+
+No surprises on your GCP bill. No accidental credential exposure. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); all 67 others are strictly read-only `list`/`get` API calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
+
+### Human-in-the-Loop for Every Mutation
+
+No GCP resource can be modified without first generating a preview plan, then explicitly confirming it:
+
+1. Call with `dry_run: true` → receive a `plan_id` and a before/after preview. The plan expires in **10 minutes** and is **single-use**.
+2. Call again with `confirm_plan_id: <plan_id>` → the change executes using the exact parameters locked at dry-run time.
+
+Calling a mutation tool without a plan returns a `confirmation required` error with step-by-step instructions. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`). This protocol is enforced in `internal/safety/` at the port boundary — it cannot be bypassed by the LLM.
+
+> **Development override:** Set `SAFETY_ENABLED=false` to skip the plan/confirm flow. Never use this in production.
+
+### Token Efficiency: Load Only What You Need
+
+All 69 tools are registered by default, which consumes LLM context on every turn. Use `--modules` to load only the services relevant to your workflow — each excluded module also skips its GCP client connections at startup:
+
+```json
+"args": ["--modules=cloudrun,aura,monitoring,iam"]
+```
+
+| Workflow | `--modules` | Tools |
+|---|---|---|
+| Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
+| GKE cluster health | `gke,aura,monitoring,logging` | 8 |
+| Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
+| Data / logging | `logging,monitoring,iam` | 4 |
+| Storage inspection | `storage` | 3 |
+| Full toolkit | *(omit flag)* | 69 |
+
+See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
+
+### Roadmap
+
+Planned enhancements — contributions welcome:
+
+- **GKE cluster scoring enhancements:** extend `gcp_gke_get_aura_score` with cluster-level autoscaling efficiency signals and control-plane version drift detection across node pools
+- **Storage bucket cost-efficiency scoring:** `gcp_gcs_get_aura_score` currently covers security posture (PAP, UBLA, versioning); lifecycle policy analysis and storage-class-vs-access-frequency scoring are planned
+- **GCP DLP Phase 2:** `DLPAnonymizer` is scaffolded in `internal/anonymize/dlp.go` with a compile-time interface check; production wiring to the GCP DLP API is a planned contribution point
+- **Kubernetes Deployment scaling:** `gcp_gke_scale_deployment` currently resizes GKE **node pools** via the GKE management API; scaling individual Kubernetes Deployments requires `k8s.io/client-go` and is not yet implemented
 
 ---
 
@@ -117,11 +172,178 @@ Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `sch
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Storage inspection | `storage` | 3 |
 | Data / logging | `logging,monitoring,iam` | 4 |
-| Full toolkit | *(omit flag)* | 35 |
+| Full toolkit | *(omit flag)* | 69 |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
 > "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."
+
+---
+
+## Getting Started by Service
+
+Each snippet below is a minimal `mcpServers` config for that service. Paste it into your `claude_desktop_config.json` or `.claude/settings.json`, replace `my-project`, and restart.
+
+### GKE
+
+**Modules:** `gke` (cluster health) · add `gke_workloads` + `gke_mesh` for workload / mesh introspection  
+**IAM role:** `roles/container.viewer` · add `roles/container.admin` for node pool scaling
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=gke,aura,monitoring,logging"],
+      "env": { "GCP_PROJECT_ID": "my-project" }
+    }
+  }
+}
+```
+
+**Try it:**
+> "List all GKE clusters in my-project across all locations."  
+> "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."  
+> "Give me a deep Aura Score for my-cluster — include per-node-pool autoscaling audit."  
+> "Scale the default-pool node pool in my-cluster to 5 nodes — show me a plan first."
+
+The last prompt triggers the two-step HITL flow: the LLM calls `gcp_gke_scale_deployment` with `dry_run: true` first, shows you a plan, then waits for your confirmation before executing.
+
+---
+
+### Cloud Run
+
+**Modules:** `cloudrun` · add `functions`, `eventarc` for the full serverless tier  
+**IAM role:** `roles/run.viewer` · add `roles/run.admin` for traffic split mutations
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=cloudrun,functions,eventarc,aura,monitoring,iam"],
+      "env": { "GCP_PROJECT_ID": "my-project" }
+    }
+  }
+}
+```
+
+**Try it:**
+> "List all Cloud Run services in my-project."  
+> "What's the traffic split for the api-gateway service in us-central1?"  
+> "Show me the last 50 ERROR logs from my-service."  
+> "Update the api-gateway traffic split to send 10% to revision-2 — show me a plan first."
+
+---
+
+### Pub/Sub
+
+**Module:** `pubsub`  
+**IAM role:** `roles/pubsub.viewer`
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=pubsub,monitoring,iam"],
+      "env": { "GCP_PROJECT_ID": "my-project" }
+    }
+  }
+}
+```
+
+**Try it:**
+> "List all Pub/Sub topics in my-project with their subscription counts."  
+> "Is there any subscription lag on the orders-topic?"  
+> "Show me the dead-letter configuration for the payment-events subscription."
+
+---
+
+### BigQuery
+
+> **BigQuery uses MCP Resources, not tools.** There is no `--modules=bigquery` flag. Resources (`gcp://…/bigquery/…`) are always available regardless of which modules are loaded.
+
+**IAM role:** `roles/bigquery.metadataViewer`
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=monitoring,iam"],
+      "env": { "GCP_PROJECT_ID": "my-project" }
+    }
+  }
+}
+```
+
+The LLM reads BigQuery state through three resource URIs before generating SQL or analysis:
+
+1. `gcp://{project}/bigquery/datasets` — discover all datasets
+2. `gcp://{project}/bigquery/{dataset}/tables` — list tables with row counts and sizes
+3. `gcp://{project}/bigquery/{dataset}/{table}/schema` — full field definitions
+
+This three-step read prevents hallucinated column names — the model knows actual column types before writing SQL.
+
+**Try it:**
+> "What BigQuery datasets exist in my-project?"  
+> "Show me the schema for the orders table in the analytics dataset."  
+> "What are the five largest tables in the events dataset by storage size?"  
+> "Use the optimize-bigquery-costs prompt on my-project to identify partitioning opportunities."
+
+---
+
+### Firebase / Firestore
+
+Firestore is available through the `datastores` module (Phase 2), which also covers Cloud Spanner, AlloyDB, and Memorystore for Redis. It lists Firestore databases in both **Native** and **Datastore** mode — it does not read collection or document data.
+
+**Module:** `datastores`  
+**IAM role:** `roles/datastore.viewer`
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=datastores,iam"],
+      "env": { "GCP_PROJECT_ID": "my-project" }
+    }
+  }
+}
+```
+
+**Try it:**
+> "List all Firestore databases in my-project and tell me which are in Native mode."  
+> "What data stores does my-project use? Show me Spanner, AlloyDB, Firestore, and Redis."
+
+---
+
+### Cloud SQL
+
+**Module:** `cloudsql`  
+**IAM role:** `roles/cloudsql.viewer`  
+**Optional:** add `RECOMMENDER_ENABLED=true` for GCP-authoritative idle/overprovisioned signals with USD savings estimates
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=cloudsql,aura,monitoring,iam"],
+      "env": {
+        "GCP_PROJECT_ID": "my-project",
+        "RECOMMENDER_ENABLED": "true"
+      }
+    }
+  }
+}
+```
+
+**Try it:**
+> "List all Cloud SQL instances in my-project with their machine tier and state."  
+> "Give me an Aura Score for the main-db Cloud SQL instance."  
+> "Show me the Aura Score summary for all resources in my-project — are any SQL instances idle?"
 
 ---
 
@@ -728,7 +950,7 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **Read-only guarantees**: all 34 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Read-only guarantees**: all 67 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
 - **MCP annotations**: all 69 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
@@ -864,6 +1086,114 @@ Every tool result becomes an `AuditReport` JSON instead of the real output:
   ]
 }
 ```
+
+---
+
+## Troubleshooting
+
+### Cloud Monitoring: Empty Results or "No Data" for a Cloud Run Service
+
+**Symptom:** `gcp_monitoring_get_metrics` returns an empty `points` array even though the service is running.
+
+**Cause 1 — Wrong metric type name.**
+
+Metric type strings must exactly match the Cloud Monitoring descriptor. Common mistakes:
+
+| Wrong | Correct |
+|---|---|
+| `cloudrun.googleapis.com/request_count` | `run.googleapis.com/request_count` |
+| `cloudrun.googleapis.com/container/cpu` | `run.googleapis.com/container/cpu/utilizations` |
+| `container.googleapis.com/cpu` | `kubernetes.io/container/cpu/request_utilization` |
+
+Use `gcp_monitoring_list_metric_descriptors` to discover exact type strings for any service:
+
+> "List all metric descriptors in my-project with the prefix `run.googleapis.com`."
+
+**Cause 2 — Region scoping.**
+
+Cloud Run metrics require the resource label `location` to match the region where the service runs. Pass `resource_labels` explicitly to `gcp_monitoring_get_metrics`:
+
+```json
+{
+  "metric_type": "run.googleapis.com/request_count",
+  "resource_labels": {
+    "service_name": "my-service",
+    "location": "us-central1"
+  }
+}
+```
+
+**Cause 3 — Distribution metric with incompatible aligner.**
+
+Some Cloud Run metrics are `DELTA DISTRIBUTION` types (`run.googleapis.com/request_latencies`, `run.googleapis.com/container/cpu/utilizations`). Calling `gcp_monitoring_get_metrics` on them directly may return:
+
+```
+The per-series aligner ALIGN_MEAN is not compatible with the value type DISTRIBUTION
+```
+
+Use `gcp_get_aura_score` instead — it selects the correct percentile aligner per metric automatically, and its 5-minute in-process cache means repeat calls are free.
+
+---
+
+### Cloud Logging: Zero Results for a Cloud Run Service
+
+**Symptom:** `gcp_logging_query_recent` returns no entries for a Cloud Run service.
+
+The tool's filter uses `resource.type` to scope logs to a specific GCP resource. Common mistakes:
+
+| Resource | Correct `resource_type` |
+|---|---|
+| Cloud Run service | `cloud_run_revision` |
+| GKE cluster | `k8s_cluster` |
+| GKE container | `k8s_container` |
+| Cloud Function | `cloud_function` |
+
+Using `cloud_run_service` (which looks correct) returns zero results — the actual monitored resource type is `cloud_run_revision`.
+
+**Severity values must be uppercase.** The valid values are `DEBUG`, `INFO`, `NOTICE`, `WARNING`, `ERROR`, `CRITICAL`, `ALERT`, `EMERGENCY`. Lowercase values like `"error"` are silently treated as the zero value by the Logging API, returning all severities regardless of the filter.
+
+**Short lookback windows.** If `lookback_minutes` is less than `15` for an infrequently accessed service, no logs may exist in the window. Start with `60` and narrow down.
+
+---
+
+### Permission Errors on Monitoring or Logging API Calls
+
+**Symptom:** Tools return `PermissionDeniedError` on Monitoring or Logging calls.
+
+Use `gcp_iam_test_permissions` to identify exactly which roles are missing before diagnosing further:
+
+> "Test my IAM permissions on project my-project and tell me what GCP tools you can and cannot call."
+
+Commonly missing roles:
+
+| Missing role | Affected tools |
+|---|---|
+| `roles/monitoring.viewer` | `gcp_monitoring_get_metrics`, `gcp_monitoring_list_metric_descriptors`, all Aura Score tools |
+| `roles/cloudtrace.user` | `gcp_trace_list_services`, `gcp_trace_list_dependency_edges` |
+| `roles/logging.viewer` | `gcp_logging_query_recent` |
+| `roles/recommender.viewer` | Aura Score efficiency signals (only when `RECOMMENDER_ENABLED=true`) |
+
+Run `scripts/setup-iam.sh` to provision all least-privilege roles automatically:
+
+```bash
+PROJECT_ID=my-project bash scripts/setup-iam.sh
+# With Recommender API
+PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+```
+
+---
+
+### Server Fails to Start: Missing GCP Credentials
+
+```
+aura-tracker-gcp: no GCP credentials found.
+
+Run:  gcloud auth application-default login
+
+Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.
+```
+
+For Cloud Run deployments (`MCP_TRANSPORT=sse`): ensure [Workload Identity](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) is configured on the service account, or set `GOOGLE_APPLICATION_CREDENTIALS` to a mounted service account key.
 
 ---
 
