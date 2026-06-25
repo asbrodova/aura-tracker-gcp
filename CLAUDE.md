@@ -40,11 +40,20 @@ internal/mcp/  NEVER imports internal/gcp/
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GCP_PROJECT_ID` | Yes | GCP project for SDK client init |
+| `GCP_PROJECT_ID` | Yes* | GCP project for SDK client init. Can be omitted if `project_id` is set in `~/.aura-tracker.yaml`. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Service account key path (optional with ADC) |
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII scrubbing on all tool outputs (overrides YAML `enabled`) |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
+| `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask the GCP project ID in all tool outputs as `[GCP_PROJECT_ID_1]`. Off by default. Can be combined with `ANONYMIZE_ENABLED`. |
 | `RECOMMENDER_ENABLED` | No | Set `true` to enable Cloud Recommender API integration for Aura Score efficiency signals (requires Recommender Viewer role) |
+
+## User Config File
+
+Optional per-user defaults in `~/.aura-tracker.yaml`. Overridden by environment variables.
+
+```yaml
+project_id: my-gcp-project-id   # fallback when GCP_PROJECT_ID is not set
+```
 
 ## CLI Flags
 

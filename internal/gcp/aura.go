@@ -952,6 +952,7 @@ func calculateAura(kind models.ResourceKind, name, region string, signals []mode
 	score := int(math.Round(float64(healthScore)*0.6 + float64(efficiencyScore)*0.4))
 	band := auraBand(score)
 	label := auraLabel(score, signals, kind)
+	reasons := buildReasons(kind, signals)
 
 	return models.AuraReport{
 		ResourceKind:    kind,
@@ -959,11 +960,11 @@ func calculateAura(kind models.ResourceKind, name, region string, signals []mode
 		Region:          region,
 		Score:           score,
 		Band:            band,
-		Display:         buildDisplay(kind, name, score, label),
+		Display:         buildDisplay(kind, name, score, label, reasons),
 		HealthScore:     healthScore,
 		EfficiencyScore: efficiencyScore,
 		HealthSignals:   signals,
-		Reasons:         buildReasons(kind, signals),
+		Reasons:         reasons,
 	}
 }
 
@@ -1294,9 +1295,48 @@ func auraLabel(score int, signals []models.AuraHealthSignal, kind models.Resourc
 	}
 }
 
-func buildDisplay(kind models.ResourceKind, name string, score int, label string) string {
+func buildDisplay(kind models.ResourceKind, name string, score int, label string, reasons []string) string {
 	band := auraBand(score)
-	return fmt.Sprintf("%s %s: %s | Aura: %d (%s)", auraEmoji(band), kindLabel(kind), name, score, label)
+	display := fmt.Sprintf("%s %s: %s | Aura: %d (%s)", auraEmoji(band), kindLabel(kind), name, score, label)
+	if band != models.AuraBandGreen && len(reasons) > 0 {
+		display += " — " + shortenReason(reasons[0])
+	}
+	return display
+}
+
+// shortenReason extracts a compact diagnostic snippet from a full reason string.
+// For Recommender reasons it surfaces the dollar savings; for signal reasons it
+// keeps only the measurement before the action-advice separator.
+func shortenReason(r string) string {
+	if strings.HasPrefix(r, "GCP Recommender: resource is idle") {
+		if i := strings.Index(r, "estimated $"); i != -1 {
+			rest := r[i+len("estimated $"):]
+			if j := strings.Index(rest, "/mo"); j != -1 {
+				return "est. $" + rest[:j] + "/mo"
+			}
+		}
+		return "idle resource"
+	}
+	if strings.HasPrefix(r, "GCP Recommender: resource is over-provisioned") {
+		if i := strings.Index(r, "estimated $"); i != -1 {
+			rest := r[i+len("estimated $"):]
+			if j := strings.Index(rest, "/mo"); j != -1 {
+				return "est. $" + rest[:j] + "/mo savings"
+			}
+		}
+		return "over-provisioned"
+	}
+	// Generic: keep only the diagnostic measurement, strip action advice after " — ".
+	if i := strings.Index(r, " — "); i != -1 {
+		r = r[:i]
+	}
+	if i := strings.Index(r, "; "); i != -1 {
+		r = r[:i]
+	}
+	if len(r) > 55 {
+		r = r[:52] + "..."
+	}
+	return r
 }
 
 func buildReasons(kind models.ResourceKind, signals []models.AuraHealthSignal) []string {

@@ -590,10 +590,11 @@ PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GCP_PROJECT_ID` | Yes | Default GCP project used when initialising SDK clients |
+| `GCP_PROJECT_ID` | Yes* | Default GCP project used when initialising SDK clients. Can be omitted if `project_id` is set in `~/.aura-tracker.yaml`. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON key (optional if ADC is configured via `gcloud`) |
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
+| `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask the GCP project ID in all tool outputs as `[GCP_PROJECT_ID_1]`. Off by default. Useful for demos. Can be combined with `ANONYMIZE_ENABLED`. |
 | `RECOMMENDER_ENABLED` | No | Set `true` to enable the Cloud Recommender API integration. When enabled, Aura Scores include idle/over-provisioned flags with estimated monthly savings from GCP's pre-computed recommendations. Requires the Recommender Viewer role. Off by default. |
 | `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
 | `TRACE_BACKEND` | No | Backend for `gcp_trace_list_services`: `trace` (Cloud Trace v1 REST, default) or `monitoring` (Monitoring metric proxy). Use `monitoring` if Cloud Trace API is disabled but OpenCensus/OpenTelemetry metrics exist. |
@@ -601,6 +602,16 @@ PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 | `MCP_TRANSPORT` | No | Transport mode: `stdio` (default, for Claude Desktop) or `sse` (for Cloud Run / web-based MCP clients) |
 | `PORT` | No | HTTP port when `MCP_TRANSPORT=sse`. Cloud Run sets this automatically. Defaults to `8080`. |
 | `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Required for correct SSE endpoint URLs when deployed to Cloud Run. Defaults to `http://localhost:PORT` for local testing. |
+
+## User Config File
+
+Avoid setting `GCP_PROJECT_ID` on every launch by adding a `~/.aura-tracker.yaml`:
+
+```yaml
+project_id: my-gcp-project-id
+```
+
+The environment variable takes precedence when both are set.
 
 ## IAM Setup
 

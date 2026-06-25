@@ -116,11 +116,11 @@ func (t *AuraTools) projectAuraSummaryHandler(ctx context.Context, _ mcp.CallToo
 	if err != nil {
 		return handleServiceError("gcp_project_aura_summary", err)
 	}
-	result, err := mcp.NewToolResultJSON(summary)
-	if err != nil {
-		return nil, fmt.Errorf("gcp_project_aura_summary: marshal: %w", err)
-	}
-	return result, nil
+	text := summary.Summary + fmt.Sprintf(
+		"\n\nTotal: %d  🔴 Critical: %d  🟡 Warning: %d  🟢 Healthy: %d",
+		summary.TotalCount, summary.CriticalCount, summary.WarningCount, summary.HealthyCount,
+	)
+	return mcp.NewToolResultText(text), nil
 }
 
 func (t *AuraTools) GKEAuraScore() server.ServerTool {

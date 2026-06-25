@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
+	"github.com/asbrodova/aura-tracker-gcp/internal/config"
 	gcpadapter "github.com/asbrodova/aura-tracker-gcp/internal/gcp"
 	mcpserver "github.com/asbrodova/aura-tracker-gcp/internal/mcp"
 	"github.com/asbrodova/aura-tracker-gcp/internal/safety"
@@ -48,9 +50,18 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
+	userCfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: load user config: %v\n", err)
+		os.Exit(1)
+	}
+
 	projectID := os.Getenv("GCP_PROJECT_ID")
 	if projectID == "" {
-		fmt.Fprintln(os.Stderr, "aura-tracker-gcp: GCP_PROJECT_ID environment variable is required")
+		projectID = userCfg.ProjectID
+	}
+	if projectID == "" {
+		fmt.Fprintln(os.Stderr, "aura-tracker-gcp: GCP_PROJECT_ID env var or project_id in ~/.aura-tracker.yaml is required")
 		os.Exit(1)
 	}
 
@@ -102,6 +113,13 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: load anonymize config: %v\n", err)
 		os.Exit(1)
+	}
+	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" && projectID != "" {
+		anonCfg.Enabled = true
+		anonCfg.Patterns = append(anonCfg.Patterns, anonymize.PatternConfig{
+			Name:  "gcp_project_id",
+			Regex: regexp.QuoteMeta(projectID),
+		})
 	}
 
 	anon, anonClose, err := buildAnonymizer(ctx, anonCfg, log, projectID)
