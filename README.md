@@ -77,7 +77,7 @@ See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
 **Homebrew (macOS / Linux) — recommended**
 
 ```bash
-brew install asbrodova/tap/aura-tracker-gcp
+brew install --cask asbrodova/tap/aura-tracker-gcp
 ```
 
 **Direct binary download (all platforms)**
