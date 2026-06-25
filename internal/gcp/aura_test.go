@@ -369,7 +369,7 @@ func TestExtractMonthlySavings_NilInput(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildDisplay(t *testing.T) {
-	display := buildDisplay(models.ResourceKindCloudRun, "auth-service", 98, "Healthy & Scaled")
+	display := buildDisplay(models.ResourceKindCloudRun, "auth-service", 98, "Healthy & Scaled", nil)
 	want := "🟢 Cloud Run: auth-service | Aura: 98 (Healthy & Scaled)"
 	if display != want {
 		t.Errorf("buildDisplay = %q, want %q", display, want)
@@ -377,7 +377,7 @@ func TestBuildDisplay(t *testing.T) {
 }
 
 func TestBuildDisplay_Yellow(t *testing.T) {
-	display := buildDisplay(models.ResourceKindCloudSQL, "main-db", 65, "Healthy, but High Disk Cost")
+	display := buildDisplay(models.ResourceKindCloudSQL, "main-db", 65, "Healthy, but High Disk Cost", nil)
 	want := "🟡 Cloud SQL: main-db | Aura: 65 (Healthy, but High Disk Cost)"
 	if display != want {
 		t.Errorf("buildDisplay = %q, want %q", display, want)
