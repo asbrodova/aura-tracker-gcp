@@ -19,18 +19,18 @@ linters:
         - "-S1011"    # loop vs append — cosmetic
         - "-S1016"    # struct conversion — cosmetic
 
-issues:
-  exclude-rules:
-    # Test files: relax errcheck (t.Fatal chains are intentional).
-    - path: "_test\\.go"
-      linters: [errcheck]
+  exclusions:
+    rules:
+      # Test files: relax errcheck (t.Fatal chains are intentional).
+      - path: "_test\\.go"
+        linters: [errcheck]
 
-    # defer resp.Body.Close() — the error is not actionable inside a defer.
-    - source: "defer resp\\.Body\\.Close"
-      linters: [errcheck]
+      # defer resp.Body.Close() — the error is not actionable inside a defer.
+      - source: "defer resp\\.Body\\.Close"
+        linters: [errcheck]
 
-    # Phase 2 skeleton — DLP adapter is intentionally incomplete.
-    - path: "internal/gcp/dlp\\.go"
-      linters: [unused]
-    - path: "internal/anonymize/dlp\\.go"
-      linters: [unused]
+      # Phase 2 skeleton — DLP adapter is intentionally incomplete.
+      - path: "internal/gcp/dlp\\.go"
+        linters: [unused]
+      - path: "internal/anonymize/dlp\\.go"
+        linters: [unused]

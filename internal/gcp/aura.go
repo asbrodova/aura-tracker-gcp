@@ -523,7 +523,7 @@ func (a *gcpAdapter) fetchGKESignalsRich(ctx context.Context, projectID, cluster
 	clusterFilter := fmt.Sprintf(`resource.labels.cluster_name = "%s" AND resource.labels.location = "%s"`, clusterName, location)
 
 	var nodeCPU, nodeMem, restartRate float64
-	var ctrlHealth float64 = 1.0
+	ctrlHealth := 1.0
 	var pools []models.NodePoolAudit
 	var channelName, currentVersion string
 	var serverChannels map[string]string // channel name → latest default version
