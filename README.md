@@ -15,6 +15,8 @@
 
 **69 Tools · 10 Resources · 3 Prompts · 26 Modules**
 
+> For architecture deep-dives, per-service guides, and full configuration reference, see the **[GitHub Wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)**.
+
 <!-- Add a demo GIF here: -->
 <!-- ![Demo: Claude calling gcp_project_aura_summary](docs/demo.gif) -->
 
