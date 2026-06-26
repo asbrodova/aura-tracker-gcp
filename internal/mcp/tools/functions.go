@@ -38,7 +38,7 @@ func (t *FunctionsTools) ListFunctions() server.ServerTool {
 				"Gen 2 functions run on Cloud Run and are listed separately from gcp_cloudrun_list_services. "+
 				"Use generation='1', '2', or 'both' (default). Use region='-' or omit for all regions.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region (e.g. us-central1). Omit or use '-' for all regions.")),
 		mcp.WithString("generation",
 			mcp.Description("Which generation to list: '1' (Gen 1 only), '2' (Gen 2 only), or 'both' (default)."),
@@ -77,7 +77,7 @@ func (t *FunctionsTools) GetFunctionDetails() server.ServerTool {
 			"Get detailed information about a specific Cloud Function (Gen 1 or Gen 2) including runtime, entry point, memory, timeout, service account, and VPC connector. "+
 				"For Gen 2 functions, also returns the underlying Cloud Run service name.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("function_name", mcp.Required(), mcp.Description("Cloud Function name")),
 		mcp.WithNumber("generation",

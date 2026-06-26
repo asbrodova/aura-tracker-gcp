@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -114,13 +113,6 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: load anonymize config: %v\n", err)
 		os.Exit(1)
 	}
-	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" && projectID != "" {
-		anonCfg.Enabled = true
-		anonCfg.Patterns = append(anonCfg.Patterns, anonymize.PatternConfig{
-			Name:  "gcp_project_id",
-			Regex: regexp.QuoteMeta(projectID),
-		})
-	}
 
 	anon, anonClose, err := buildAnonymizer(ctx, anonCfg, log, projectID)
 	if err != nil {
@@ -132,6 +124,13 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		log.Info("anonymization enabled", "mode", anonCfg.Mode, "audit_only", anonCfg.AuditOnly)
 	}
 
+	// ANONYMIZE_PROJECT_ID is independent of ANONYMIZE_ENABLED: it masks only the
+	// project ID without activating the built-in IP/email scrubbing patterns.
+	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" && projectID != "" {
+		anon = anonymize.ChainAnonymizers(anon, anonymize.NewProjectIDMasker(projectID))
+		log.Info("project ID masking enabled")
+	}
+
 	var gcpSvc ports.GCPService = svc
 	if os.Getenv("SAFETY_ENABLED") != "false" {
 		gcpSvc = safety.NewSafetyDecorator(svc, log)
@@ -140,7 +139,7 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		log.Warn("safety enforcement DISABLED via SAFETY_ENABLED=false")
 	}
 
-	s := mcpserver.New(gcpSvc, log, version, mcpserver.WithAnonymizer(anon), mcpserver.WithModules(enabledModules))
+	s := mcpserver.New(gcpSvc, log, version, mcpserver.WithAnonymizer(anon), mcpserver.WithModules(enabledModules), mcpserver.WithDefaultProjectID(projectID))
 
 	switch os.Getenv("MCP_TRANSPORT") {
 	case "sse":

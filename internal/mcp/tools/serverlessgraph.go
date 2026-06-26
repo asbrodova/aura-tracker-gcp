@@ -35,7 +35,7 @@ func (t *ServerlessGraphTools) ExportServerlessGraph() server.ServerTool {
 			"Cloud Scheduler jobs, Workflows, Cloud Tasks queues, Pub/Sub topics and subscriptions, "+
 			"Secret Manager secrets, Serverless VPC connectors, and Cloud SQL instances — "+
 			"connected by dependency edges (triggers, routes_to, dead_letters_to, reads_secret, etc.)."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region",
 			mcp.Description("Filter output to a single region (e.g. us-central1). Omit or use '-' for all regions."),
 		),

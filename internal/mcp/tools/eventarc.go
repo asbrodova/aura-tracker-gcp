@@ -39,7 +39,7 @@ func (t *EventarcTools) ListTriggers() server.ServerTool {
 				"destination URN, Pub/Sub transport topic, event filters, and service account. "+
 				"Use region='-' or omit for all regions.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region (e.g. us-central1). Omit or use '-' for all regions.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Eventarc Triggers",
@@ -71,7 +71,7 @@ func (t *EventarcTools) listTriggersHandler(ctx context.Context, _ mcp.CallToolR
 func (t *EventarcTools) GetTrigger() server.ServerTool {
 	tool := mcp.NewTool("gcp_eventarc_get_trigger",
 		mcp.WithDescription("Get detailed information about a specific Eventarc trigger including all event filters, destination, and transport configuration"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("trigger_name", mcp.Required(), mcp.Description("Eventarc trigger name")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{

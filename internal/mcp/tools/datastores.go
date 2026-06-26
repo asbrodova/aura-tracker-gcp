@@ -36,7 +36,7 @@ func (t *DatastoreTools) GetTools() []server.ServerTool {
 func (t *DatastoreTools) ListSpannerInstances() server.ServerTool {
 	tool := mcp.NewTool("gcp_spanner_list_instances",
 		mcp.WithDescription("List Cloud Spanner instances in a GCP project including state, node count, processing units, and edition."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Spanner Instances",
 			ReadOnlyHint:    boolPtr(true),
@@ -67,7 +67,7 @@ func (t *DatastoreTools) listSpannerInstancesHandler(ctx context.Context, _ mcp.
 func (t *DatastoreTools) ListAlloyDBClusters() server.ServerTool {
 	tool := mcp.NewTool("gcp_alloydb_list_clusters",
 		mcp.WithDescription("List AlloyDB clusters in a GCP project including state, PostgreSQL version, and cluster type (primary/secondary)."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Description("GCP region (e.g. us-central1). Omit to list across all regions.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List AlloyDB Clusters",
@@ -99,7 +99,7 @@ func (t *DatastoreTools) listAlloyDBClustersHandler(ctx context.Context, _ mcp.C
 func (t *DatastoreTools) ListFirestoreDatabases() server.ServerTool {
 	tool := mcp.NewTool("gcp_firestore_list_databases",
 		mcp.WithDescription("List Firestore databases in a GCP project including type (Native/Datastore), location, concurrency mode, and edition."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Firestore Databases",
 			ReadOnlyHint:    boolPtr(true),
@@ -130,7 +130,7 @@ func (t *DatastoreTools) listFirestoreDatabasesHandler(ctx context.Context, _ mc
 func (t *DatastoreTools) ListMemorystoreInstances() server.ServerTool {
 	tool := mcp.NewTool("gcp_memorystore_list_instances",
 		mcp.WithDescription("List Memorystore for Redis instances in a GCP project including tier, memory size, Redis version, host endpoint, and state."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Description("GCP region (e.g. us-central1). Omit to list across all regions.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Memorystore Instances",

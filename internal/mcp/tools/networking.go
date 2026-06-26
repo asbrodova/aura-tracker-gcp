@@ -47,7 +47,7 @@ func (t *NetworkingTools) ListLoadBalancers() server.ServerTool {
 				"and target proxy name. Omit region to return all global and regional LBs; "+
 				"set region='global' for global-only.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region, 'global', or omit for all")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Compute Load Balancers",
@@ -84,7 +84,7 @@ func (t *NetworkingTools) ListURLMaps() server.ServerTool {
 				"(global/regional), default backend service, and host rule count. "+
 				"Omit region for global URL maps; specify region for regional ones.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region for regional URL maps; omit for global")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Compute URL Maps",
@@ -122,7 +122,7 @@ func (t *NetworkingTools) ListNEGs() server.ServerTool {
 				"SERVERLESS NEGs are the backend attachment point between an HTTP(S) LB and "+
 				"a Cloud Run or Cloud Functions service.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("Filter by GCP region; omit for all regions")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Compute NEGs",
@@ -159,7 +159,7 @@ func (t *NetworkingTools) ListAPIGateways() server.ServerTool {
 				"hostname (e.g. <id>-<hash>-uc.a.run.app). Omit location to list all regions. "+
 				"Requires the API Gateway API to be enabled and roles/apigateway.viewer.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Description("GCP region; omit for all locations")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List API Gateways",
@@ -195,7 +195,7 @@ func (t *NetworkingTools) ListVPCNetworks() server.ServerTool {
 				"number of subnets and VPC peerings, and MTU. Use gcp_vpc_list_subnets to see "+
 				"the subnets within each network.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List VPC Networks",
 			ReadOnlyHint:    boolPtr(true),
@@ -231,7 +231,7 @@ func (t *NetworkingTools) ListVPCSubnets() server.ServerTool {
 				"(PRIVATE, PRIVATE_SERVICE_CONNECT, etc.), and secondary range count. "+
 				"Filter by network name or region to narrow results.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("network", mcp.Description("Filter by VPC network name or self-link")),
 		mcp.WithString("region", mcp.Description("Filter by GCP region")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -270,7 +270,7 @@ func (t *NetworkingTools) ListPSCEndpoints() server.ServerTool {
 				"PSC connection ID. PSC endpoints allow VMs and serverless workloads to reach "+
 				"Google APIs or producer services over a private IP address.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("Filter by GCP region; omit for all regions")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List PSC Endpoints",

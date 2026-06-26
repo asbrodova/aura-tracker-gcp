@@ -40,7 +40,7 @@ func (t *MonitoringTools) GetTools() []server.ServerTool {
 func (t *MonitoringTools) GetMetrics() server.ServerTool {
 	tool := mcp.NewTool("gcp_monitoring_get_metrics",
 		mcp.WithDescription("Fetch Cloud Monitoring time-series metrics for a GCP resource over a specified time window"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("metric_type", mcp.Required(), mcp.Description("Full Cloud Monitoring metric type, e.g. kubernetes.io/container/cpu/request_utilization")),
 		mcp.WithNumber("lookback_minutes",
 			mcp.Description("Time window in minutes (1–1440). Default: 60."),
@@ -86,7 +86,7 @@ func (t *MonitoringTools) getMetricsHandler(ctx context.Context, _ mcp.CallToolR
 func (t *MonitoringTools) ListMetricDescriptors() server.ServerTool {
 	tool := mcp.NewTool("gcp_monitoring_list_metric_descriptors",
 		mcp.WithDescription("List Cloud Monitoring metric descriptors for a project, optionally filtered by a prefix"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("filter", mcp.Description(`Optional filter expression, e.g. metric.type = starts_with("custom.")`)),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Metric Descriptors",
@@ -118,7 +118,7 @@ func (t *MonitoringTools) listMetricDescriptorsHandler(ctx context.Context, _ mc
 func (t *MonitoringTools) ListTraceServices() server.ServerTool {
 	tool := mcp.NewTool("gcp_trace_list_services",
 		mcp.WithDescription("List services that have sent traces to Cloud Trace. Uses the Cloud Trace API by default; set TRACE_BACKEND=monitoring to use the Monitoring metric proxy instead."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Trace Services",
 			ReadOnlyHint:    boolPtr(true),
@@ -153,7 +153,7 @@ func (t *MonitoringTools) ListAlertPolicies() server.ServerTool {
 				"Returns policy name, display name, enabled status, severity, and condition display names. "+
 				"Use filter to narrow results, e.g. 'enabled=\"true\"'.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("filter", mcp.Description("Optional filter expression")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Alert Policies",
@@ -185,7 +185,7 @@ func (t *MonitoringTools) ListUptimeChecks() server.ServerTool {
 			"List Cloud Monitoring uptime check configurations in a project. "+
 				"Returns name, display name, check period, timeout, and checker type.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Uptime Checks",
 			ReadOnlyHint:    boolPtr(true),
@@ -217,7 +217,7 @@ func (t *MonitoringTools) ListSLOs() server.ServerTool {
 				"Lists all services and their SLOs; optionally filter by service_name. "+
 				"Returns SLO name, display name, goal (0–1), and calendar period.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("service_name", mcp.Description("Optional service name suffix to filter results")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List SLOs",
@@ -249,7 +249,7 @@ func (t *MonitoringTools) ListDashboards() server.ServerTool {
 			"List Cloud Monitoring dashboards in a project. "+
 				"Returns dashboard name, display name, and etag.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Dashboards",
 			ReadOnlyHint:    boolPtr(true),
@@ -281,7 +281,7 @@ func (t *MonitoringTools) ListTraceDependencyEdges() server.ServerTool {
 				"Scans up to 2000 traces over the lookback window (default 7 days) and returns caller→callee "+
 				"pairs with sample counts. Use the results to build a service dependency graph.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithNumber("lookback_hours",
 			mcp.Description("Hours of trace data to scan (1–720). Default: 168 (7 days)."),
 			mcp.Min(1),

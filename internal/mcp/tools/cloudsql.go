@@ -33,7 +33,7 @@ func (t *CloudSQLTools) GetTools() []server.ServerTool {
 func (t *CloudSQLTools) ListSQLInstances() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudsql_list_instances",
 		mcp.WithDescription("List Cloud SQL instances in a GCP project including database version, region, state, and machine tier."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Cloud SQL Instances",
 			ReadOnlyHint:    boolPtr(true),

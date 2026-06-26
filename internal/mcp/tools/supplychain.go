@@ -42,7 +42,7 @@ func (t *SupplyChainTools) ListArtifactRegistryRepos() server.ServerTool {
 				"description, creation time, and size in bytes. "+
 				"Omit location to list repositories in all locations.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Description("GCP location/region, or omit for all locations")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Artifact Registry Repositories",
@@ -76,7 +76,7 @@ func (t *SupplyChainTools) ListArtifactRegistryImages() server.ServerTool {
 			"List Docker images in an Artifact Registry repository. "+
 				"Returns image name, URI, tags, build time, upload time, and size in bytes.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP location/region of the repository")),
 		mcp.WithString("repository", mcp.Required(), mcp.Description("Repository name (short name, not full path)")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -115,7 +115,7 @@ func (t *SupplyChainTools) ListCloudBuildTriggers() server.ServerTool {
 				"enabled/disabled status, tags, creation time, and build config filename. "+
 				"Omit region to list triggers across all regions.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region, or omit for all regions")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Cloud Build Triggers",
@@ -150,7 +150,7 @@ func (t *SupplyChainTools) ListServiceDirectoryNamespaces() server.ServerTool {
 				"Returns namespace name, location, and the services registered within each namespace. "+
 				"Omit location to list namespaces across all locations.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Description("GCP location/region, or omit for all locations")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Service Directory Namespaces",

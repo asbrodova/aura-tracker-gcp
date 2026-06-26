@@ -35,7 +35,7 @@ func (t *StorageTools) GetTools() []server.ServerTool {
 func (t *StorageTools) ListBuckets() server.ServerTool {
 	tool := mcp.NewTool("gcp_storage_list_buckets",
 		mcp.WithDescription("List all Cloud Storage buckets in a GCP project with location, storage class, labels, and creation time."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List GCS Buckets",
 			ReadOnlyHint:    boolPtr(true),
@@ -66,7 +66,7 @@ func (t *StorageTools) listBucketsHandler(ctx context.Context, _ mcp.CallToolReq
 func (t *StorageTools) GetBucketMetadata() server.ServerTool {
 	tool := mcp.NewTool("gcp_storage_get_bucket_metadata",
 		mcp.WithDescription("Get detailed metadata for a Cloud Storage bucket: versioning, uniform bucket-level access, public access prevention, and lifecycle rule count."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("bucket_name", mcp.Required(), mcp.Description("Globally unique bucket name")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Get GCS Bucket Metadata",
@@ -98,7 +98,7 @@ func (t *StorageTools) getBucketMetadataHandler(ctx context.Context, _ mcp.CallT
 func (t *StorageTools) ListBucketObjects() server.ServerTool {
 	tool := mcp.NewTool("gcp_storage_list_bucket_objects",
 		mcp.WithDescription("List objects in a GCS bucket. Supports optional prefix filtering and a configurable result limit (max 1000)."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("bucket_name", mcp.Required(), mcp.Description("Bucket name")),
 		mcp.WithString("prefix", mcp.Description("Filter objects by name prefix (e.g. \"images/\")")),
 		mcp.WithNumber("max_results", mcp.Description("Maximum number of objects to return (default 1000, max 1000)")),
