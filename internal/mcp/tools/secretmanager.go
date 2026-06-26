@@ -39,7 +39,7 @@ func (t *SecretManagerTools) ListSecrets() server.ServerTool {
 				"Secret values are NEVER read or returned. "+
 				"Set include_references=true to see which Cloud Run services reference each secret via secretKeyRef.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("filter", mcp.Description("Optional server-side filter expression (e.g. 'labels.env=prod')")),
 		mcp.WithBoolean("include_references",
 			mcp.Description("If true, scan Cloud Run service specs to show which services reference each secret. Default: false."),

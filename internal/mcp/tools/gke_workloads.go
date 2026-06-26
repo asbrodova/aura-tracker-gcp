@@ -46,7 +46,7 @@ func (t *GKEWorkloadTools) ListWorkloads() server.ServerTool {
 				"Requires the cluster's Kubernetes API to be accessible; returns an error for "+
 				"clusters with a private endpoint and no external access.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone of the cluster")),
 		mcp.WithString("namespace", mcp.Description("Kubernetes namespace; omit for all namespaces")),
@@ -91,7 +91,7 @@ func (t *GKEWorkloadTools) GetWorkloadDetails() server.ServerTool {
 				"(with secret references masked), resource requests/limits, node selector, tolerations, "+
 				"and annotations. Useful for diagnosing misconfigurations or tracing secret dependencies.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone of the cluster")),
 		mcp.WithString("namespace", mcp.Required(), mcp.Description("Kubernetes namespace")),
@@ -134,7 +134,7 @@ func (t *GKEWorkloadTools) ListServices() server.ServerTool {
 				"LoadBalancer), selector labels, ports, and — when present — the cloud.google.com/neg "+
 				"annotation that links the service to a GCP Network Endpoint Group.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone of the cluster")),
 		mcp.WithString("namespace", mcp.Description("Kubernetes namespace; omit for all namespaces")),
@@ -176,7 +176,7 @@ func (t *GKEWorkloadTools) ListIngresses() server.ServerTool {
 				"are included when the Gateway CRD is installed; a 404 from the API server is "+
 				"treated as 'not installed' and silently skipped.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone of the cluster")),
 		mcp.WithString("namespace", mcp.Description("Kubernetes namespace; omit for all namespaces")),
@@ -217,7 +217,7 @@ func (t *GKEWorkloadTools) ListNetworkPolicies() server.ServerTool {
 				"which pods are isolated and whether observed traffic edges in the architecture "+
 				"graph are permitted by policy.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone of the cluster")),
 		mcp.WithString("namespace", mcp.Description("Kubernetes namespace; omit for all namespaces")),

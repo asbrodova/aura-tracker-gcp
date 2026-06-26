@@ -12,6 +12,33 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
+// auraDashboardInstruction is appended to every Aura tool result so the LLM
+// presents scores as a ranked visual dashboard rather than plain prose.
+const auraDashboardInstruction = `
+CRITICAL FORMATTING INSTRUCTION FOR LLM: Present the data above as a ranked visual dashboard. Do not use paragraphs. Use this strict markdown template:
+
+## 🌐 Aura Tracker Health & Cost Summary
+
+**Resource Rankings (by Aura Score):**
+
+[Emoji] **[Resource Type]**: [Resource Name] | Aura: **[Score]**/100
+> Details: [Brief status]
+> Action: [Estimated savings or fix required]
+
+Emoji rules by Aura Score:
+- 🟢 80–100 (Healthy)
+- 🟡 50–79 (Warning / Over-provisioned)
+- 🔴 0–49 (Critical / Idle)
+`
+
+func appendAuraInstruction(r *mcp.CallToolResult) *mcp.CallToolResult {
+	r.Content = append(r.Content, mcp.TextContent{
+		Type: "text",
+		Text: auraDashboardInstruction,
+	})
+	return r
+}
+
 // AuraTools provides MCP tool definitions and handlers for Aura Score operations.
 type AuraTools struct {
 	svc ports.AuraService
@@ -39,7 +66,7 @@ func (t *AuraTools) GetAuraScore() server.ServerTool {
 			"Return an Aura Score (0-100) combining Cloud Monitoring health signals and utilization "+
 				"efficiency for a resource. Cached 5 min. Bands: green ≥80, yellow 50-79, red <50.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("resource_kind", mcp.Required(),
 			mcp.Description("Resource type: cloud_run | bigquery | cloud_sql | gke | gcs"),
 			mcp.Enum("cloud_run", "bigquery", "cloud_sql", "gke", "gcs"),
@@ -79,7 +106,7 @@ func (t *AuraTools) getAuraScoreHandler(ctx context.Context, _ mcp.CallToolReque
 	if err != nil {
 		return nil, fmt.Errorf("gcp_get_aura_score: marshal: %w", err)
 	}
-	return result, nil
+	return appendAuraInstruction(result), nil
 }
 
 func (t *AuraTools) ProjectAuraSummary() server.ServerTool {
@@ -88,7 +115,7 @@ func (t *AuraTools) ProjectAuraSummary() server.ServerTool {
 			"Score all Cloud Run, Cloud SQL, BigQuery, and GKE resources with Aura Scores, sorted worst-first. "+
 				"Includes a pre-formatted summary block.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region",
 			mcp.Description("Limit discovery to a specific region (e.g. us-central1). Leave empty to cover all regions."),
 			mcp.DefaultString(""),
@@ -120,7 +147,7 @@ func (t *AuraTools) projectAuraSummaryHandler(ctx context.Context, _ mcp.CallToo
 		"\n\nTotal: %d  🔴 Critical: %d  🟡 Warning: %d  🟢 Healthy: %d",
 		summary.TotalCount, summary.CriticalCount, summary.WarningCount, summary.HealthyCount,
 	)
-	return mcp.NewToolResultText(text), nil
+	return appendAuraInstruction(mcp.NewToolResultText(text)), nil
 }
 
 func (t *AuraTools) GKEAuraScore() server.ServerTool {
@@ -131,7 +158,7 @@ func (t *AuraTools) GKEAuraScore() server.ServerTool {
 				"per-node-pool autoscaling audit. Score 0–100; bands: green ≥80, yellow 50–79, red <50. "+
 				"Not cached — use for fresh deep-dives after gcp_project_aura_summary flags a cluster.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("Cluster region or zone, e.g. us-central1")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -162,7 +189,7 @@ func (t *AuraTools) gkeAuraScoreHandler(ctx context.Context, _ mcp.CallToolReque
 	if err != nil {
 		return nil, fmt.Errorf("gcp_gke_get_aura_score: marshal: %w", err)
 	}
-	return result, nil
+	return appendAuraInstruction(result), nil
 }
 
 func (t *AuraTools) GCSAuraScore() server.ServerTool {
@@ -175,7 +202,7 @@ func (t *AuraTools) GCSAuraScore() server.ServerTool {
 				"actionable reasons. Score 0–100; health sub-score reflects security posture, "+
 				"efficiency sub-score reflects cost optimisation.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("bucket_name", mcp.Required(), mcp.Description("GCS bucket name")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "GCS Bucket Aura Score",
@@ -204,5 +231,5 @@ func (t *AuraTools) gcsAuraScoreHandler(ctx context.Context, _ mcp.CallToolReque
 	if err != nil {
 		return nil, fmt.Errorf("gcp_gcs_get_aura_score: marshal: %w", err)
 	}
-	return result, nil
+	return appendAuraInstruction(result), nil
 }

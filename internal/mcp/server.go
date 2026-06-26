@@ -25,8 +25,9 @@ const serverName = "aura-tracker-gcp"
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	anonymizer     anonymize.Anonymizer
-	enabledModules map[string]bool // nil = all modules
+	anonymizer       anonymize.Anonymizer
+	enabledModules   map[string]bool // nil = all modules
+	defaultProjectID string
 }
 
 // WithAnonymizer attaches an Anonymizer to every registered tool handler.
@@ -39,6 +40,13 @@ func WithAnonymizer(a anonymize.Anonymizer) Option {
 // A nil or empty map registers all modules (default behavior).
 func WithModules(modules map[string]bool) Option {
 	return func(o *serverOptions) { o.enabledModules = modules }
+}
+
+// WithDefaultProjectID sets the fallback GCP project ID injected into any tool
+// call that does not supply a project_id argument. This lets the LLM omit
+// project_id without causing an empty-string error in the adapter.
+func WithDefaultProjectID(id string) Option {
+	return func(o *serverOptions) { o.defaultProjectID = id }
 }
 
 // New creates and configures the MCP server, registering all tools, resources, and prompts.
@@ -58,9 +66,22 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	)
 
 	wrap := func(t server.ServerTool) server.ServerTool {
-		// Inject a fresh correlation ID so every log line for one tool call shares a cid.
 		orig := t.Handler
 		t.Handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			// Inject default project_id (and "project" for topology) so the LLM can
+			// omit the project argument when a server default is configured.
+			if o.defaultProjectID != "" {
+				args, _ := req.Params.Arguments.(map[string]any)
+				if args == nil {
+					args = make(map[string]any)
+				}
+				for _, key := range []string{"project_id", "project"} {
+					if v, ok := args[key]; !ok || v == "" || v == nil {
+						args[key] = o.defaultProjectID
+					}
+				}
+				req.Params.Arguments = args
+			}
 			return orig(middleware.WithCorrelationID(ctx), req)
 		}
 		return anonymize.WrapHandler(t, o.anonymizer)

@@ -35,7 +35,7 @@ func (t *PubSubTools) GetTools() []server.ServerTool {
 func (t *PubSubTools) ListTopics() server.ServerTool {
 	tool := mcp.NewTool("gcp_pubsub_list_topics",
 		mcp.WithDescription("List all Pub/Sub topics in a GCP project with their subscription counts"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Pub/Sub Topics",
 			ReadOnlyHint:    boolPtr(true),
@@ -66,7 +66,7 @@ func (t *PubSubTools) listTopicsHandler(ctx context.Context, _ mcp.CallToolReque
 func (t *PubSubTools) InspectTopicHealth() server.ServerTool {
 	tool := mcp.NewTool("gcp_pubsub_inspect_topic_health",
 		mcp.WithDescription("Inspect a Pub/Sub topic for subscription lag, unacked messages, and health issues"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("topic_name", mcp.Required(), mcp.Description("Pub/Sub topic short name (not the full resource path)")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Inspect Pub/Sub Topic Health",
@@ -102,7 +102,7 @@ func (t *PubSubTools) ListSubscriptions() server.ServerTool {
 				"Shows push endpoint, dead-letter topic, and filter for each subscription. "+
 				"Optionally filter by topic_name to list only subscriptions for a specific topic.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("topic_name", mcp.Description("Optional: filter to subscriptions on this topic (bare name, not full resource path)")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Pub/Sub Subscriptions",

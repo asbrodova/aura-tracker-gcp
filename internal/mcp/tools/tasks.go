@@ -33,7 +33,7 @@ func (t *TasksTools) GetTools() []server.ServerTool {
 func (t *TasksTools) ListTaskQueues() server.ServerTool {
 	tool := mcp.NewTool("gcp_tasks_list_queues",
 		mcp.WithDescription("List Cloud Tasks queues in a GCP project. Use region='-' or omit for all regions."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region (e.g. us-central1). Omit or use '-' for all regions.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Cloud Tasks Queues",

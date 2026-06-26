@@ -36,7 +36,7 @@ func (t *GKETools) GetTools() []server.ServerTool {
 func (t *GKETools) ListClusters() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_list_clusters",
 		mcp.WithDescription("List all GKE clusters in a GCP project and location"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region, zone, or '-' for all locations")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List GKE Clusters",
@@ -68,7 +68,7 @@ func (t *GKETools) listClustersHandler(ctx context.Context, _ mcp.CallToolReques
 func (t *GKETools) GetClusterDetails() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_get_cluster_details",
 		mcp.WithDescription("Get detailed information about a specific GKE cluster including node pools and configuration"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -101,7 +101,7 @@ func (t *GKETools) getClusterDetailsHandler(ctx context.Context, _ mcp.CallToolR
 func (t *GKETools) GetClusterBottlenecks() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_get_cluster_bottlenecks",
 		mcp.WithDescription("Identify GKE cluster bottlenecks from CPU/memory metrics and error logs; returns severity rating."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithNumber("lookback_minutes",
@@ -147,7 +147,7 @@ func (t *GKETools) ScaleDeployment() server.ServerTool {
 				"Mutation: dry_run=true → plan_id preview; confirm_plan_id=<id> executes (TTL 10 min). "+
 				"Idempotent: same count → no_change_needed=true.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("node_pool_name", mcp.Required(), mcp.Description("Node pool name to resize")),

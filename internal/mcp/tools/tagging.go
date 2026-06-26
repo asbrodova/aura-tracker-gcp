@@ -38,7 +38,7 @@ func (t *TaggingTools) ListTaggedResources() server.ServerTool {
 				"tag_key should be the short key name (e.g. \"env\") as it appears in the namespaced tag name. "+
 				"When tag_value is omitted, all values under the key are returned.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("tag_key", mcp.Required(), mcp.Description("Tag key short name (e.g. \"env\"); matched against the namespaced tag name")),
 		mcp.WithString("tag_value", mcp.Description("Tag value short name (e.g. \"prod\"); omit to return all values under the key")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{

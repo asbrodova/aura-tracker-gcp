@@ -34,7 +34,7 @@ func (t *TopologyTools) GetServiceTopology() server.ServerTool {
 			"Infer Cloud Run service dependencies from Cloud SQL annotations, VPC connector, env vars, "+
 				"Secret Manager refs, and Pub/Sub subscriptions. depth=2 resolves transitive deps.",
 		),
-		mcp.WithString("project", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("Cloud Run region, e.g. us-central1")),
 		mcp.WithString("service_name", mcp.Required(), mcp.Description("Cloud Run service name")),
 		mcp.WithNumber("depth",

@@ -34,7 +34,7 @@ func (t *WorkflowsTools) GetTools() []server.ServerTool {
 func (t *WorkflowsTools) ListWorkflows() server.ServerTool {
 	tool := mcp.NewTool("gcp_workflows_list",
 		mcp.WithDescription("List Cloud Workflows in a GCP project. Use region='-' or omit for all regions."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region (e.g. us-central1). Omit or use '-' for all regions.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Cloud Workflows",
@@ -66,7 +66,7 @@ func (t *WorkflowsTools) listWorkflowsHandler(ctx context.Context, _ mcp.CallToo
 func (t *WorkflowsTools) ListWorkflowExecutions() server.ServerTool {
 	tool := mcp.NewTool("gcp_workflows_list_executions",
 		mcp.WithDescription("List recent executions of a Cloud Workflow including state, start/end times, and execution ID"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("workflow_name", mcp.Required(), mcp.Description("Workflow name")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of executions to return (default 20)")),

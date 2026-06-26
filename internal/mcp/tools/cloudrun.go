@@ -38,7 +38,7 @@ func (t *CloudRunTools) GetTools() []server.ServerTool {
 func (t *CloudRunTools) ListServices() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_list_services",
 		mcp.WithDescription("List all Cloud Run services in a GCP project and region"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region, e.g. us-central1")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Cloud Run Services",
@@ -70,7 +70,7 @@ func (t *CloudRunTools) listServicesHandler(ctx context.Context, _ mcp.CallToolR
 func (t *CloudRunTools) GetServiceDetails() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_get_service_details",
 		mcp.WithDescription("Get detailed information about a specific Cloud Run service including traffic splits and latest revision"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("service_name", mcp.Required(), mcp.Description("Cloud Run service name")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -106,7 +106,7 @@ func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 			"Update the traffic split for a Cloud Run service. "+
 				"Mutation: dry_run=true → plan_id + before/after preview; confirm_plan_id=<id> executes (TTL 10 min).",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("service_name", mcp.Required(), mcp.Description("Cloud Run service name")),
 		mcp.WithBoolean("dry_run",
@@ -150,7 +150,7 @@ func (t *CloudRunTools) updateTrafficHandler(ctx context.Context, _ mcp.CallTool
 func (t *CloudRunTools) ListJobs() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_list_jobs",
 		mcp.WithDescription("List all Cloud Run jobs in a GCP project. Use region='-' or omit to list across all regions."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region (e.g. us-central1). Omit or use '-' for all regions.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Cloud Run Jobs",
@@ -182,7 +182,7 @@ func (t *CloudRunTools) listJobsHandler(ctx context.Context, _ mcp.CallToolReque
 func (t *CloudRunTools) GetJobDetails() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_get_job_details",
 		mcp.WithDescription("Get detailed information about a specific Cloud Run job including container image, parallelism, and latest execution"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("job_name", mcp.Required(), mcp.Description("Cloud Run job name")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
@@ -215,7 +215,7 @@ func (t *CloudRunTools) getJobDetailsHandler(ctx context.Context, _ mcp.CallTool
 func (t *CloudRunTools) ListJobExecutions() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_list_job_executions",
 		mcp.WithDescription("List recent executions of a Cloud Run job including status, start/completion times, and task counts"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
 		mcp.WithString("job_name", mcp.Required(), mcp.Description("Cloud Run job name")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of executions to return (default 20)")),

@@ -43,7 +43,7 @@ func (t *GKEMeshTools) GetMeshTopology() server.ServerTool {
 				"which data source was used ('istio_metrics', 'log_based', or 'none'). An empty edges "+
 				"array with warnings means ASM is not installed or no traffic was observed.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone of the cluster")),
 		mcp.WithNumber("lookback_hours", mcp.Description("Lookback window in hours (default 24, max 168)")),

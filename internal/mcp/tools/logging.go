@@ -31,7 +31,7 @@ func (t *LoggingTools) GetTools() []server.ServerTool {
 func (t *LoggingTools) QueryRecent() server.ServerTool {
 	tool := mcp.NewTool("gcp_logging_query_recent",
 		mcp.WithDescription("Fetch recent Cloud Logging entries for a GCP resource, filtered by severity and time window"),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("resource_type", mcp.Required(), mcp.Description("GCP monitored resource type, e.g. k8s_cluster, cloud_run_revision, pubsub_topic")),
 		mcp.WithString("resource_name", mcp.Required(), mcp.Description("Resource name or identifier")),
 		mcp.WithString("min_severity",

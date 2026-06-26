@@ -37,7 +37,7 @@ func (t *SchedulerTools) ListSchedulerJobs() server.ServerTool {
 				"Each job shows its schedule (cron), timezone, state, and target (HTTP URI, Pub/Sub topic, or App Engine endpoint). "+
 				"Use region='-' or omit for all regions.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Description("GCP region (e.g. us-central1). Omit or use '-' for all regions.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Cloud Scheduler Jobs",

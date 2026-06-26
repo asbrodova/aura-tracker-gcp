@@ -40,7 +40,7 @@ func (t *ArchGraphTools) ExportArchitectureGraph() server.ServerTool {
 				"Results are cached for 5 minutes per project+region combination. "+
 				"WARNING: full scans of large projects (5+ clusters, 50+ services) may take 40–60 seconds.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithNumber("max_nodes",
 			mcp.Description("Hard cap on the number of nodes returned (0 = unlimited)."),
 			mcp.Min(0),

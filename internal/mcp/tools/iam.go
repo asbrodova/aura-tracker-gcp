@@ -35,7 +35,7 @@ func (t *IAMTools) GetTools() []server.ServerTool {
 func (t *IAMTools) TestPermissions() server.ServerTool {
 	tool := mcp.NewTool("gcp_iam_test_permissions",
 		mcp.WithDescription("Test which IAM permissions the service account holds on the project. Call before mutations to pre-check access."),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID to test permissions against")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID to test permissions against. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Test IAM Permissions",
 			ReadOnlyHint:    boolPtr(true),
@@ -107,7 +107,7 @@ func (t *IAMTools) ListServiceAccounts() server.ServerTool {
 				"Returns each account's name, email, display name, description, "+
 				"disabled status, and unique numeric ID.",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Service Accounts",
 			ReadOnlyHint:    boolPtr(true),

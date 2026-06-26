@@ -38,7 +38,7 @@ func (t *CoverageTools) GetObservabilityCoverage() server.ServerTool {
 				"computes a 0–1 coverage score, and returns project-wide recommendations for gaps. "+
 				"Coverage score = HasMetrics×0.35 + HasTraces×0.35 + HasLogs×0.20 + HasAlerts×0.10 (+0.10 bonus for OTel sidecar).",
 		),
-		mcp.WithString("project_id", mcp.Required(), mcp.Description("GCP project ID")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Observability Coverage Rollup",
 			ReadOnlyHint:    boolPtr(true),
