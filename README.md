@@ -80,6 +80,10 @@ See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
 brew install asbrodova/tap/aura-tracker-gcp
 ```
 
+> **macOS Gatekeeper:** On first run macOS may block the binary with a "cannot be opened" warning. Fix with either:
+> - `xattr -d com.apple.quarantine $(which aura-tracker-gcp)` in your terminal, then restart Claude Desktop.
+> - **System Settings → Privacy & Security** → scroll down to `aura-tracker-gcp` → click **Allow Anyway**, then restart Claude Desktop.
+
 **Direct binary download (all platforms)**
 
 Download the archive for your platform from the [latest release](https://github.com/asbrodova/aura-tracker-gcp/releases/latest), extract, and place the binary on your `PATH`.
