@@ -47,7 +47,7 @@ release:
   draft: false
   prerelease: auto
 
-homebrew_casks:
+brews:
   - name: aura-tracker-gcp
     repository:
       owner: asbrodova
@@ -59,6 +59,10 @@ homebrew_casks:
     homepage: https://github.com/asbrodova/aura-tracker-gcp
     description: "MCP server exposing GCP infrastructure operations as LLM-callable tools."
     license: MIT
+    install: |
+      bin.install "aura-tracker-gcp"
+    test: |
+      system "#{bin}/aura-tracker-gcp", "--version"
 
 changelog:
   sort: asc
