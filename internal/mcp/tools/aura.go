@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -30,6 +31,53 @@ Emoji rules by Aura Score:
 - 🟡 50–79 (Warning / Over-provisioned)
 - 🔴 0–49 (Critical / Idle)
 `
+
+func auraEmoji(band models.AuraBand) string {
+	switch band {
+	case models.AuraBandGreen:
+		return "🟢"
+	case models.AuraBandYellow:
+		return "🟡"
+	default:
+		return "🔴"
+	}
+}
+
+func auraKindLabel(k models.ResourceKind) string {
+	switch k {
+	case models.ResourceKindCloudRun:
+		return "Cloud Run"
+	case models.ResourceKindBigQuery:
+		return "BigQuery"
+	case models.ResourceKindCloudSQL:
+		return "Cloud SQL"
+	case models.ResourceKindGKE:
+		return "GKE"
+	case models.ResourceKindGCS:
+		return "GCS"
+	default:
+		return string(k)
+	}
+}
+
+func auraStatusLabel(band models.AuraBand, reasons []string) string {
+	switch band {
+	case models.AuraBandGreen:
+		return "Healthy"
+	case models.AuraBandYellow:
+		s := "Warning"
+		if len(reasons) > 0 {
+			s += " — " + reasons[0]
+		}
+		return s
+	default:
+		s := "Critical"
+		if len(reasons) > 0 {
+			s += " — " + reasons[0]
+		}
+		return s
+	}
+}
 
 func appendAuraInstruction(r *mcp.CallToolResult) *mcp.CallToolResult {
 	r.Content = append(r.Content, mcp.TextContent{
@@ -143,11 +191,21 @@ func (t *AuraTools) projectAuraSummaryHandler(ctx context.Context, _ mcp.CallToo
 	if err != nil {
 		return handleServiceError("gcp_project_aura_summary", err)
 	}
-	text := summary.Summary + fmt.Sprintf(
-		"\n\nTotal: %d  🔴 Critical: %d  🟡 Warning: %d  🟢 Healthy: %d",
+	var sb strings.Builder
+	sb.WriteString("| Resource | Type | Aura | Status |\n")
+	sb.WriteString("|----------|------|------|--------|\n")
+	for _, r := range summary.Resources {
+		fmt.Fprintf(&sb, "| %s | %s | %s %d | %s |\n",
+			r.ResourceName,
+			auraKindLabel(r.ResourceKind),
+			auraEmoji(r.Band), r.Score,
+			auraStatusLabel(r.Band, r.Reasons),
+		)
+	}
+	fmt.Fprintf(&sb, "\nTotal: %d  🔴 Critical: %d  🟡 Warning: %d  🟢 Healthy: %d",
 		summary.TotalCount, summary.CriticalCount, summary.WarningCount, summary.HealthyCount,
 	)
-	return appendAuraInstruction(mcp.NewToolResultText(text)), nil
+	return mcp.NewToolResultText(sb.String()), nil
 }
 
 func (t *AuraTools) GKEAuraScore() server.ServerTool {

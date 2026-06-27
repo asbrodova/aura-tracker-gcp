@@ -139,7 +139,15 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		log.Warn("safety enforcement DISABLED via SAFETY_ENABLED=false")
 	}
 
-	s := mcpserver.New(gcpSvc, log, version, mcpserver.WithAnonymizer(anon), mcpserver.WithModules(enabledModules), mcpserver.WithDefaultProjectID(projectID))
+	mcpOpts := []mcpserver.Option{
+		mcpserver.WithAnonymizer(anon),
+		mcpserver.WithModules(enabledModules),
+		mcpserver.WithDefaultProjectID(projectID),
+	}
+	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" {
+		mcpOpts = append(mcpOpts, mcpserver.WithProjectIDPlaceholder("your-project"))
+	}
+	s := mcpserver.New(gcpSvc, log, version, mcpOpts...)
 
 	switch os.Getenv("MCP_TRANSPORT") {
 	case "sse":

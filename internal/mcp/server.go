@@ -25,9 +25,10 @@ const serverName = "aura-tracker-gcp"
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	anonymizer       anonymize.Anonymizer
-	enabledModules   map[string]bool // nil = all modules
-	defaultProjectID string
+	anonymizer           anonymize.Anonymizer
+	enabledModules       map[string]bool // nil = all modules
+	defaultProjectID     string
+	projectIDPlaceholder string
 }
 
 // WithAnonymizer attaches an Anonymizer to every registered tool handler.
@@ -49,6 +50,14 @@ func WithDefaultProjectID(id string) Option {
 	return func(o *serverOptions) { o.defaultProjectID = id }
 }
 
+// WithProjectIDPlaceholder sets a placeholder string (e.g. "your-project") to
+// display in tool-call permission prompts when project ID masking is active.
+// The tool schema is patched so the LLM passes this value; the server replaces
+// it with the real project ID before the GCP adapter sees it.
+func WithProjectIDPlaceholder(placeholder string) Option {
+	return func(o *serverOptions) { o.projectIDPlaceholder = placeholder }
+}
+
 // New creates and configures the MCP server, registering all tools, resources, and prompts.
 // svc is the GCPService port — the only GCP dependency visible to this layer.
 func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option) *server.MCPServer {
@@ -66,17 +75,33 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	)
 
 	wrap := func(t server.ServerTool) server.ServerTool {
+		// When placeholder mode is active, patch the tool's JSON Schema for
+		// project_id / project so the LLM sends the placeholder string rather
+		// than omitting the field, making the permission popup informative.
+		if o.projectIDPlaceholder != "" {
+			for _, key := range []string{"project_id", "project"} {
+				if raw, ok := t.Tool.InputSchema.Properties[key]; ok {
+					if prop, ok := raw.(map[string]any); ok {
+						prop["description"] = "GCP project ID. Pass '" + o.projectIDPlaceholder + "' as a placeholder — the server will use its configured project."
+						prop["default"] = o.projectIDPlaceholder
+					}
+				}
+			}
+		}
+
 		orig := t.Handler
 		t.Handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			// Inject default project_id (and "project" for topology) so the LLM can
 			// omit the project argument when a server default is configured.
+			// Also replaces the placeholder value so the real project ID reaches the adapter.
 			if o.defaultProjectID != "" {
 				args, _ := req.Params.Arguments.(map[string]any)
 				if args == nil {
 					args = make(map[string]any)
 				}
 				for _, key := range []string{"project_id", "project"} {
-					if v, ok := args[key]; !ok || v == "" || v == nil {
+					v, ok := args[key]
+					if !ok || v == "" || v == nil || (o.projectIDPlaceholder != "" && v == o.projectIDPlaceholder) {
 						args[key] = o.defaultProjectID
 					}
 				}
