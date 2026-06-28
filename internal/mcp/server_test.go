@@ -453,3 +453,6 @@ func (m *mockSvc) ExportArchitectureGraph(_ context.Context, _ models.ExportArch
 func (m *mockSvc) ListTaggedResources(_ context.Context, _ models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
 	return models.ListTaggedResourcesResponse{}, nil
 }
+func (m *mockSvc) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	return models.ExportRecommendationsToBQResponse{}, nil
+}

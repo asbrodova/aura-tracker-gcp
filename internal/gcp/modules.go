@@ -65,8 +65,9 @@ var moduleClientDeps = map[string][]clientKey{
 	"supplychain":   {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
 	"coverage":      {clientRunSvc, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
 	"archgraph":     {clientRunSvc, clientRunJobs, clientFunctionsV1, clientEventarc, clientScheduler, clientWorkflows, clientWorkflowExec, clientTasks, clientSecretMgr, clientVPCAccess, clientSQLAdmin, clientPubSub, clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore, clientArtifactRegistry, clientCloudBuild, clientServiceDirectory, clientCompute, clientAPIGateway, clientIAMAdmin, clientClusterMgr, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
-	"tagging":       {clientCRMv3},
-	"_resources":    {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
+	"tagging":            {clientCRMv3},
+	"recommender_export": {clientBQ}, // BQ is also in _resources; listed here for --modules= explicit selection
+	"_resources":         {clientBQ, clientGCS, clientCRM}, // always initialized for MCP Resources
 }
 
 // neededClients returns the union of client keys for the given module set,

@@ -8,8 +8,11 @@ import (
 
 	"cloud.google.com/go/recommender/apiv1/recommenderpb"
 	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 const (
@@ -43,6 +46,17 @@ func (a *gcpAdapter) fetchRecommenderInsights(
 		return nil, nil
 	}
 
+	// Fast-path: quota already exhausted this session — skip the API entirely.
+	if a.recommenderQuotaExhausted.Load() {
+		return nil, &ports.RecommenderQuotaExhaustedError{Op: "recommender.fetchInsights"}
+	}
+
+	// Cache hit: return stored results without burning any API quota.
+	cacheKey := projectID + "|" + location + "|" + recommenderID + "|" + resourceSuffix
+	if cached, ok := a.recommenderCache.get(cacheKey); ok {
+		return cached, nil
+	}
+
 	parent := fmt.Sprintf("projects/%s/locations/%s/recommenders/%s", projectID, location, recommenderID)
 	req := &recommenderpb.ListRecommendationsRequest{
 		Parent: parent,
@@ -57,6 +71,10 @@ func (a *gcpAdapter) fetchRecommenderInsights(
 			break
 		}
 		if err != nil {
+			if status.Code(err) == codes.ResourceExhausted {
+				a.recommenderQuotaExhausted.Store(true)
+				return nil, &ports.RecommenderQuotaExhaustedError{Op: "recommender.fetchInsights"}
+			}
 			return nil, err
 		}
 		if !recommenderTargetsResource(rec.GetContent(), resourceSuffix) {
@@ -68,6 +86,8 @@ func (a *gcpAdapter) fetchRecommenderInsights(
 			monthlySavings: extractMonthlySavings(rec),
 		})
 	}
+
+	a.recommenderCache.set(cacheKey, insights)
 	return insights, nil
 }
 

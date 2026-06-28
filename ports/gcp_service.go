@@ -195,6 +195,12 @@ type ArchGraphService interface {
 	ExportArchitectureGraph(ctx context.Context, req models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error)
 }
 
+// RecommenderExportService exports active GCP recommendations to BigQuery.
+// Off by default; enabled via RECOMMENDER_BQ_EXPORT_ENABLED=true.
+type RecommenderExportService interface {
+	ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error)
+}
+
 // ─── Composite port ───────────────────────────────────────────────────────────
 
 // GCPService is the single composite secondary-port interface that all GCP
@@ -232,4 +238,5 @@ type GCPService interface {
 	TaggingService
 	CoverageService
 	ArchGraphService
+	RecommenderExportService
 }

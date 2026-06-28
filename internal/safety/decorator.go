@@ -478,3 +478,7 @@ func (d *SafetyDecorator) ExportArchitectureGraph(ctx context.Context, req model
 func (d *SafetyDecorator) ListTaggedResources(ctx context.Context, req models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
 	return d.inner.ListTaggedResources(ctx, req)
 }
+
+func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	return d.inner.ExportRecommendationsToBQ(ctx, req)
+}

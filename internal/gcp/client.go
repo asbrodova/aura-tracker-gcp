@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/bigquery"
@@ -79,8 +80,9 @@ func WithClientOptions(opts ...option.ClientOption) Option {
 // Aura Score efficiency signals with GCP's pre-computed idle / over-provisioned
 // recommendations and their estimated monthly cost savings.
 //
-// Off by default. Requires the service account to have the Recommender Viewer
-// role (or the individual recommender.*.list permissions listed in the README).
+// On by default. Set RECOMMENDER_ENABLED=false to disable. Requires the service
+// account to have the Recommender Viewer role (or individual recommender.*.list
+// permissions listed in the README).
 func WithRecommender() Option {
 	return func(a *gcpAdapter) { a.enableRecommender = true }
 }
@@ -148,9 +150,11 @@ type gcpAdapter struct {
 	rec                 *recommender.Client
 	limiter             *rate.Limiter
 	log                 *slog.Logger
-	auraCache           *ttlCache[models.AuraReport]
-	regionsCache        *ttlCache[[]string]
-	graphCache          *ttlCache[models.ServerlessGraph]
+	auraCache                 *ttlCache[models.AuraReport]
+	regionsCache              *ttlCache[[]string]
+	graphCache                *ttlCache[models.ServerlessGraph]
+	recommenderCache          *ttlCache[[]recommenderInsight]
+	recommenderQuotaExhausted atomic.Bool
 	// --- time.Duration (8 bytes each) ---
 	callTimeout  time.Duration
 	graphTimeout time.Duration
@@ -365,6 +369,7 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create recommender client: %w", err)
 		}
+		a.recommenderCache = newTTLCache[[]recommenderInsight](12 * time.Hour)
 	}
 
 	if needed[clientCRM] {

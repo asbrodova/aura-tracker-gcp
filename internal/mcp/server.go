@@ -25,10 +25,11 @@ const serverName = "aura-tracker-gcp"
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	anonymizer           anonymize.Anonymizer
-	enabledModules       map[string]bool // nil = all modules
-	defaultProjectID     string
-	projectIDPlaceholder string
+	anonymizer              anonymize.Anonymizer
+	enabledModules          map[string]bool // nil = all modules
+	defaultProjectID        string
+	projectIDPlaceholder    string
+	enableRecommenderExport bool
 }
 
 // WithAnonymizer attaches an Anonymizer to every registered tool handler.
@@ -56,6 +57,12 @@ func WithDefaultProjectID(id string) Option {
 // it with the real project ID before the GCP adapter sees it.
 func WithProjectIDPlaceholder(placeholder string) Option {
 	return func(o *serverOptions) { o.projectIDPlaceholder = placeholder }
+}
+
+// WithRecommenderExport registers the gcp_export_recommendations_to_bq tool.
+// Off by default; enable via RECOMMENDER_BQ_EXPORT_ENABLED=true.
+func WithRecommenderExport() Option {
+	return func(o *serverOptions) { o.enableRecommenderExport = true }
 }
 
 // New creates and configures the MCP server, registering all tools, resources, and prompts.
@@ -140,6 +147,9 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewCoverageTools(svc, log),
 		tools.NewArchGraphTools(svc, log),
 		tools.NewTaggingTools(svc, log),
+	}
+	if o.enableRecommenderExport {
+		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log))
 	}
 	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
 		s.AddTools(wrap(t))

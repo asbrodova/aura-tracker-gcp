@@ -83,9 +83,17 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		gcpadapter.WithLogger(log),
 		gcpadapter.WithModules(enabledModules),
 	}
-	if os.Getenv("RECOMMENDER_ENABLED") == "true" {
+	if os.Getenv("RECOMMENDER_ENABLED") != "false" {
 		adapterOpts = append(adapterOpts, gcpadapter.WithRecommender())
-		log.Info("recommender integration enabled")
+		log.Info("recommender integration enabled (set RECOMMENDER_ENABLED=false to disable)")
+	}
+
+	// RECOMMENDER_BQ_EXPORT_ENABLED/DATASET override yaml config.
+	if v := os.Getenv("RECOMMENDER_BQ_EXPORT_ENABLED"); v == "true" {
+		userCfg.RecommenderExport.Enabled = true
+	}
+	if v := os.Getenv("RECOMMENDER_BQ_EXPORT_DATASET"); v != "" {
+		userCfg.RecommenderExport.Dataset = v
 	}
 	if tb := os.Getenv("TRACE_BACKEND"); tb != "" {
 		adapterOpts = append(adapterOpts, gcpadapter.WithTraceBackend(tb))
@@ -146,6 +154,10 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 	}
 	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" {
 		mcpOpts = append(mcpOpts, mcpserver.WithProjectIDPlaceholder("your-project"))
+	}
+	if userCfg.RecommenderExport.Enabled {
+		mcpOpts = append(mcpOpts, mcpserver.WithRecommenderExport())
+		log.Info("recommender BigQuery export enabled", "dataset", userCfg.RecommenderExport.Dataset)
 	}
 	s := mcpserver.New(gcpSvc, log, version, mcpOpts...)
 

@@ -154,7 +154,11 @@ func (t *AuraTools) getAuraScoreHandler(ctx context.Context, _ mcp.CallToolReque
 	if err != nil {
 		return nil, fmt.Errorf("gcp_get_aura_score: marshal: %w", err)
 	}
-	return appendAuraInstruction(result), nil
+	result = appendAuraInstruction(result)
+	if report.RecommenderNote != "" {
+		result.Content = append([]mcp.Content{mcp.TextContent{Type: "text", Text: "⚠️ " + report.RecommenderNote}}, result.Content...)
+	}
+	return result, nil
 }
 
 func (t *AuraTools) ProjectAuraSummary() server.ServerTool {
@@ -205,7 +209,15 @@ func (t *AuraTools) projectAuraSummaryHandler(ctx context.Context, _ mcp.CallToo
 	fmt.Fprintf(&sb, "\nTotal: %d  🔴 Critical: %d  🟡 Warning: %d  🟢 Healthy: %d",
 		summary.TotalCount, summary.CriticalCount, summary.WarningCount, summary.HealthyCount,
 	)
-	return mcp.NewToolResultText(sb.String()), nil
+	result := mcp.NewToolResultText(sb.String())
+	// Surface the first quota note found across all resource reports (global quota, one message suffices).
+	for _, r := range summary.Resources {
+		if r.RecommenderNote != "" {
+			result.Content = append([]mcp.Content{mcp.TextContent{Type: "text", Text: "⚠️ " + r.RecommenderNote}}, result.Content...)
+			break
+		}
+	}
+	return result, nil
 }
 
 func (t *AuraTools) GKEAuraScore() server.ServerTool {

@@ -45,7 +45,9 @@ internal/mcp/  NEVER imports internal/gcp/
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII scrubbing on all tool outputs (overrides YAML `enabled`) |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
 | `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask the GCP project ID in all tool outputs as `[GCP_PROJECT_ID_1]`. Off by default. Can be combined with `ANONYMIZE_ENABLED`. |
-| `RECOMMENDER_ENABLED` | No | Set `true` to enable Cloud Recommender API integration for Aura Score efficiency signals (requires Recommender Viewer role) |
+| `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Enriches Aura Scores with idle/overprovisioned signals; 12h cache prevents quota exhaustion. |
+| `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default. |
+| `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name for the recommendations export (overrides `recommender_export.dataset` in YAML). |
 
 ## User Config File
 
@@ -53,6 +55,10 @@ Optional per-user defaults in `~/.aura-tracker.yaml`. Overridden by environment 
 
 ```yaml
 project_id: my-gcp-project-id   # fallback when GCP_PROJECT_ID is not set
+
+recommender_export:
+  enabled: false      # set true to enable gcp_export_recommendations_to_bq
+  dataset: ""         # BigQuery dataset name
 ```
 
 ## CLI Flags
