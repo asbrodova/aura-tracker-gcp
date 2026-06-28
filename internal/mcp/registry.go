@@ -31,6 +31,9 @@ const (
 	ModuleCoverage     = "coverage"
 	ModuleArchGraph    = "archgraph"
 	ModuleTagging      = "tagging"
+
+	// Opt-in modules (NOT in AllModules; must be explicitly requested)
+	ModuleRecommenderExport = "recommender_export"
 )
 
 // AllModules is the default set used when --modules is absent.

@@ -471,3 +471,6 @@ func (s *stubService) ExportArchitectureGraph(_ context.Context, _ models.Export
 func (s *stubService) ListTaggedResources(_ context.Context, _ models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
 	return models.ListTaggedResourcesResponse{}, nil
 }
+func (s *stubService) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	return models.ExportRecommendationsToBQResponse{}, nil
+}

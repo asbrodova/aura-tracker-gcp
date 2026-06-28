@@ -582,3 +582,6 @@ func (f *FakeGCPService) GetGCSAuraScore(ctx context.Context, req models.GetGCSA
 	}
 	return models.GCSAuraReport{}, nil
 }
+func (f *FakeGCPService) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	return models.ExportRecommendationsToBQResponse{}, nil
+}

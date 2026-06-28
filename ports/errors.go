@@ -52,3 +52,14 @@ type ConfirmationRequiredError struct {
 func (e *ConfirmationRequiredError) Error() string {
 	return fmt.Sprintf("%s: confirmation required: %s", e.Op, e.Message)
 }
+
+// RecommenderQuotaExhaustedError is returned when the Cloud Recommender API
+// returns ResourceExhausted (daily quota used up). Unlike RetriableError, this
+// is NOT transient — the quota resets once per day at midnight Pacific Time (PT).
+type RecommenderQuotaExhaustedError struct {
+	Op string
+}
+
+func (e *RecommenderQuotaExhaustedError) Error() string {
+	return fmt.Sprintf("%s: recommender daily quota exhausted", e.Op)
+}

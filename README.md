@@ -32,7 +32,8 @@ Every opt-in feature that costs money or could expose sensitive data is **off by
 
 | Feature | Env var | Default |
 |---|---|---|
-| Cloud Recommender API integration | `RECOMMENDER_ENABLED` | off |
+| Cloud Recommender API integration | `RECOMMENDER_ENABLED` | **on** — disable with `=false` |
+| Recommender BigQuery export tool | `RECOMMENDER_BQ_EXPORT_ENABLED` | off |
 | PII / credential scrubbing | `ANONYMIZE_ENABLED` | off |
 | HITL mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
 
@@ -322,7 +323,7 @@ Firestore is available through the `datastores` module (Phase 2), which also cov
 
 **Module:** `cloudsql`  
 **IAM role:** `roles/cloudsql.viewer`  
-**Optional:** add `RECOMMENDER_ENABLED=true` for GCP-authoritative idle/overprovisioned signals with USD savings estimates
+Recommender signals are included by default (12h cache, safe 429 handling). Disable with `RECOMMENDER_ENABLED=false`.
 
 ```json
 {
@@ -331,8 +332,7 @@ Firestore is available through the `datastores` module (Phase 2), which also cov
       "command": "aura-tracker-gcp",
       "args": ["--modules=cloudsql,aura,monitoring,iam"],
       "env": {
-        "GCP_PROJECT_ID": "my-project",
-        "RECOMMENDER_ENABLED": "true"
+        "GCP_PROJECT_ID": "my-project"
       }
     }
   }
@@ -470,7 +470,7 @@ Each resource also returns a `reasons` array the LLM uses to suggest concrete ac
 
 **Band mapping:** 🟢 80–100 Healthy · 🟡 50–79 Warning · 🔴 0–49 Critical
 
-Scores are cached in-process for **5 minutes**. Enable `RECOMMENDER_ENABLED=true` to upgrade efficiency signals with GCP-authoritative idle/overprovisioned findings and estimated monthly USD savings.
+Scores are cached in-process for **5 minutes**. Recommender signals (idle/overprovisioned + estimated monthly USD savings) are **active by default** with a 12-hour result cache and safe quota handling. Set `RECOMMENDER_ENABLED=false` to disable.
 
 → Scoring formula, signal weights per resource type, GCP Recommender integration, and quota details: [Aura Score](https://github.com/asbrodova/aura-tracker-gcp/wiki/Aura-Score)
 
@@ -577,8 +577,8 @@ PROJECT_ID=my-project bash scripts/setup-iam.sh
 # With mutation tools (node pool scale, traffic split)
 PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 
-# With GCP Recommender API
-PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+# With Recommender API (on by default — grant role to avoid silent permission errors)
+PROJECT_ID=my-project RECOMMENDER_ROLES=true bash scripts/setup-iam.sh
 ```
 
 → Full per-module IAM role table: [Getting Started — IAM Setup](https://github.com/asbrodova/aura-tracker-gcp/wiki/Getting-Started#iam-setup)
@@ -592,7 +592,9 @@ PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 | `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask the GCP project ID in all tool outputs as `[GCP_PROJECT_ID_1]`. Off by default. Useful for demos. Can be combined with `ANONYMIZE_ENABLED`. |
-| `RECOMMENDER_ENABLED` | No | Set `true` to enable the Cloud Recommender API integration. When enabled, Aura Scores include idle/over-provisioned flags with estimated monthly savings from GCP's pre-computed recommendations. Requires the Recommender Viewer role. Off by default. |
+| `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Aura Scores include idle/over-provisioned signals with estimated monthly USD savings. Results are cached for 12 h; 429 quota errors emit an explicit LLM stop signal instead of retrying. Requires the Recommender Viewer role. |
+| `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to register the `gcp_export_recommendations_to_bq` tool. Off by default. |
+| `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name used by `gcp_export_recommendations_to_bq`. Overrides `recommender_export.dataset` in `~/.aura-tracker.yaml`. |
 | `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
 | `TRACE_BACKEND` | No | Backend for `gcp_trace_list_services`: `trace` (Cloud Trace v1 REST, default) or `monitoring` (Monitoring metric proxy). Use `monitoring` if Cloud Trace API is disabled but OpenCensus/OpenTelemetry metrics exist. |
 | `GRAPH_TIMEOUT_SECONDS` | No | Outer context timeout in seconds for `gcp_export_serverless_graph`. Default: `120`. Individual sub-calls still use `callTimeout` (30 s). |
@@ -769,14 +771,12 @@ Commonly missing roles:
 | `roles/monitoring.viewer` | `gcp_monitoring_get_metrics`, `gcp_monitoring_list_metric_descriptors`, all Aura Score tools |
 | `roles/cloudtrace.user` | `gcp_trace_list_services`, `gcp_trace_list_dependency_edges` |
 | `roles/logging.viewer` | `gcp_logging_query_recent` |
-| `roles/recommender.viewer` | Aura Score efficiency signals (only when `RECOMMENDER_ENABLED=true`) |
+| `roles/recommender.viewer` | Aura Score efficiency signals (Recommender integration is on by default; set `RECOMMENDER_ENABLED=false` to disable) |
 
 Run `scripts/setup-iam.sh` to provision all least-privilege roles automatically:
 
 ```bash
 PROJECT_ID=my-project bash scripts/setup-iam.sh
-# With Recommender API
-PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 ```
 
 ---
