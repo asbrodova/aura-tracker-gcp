@@ -259,7 +259,7 @@ func (e *Engine) resolveScope(ctx context.Context, req models.DiagnoseIncidentRe
 	}
 	if req.ServiceName != "" {
 		if len(scope.Targets) == 0 {
-			return scope, "", fmt.Errorf("Cloud Run service %q was not found", req.ServiceName)
+			return scope, "", fmt.Errorf("cloud run service %q was not found", req.ServiceName)
 		}
 		scope.Inferred = req.Region == ""
 		if len(scope.Targets) > 1 {
