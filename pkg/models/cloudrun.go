@@ -6,10 +6,11 @@ type ListServicesRequest struct {
 }
 
 type ServiceSummary struct {
-	Name         string `json:"name"`
-	Region       string `json:"region"`
-	URL          string `json:"url"`
-	LastModified string `json:"last_modified"`
+	Name         string            `json:"name"`
+	Region       string            `json:"region"`
+	URL          string            `json:"url"`
+	LastModified string            `json:"last_modified"`
+	Labels       map[string]string `json:"labels,omitempty"`
 }
 
 type ListServicesResponse struct {
@@ -36,6 +37,65 @@ type ServiceDetails struct {
 	// WrapsFunction is set when this Cloud Run service is the runtime backing a
 	// Cloud Function Gen 2. Value is the function URN.
 	WrapsFunction string `json:"wraps_function,omitempty"`
+}
+
+type ListRevisionsRequest struct {
+	ProjectID   string `json:"project_id"`
+	Region      string `json:"region"`
+	ServiceName string `json:"service_name"`
+	Limit       int    `json:"limit,omitempty"`
+	ShowDeleted bool   `json:"show_deleted,omitempty"`
+}
+
+type RevisionCondition struct {
+	Type               string `json:"type"`
+	State              string `json:"state"`
+	Reason             string `json:"reason,omitempty"`
+	Severity           string `json:"severity,omitempty"`
+	Message            string `json:"message,omitempty"`
+	LastTransitionTime string `json:"last_transition_time,omitempty"`
+}
+
+type RevisionContainer struct {
+	Name             string            `json:"name,omitempty"`
+	Image            string            `json:"image"`
+	ResourceLimits   map[string]string `json:"resource_limits,omitempty"`
+	EnvironmentNames []string          `json:"environment_names,omitempty"`
+	SecretReferences []string          `json:"secret_references,omitempty"`
+	CPUIdle          bool              `json:"cpu_idle"`
+	StartupCPUBoost  bool              `json:"startup_cpu_boost"`
+}
+
+// RevisionSummary is a safe operational snapshot of an immutable Cloud Run
+// revision. Configuration values contribute to ConfigFingerprint but are never
+// returned directly.
+type RevisionSummary struct {
+	Name                          string              `json:"name"`
+	ServiceName                   string              `json:"service_name"`
+	Region                        string              `json:"region"`
+	CreateTime                    string              `json:"create_time,omitempty"`
+	UpdateTime                    string              `json:"update_time,omitempty"`
+	DeleteTime                    string              `json:"delete_time,omitempty"`
+	Creator                       string              `json:"creator,omitempty"`
+	ServiceAccount                string              `json:"service_account,omitempty"`
+	MaxInstanceRequestConcurrency int32               `json:"max_instance_request_concurrency,omitempty"`
+	TimeoutSeconds                int64               `json:"timeout_seconds,omitempty"`
+	MinInstances                  int32               `json:"min_instances,omitempty"`
+	MaxInstances                  int32               `json:"max_instances,omitempty"`
+	VPCConnector                  string              `json:"vpc_connector,omitempty"`
+	VPCEgress                     string              `json:"vpc_egress,omitempty"`
+	ExecutionEnvironment          string              `json:"execution_environment,omitempty"`
+	Reconciling                   bool                `json:"reconciling"`
+	Ready                         bool                `json:"ready"`
+	ConfigFingerprint             string              `json:"config_fingerprint"`
+	Containers                    []RevisionContainer `json:"containers"`
+	Conditions                    []RevisionCondition `json:"conditions,omitempty"`
+	Labels                        map[string]string   `json:"labels,omitempty"`
+}
+
+type ListRevisionsResponse struct {
+	Revisions []RevisionSummary `json:"revisions"`
+	Truncated bool              `json:"truncated"`
 }
 
 // --- Cloud Run Jobs ---

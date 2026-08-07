@@ -65,7 +65,7 @@ recommender_export:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Use `none` for zero tools (resources and prompts remain). Each excluded module also skips its GCP client connection at startup. |
+| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Incident correlation: `incident`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
 | `--version` | — | Print version and exit. |
 
 ## README Hygiene

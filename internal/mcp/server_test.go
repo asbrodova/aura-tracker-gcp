@@ -31,6 +31,9 @@ func (m *mockSvc) ListServices(_ context.Context, _ models.ListServicesRequest) 
 func (m *mockSvc) GetServiceDetails(_ context.Context, _ models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
 	return models.ServiceDetails{}, nil
 }
+func (m *mockSvc) ListRevisions(_ context.Context, _ models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
+	return models.ListRevisionsResponse{}, nil
+}
 func (m *mockSvc) UpdateTraffic(_ context.Context, _ models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
 	return models.UpdateTrafficResponse{}, nil
 }
@@ -261,6 +264,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_cloudbuild_list_triggers",
 		"gcp_servicedirectory_list",
 		"gcp_tag_list_resources",
+		"gcp_incident_diagnose",
 	}
 
 	registered := s.ListTools()
@@ -387,6 +391,37 @@ func TestFilteredRegistration(t *testing.T) {
 		if _, ok := registered[name]; !ok {
 			t.Errorf("expected tool %q to be registered", name)
 		}
+	}
+}
+
+func TestIncidentModuleRegistersToolAndPromptTogether(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleIncident: true}),
+	)
+
+	registered := s.ListTools()
+	if len(registered) != 1 {
+		t.Fatalf("incident module tool count = %d, want 1", len(registered))
+	}
+	if _, ok := registered["gcp_incident_diagnose"]; !ok {
+		t.Error("incident module did not register gcp_incident_diagnose")
+	}
+
+	msg := json.RawMessage(`{"jsonrpc":"2.0","id":8,"method":"prompts/list","params":{}}`)
+	raw, _ := json.Marshal(s.HandleMessage(context.Background(), msg))
+	if !strings.Contains(string(raw), "incident-response-helper") {
+		t.Fatalf("incident prompt was not registered with its module: %s", raw)
+	}
+}
+
+func TestIncidentPromptIsHiddenWhenModuleDisabled(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleGKE: true}),
+	)
+	msg := json.RawMessage(`{"jsonrpc":"2.0","id":9,"method":"prompts/list","params":{}}`)
+	raw, _ := json.Marshal(s.HandleMessage(context.Background(), msg))
+	if strings.Contains(string(raw), "incident-response-helper") {
+		t.Fatalf("incident prompt should be hidden when incident module is disabled: %s", raw)
 	}
 }
 

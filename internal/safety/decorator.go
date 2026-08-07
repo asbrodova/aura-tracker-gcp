@@ -275,6 +275,10 @@ func (d *SafetyDecorator) GetServiceDetails(ctx context.Context, req models.GetS
 	return d.inner.GetServiceDetails(ctx, req)
 }
 
+func (d *SafetyDecorator) ListRevisions(ctx context.Context, req models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
+	return d.inner.ListRevisions(ctx, req)
+}
+
 func (d *SafetyDecorator) ListJobs(ctx context.Context, req models.ListJobsRequest) (models.ListJobsResponse, error) {
 	return d.inner.ListJobs(ctx, req)
 }
