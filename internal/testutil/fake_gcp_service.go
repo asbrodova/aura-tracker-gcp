@@ -49,6 +49,7 @@ type FakeGCPService struct {
 	// Cloud Run
 	ListServicesFunc      func(context.Context, models.ListServicesRequest) (models.ListServicesResponse, error)
 	GetServiceDetailsFunc func(context.Context, models.GetServiceDetailsRequest) (models.ServiceDetails, error)
+	ListRevisionsFunc     func(context.Context, models.ListRevisionsRequest) (models.ListRevisionsResponse, error)
 	UpdateTrafficFunc     func(context.Context, models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error)
 	ListJobsFunc          func(context.Context, models.ListJobsRequest) (models.ListJobsResponse, error)
 	GetJobDetailsFunc     func(context.Context, models.GetJobDetailsRequest) (models.JobDetails, error)
@@ -263,6 +264,12 @@ func (f *FakeGCPService) GetServiceDetails(ctx context.Context, req models.GetSe
 		return f.GetServiceDetailsFunc(ctx, req)
 	}
 	return models.ServiceDetails{}, nil
+}
+func (f *FakeGCPService) ListRevisions(ctx context.Context, req models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
+	if f.ListRevisionsFunc != nil {
+		return f.ListRevisionsFunc(ctx, req)
+	}
+	return models.ListRevisionsResponse{}, nil
 }
 func (f *FakeGCPService) UpdateTraffic(ctx context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
 	if f.UpdateTrafficFunc != nil {

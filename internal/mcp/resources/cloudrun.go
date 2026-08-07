@@ -77,7 +77,7 @@ func (r *CloudRunResources) RevisionsTemplate() server.ServerResourceTemplate {
 		Template: mcp.NewResourceTemplate(
 			"gcp://{project}/cloudrun/{region}/{service}/revisions",
 			"Cloud Run Service Revisions",
-			mcp.WithTemplateDescription("Latest revision name and traffic allocation for a Cloud Run service"),
+			mcp.WithTemplateDescription("Recent immutable revisions with readiness, safe configuration fingerprints, and current traffic allocation"),
 			mcp.WithTemplateMIMEType("application/json"),
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
@@ -87,7 +87,7 @@ func (r *CloudRunResources) RevisionsTemplate() server.ServerResourceTemplate {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
-			resp, err := r.svc.GetServiceDetails(ctx, models.GetServiceDetailsRequest{
+			details, err := r.svc.GetServiceDetails(ctx, models.GetServiceDetailsRequest{
 				ProjectID:   project,
 				Region:      region,
 				ServiceName: service,
@@ -95,10 +95,21 @@ func (r *CloudRunResources) RevisionsTemplate() server.ServerResourceTemplate {
 			if err != nil {
 				return nil, fmt.Errorf("cloudrun revisions: %w", err)
 			}
+			revisions, err := r.svc.ListRevisions(ctx, models.ListRevisionsRequest{
+				ProjectID:   project,
+				Region:      region,
+				ServiceName: service,
+				Limit:       20,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("cloudrun revisions: %w", err)
+			}
 			result := map[string]any{
-				"service":         resp.Name,
-				"latest_revision": resp.LatestRevision,
-				"traffic":         resp.Traffic,
+				"service":         details.Name,
+				"latest_revision": details.LatestRevision,
+				"traffic":         details.Traffic,
+				"revisions":       revisions.Revisions,
+				"truncated":       revisions.Truncated,
 			}
 			data, _ := json.Marshal(result)
 			return []mcp.ResourceContents{mcp.TextResourceContents{

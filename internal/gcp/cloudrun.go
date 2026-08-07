@@ -2,7 +2,10 @@ package gcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -50,6 +53,7 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 			Region:       region,
 			URL:          svc.Uri,
 			LastModified: lastMod,
+			Labels:       svc.Labels,
 		})
 	}
 	if services == nil {
@@ -294,11 +298,228 @@ func (a *gcpAdapter) GetServiceDetails(ctx context.Context, req models.GetServic
 			Region:       req.Region,
 			URL:          svc.Uri,
 			LastModified: lastMod,
+			Labels:       svc.Labels,
 		},
 		Traffic:        traffic,
 		LatestRevision: latestRevision,
 		Labels:         svc.Labels,
 	}, nil
+}
+
+func (a *gcpAdapter) ListRevisions(ctx context.Context, req models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
+	if err := a.rateWait(ctx, "cloudrun.ListRevisions"); err != nil {
+		return models.ListRevisionsResponse{}, err
+	}
+	ctx, cancel := a.withTimeout(ctx)
+	defer cancel()
+
+	if req.Region == "" || req.ServiceName == "" {
+		return models.ListRevisionsResponse{}, fmt.Errorf("cloudrun.ListRevisions: region and service_name are required")
+	}
+	if req.Limit <= 0 {
+		req.Limit = 20
+	}
+	if req.Limit > 100 {
+		return models.ListRevisionsResponse{}, fmt.Errorf("cloudrun.ListRevisions: limit must be at most 100")
+	}
+
+	parent := fmt.Sprintf("projects/%s/locations/%s/services/%s", req.ProjectID, req.Region, req.ServiceName)
+	it := a.runRevisions.ListRevisions(ctx, &runpb.ListRevisionsRequest{
+		Parent:      parent,
+		PageSize:    int32(req.Limit + 1),
+		ShowDeleted: req.ShowDeleted,
+	})
+
+	revisions := make([]models.RevisionSummary, 0, req.Limit)
+	truncated := false
+	for {
+		revision, err := it.Next()
+		if isIteratorDone(err) {
+			break
+		}
+		if err != nil {
+			return models.ListRevisionsResponse{}, wrapGCPError("cloudrun.ListRevisions", err)
+		}
+		if len(revisions) >= req.Limit {
+			truncated = true
+			break
+		}
+		revisions = append(revisions, revisionSummaryFromProto(revision))
+	}
+	return models.ListRevisionsResponse{Revisions: revisions, Truncated: truncated}, nil
+}
+
+func revisionSummaryFromProto(revision *runpb.Revision) models.RevisionSummary {
+	if revision == nil {
+		return models.RevisionSummary{Containers: []models.RevisionContainer{}}
+	}
+	region, service, revisionName := parseRevisionResourceName(revision.Name)
+	summary := models.RevisionSummary{
+		Name:                          revisionName,
+		ServiceName:                   service,
+		Region:                        region,
+		Creator:                       revision.Creator,
+		ServiceAccount:                revision.ServiceAccount,
+		MaxInstanceRequestConcurrency: revision.MaxInstanceRequestConcurrency,
+		ExecutionEnvironment:          revision.ExecutionEnvironment.String(),
+		Reconciling:                   revision.Reconciling,
+		Labels:                        revision.Labels,
+		Containers:                    make([]models.RevisionContainer, 0, len(revision.Containers)),
+	}
+	if revision.CreateTime != nil {
+		summary.CreateTime = revision.CreateTime.AsTime().UTC().Format(timeFormatRFC3339)
+	}
+	if revision.UpdateTime != nil {
+		summary.UpdateTime = revision.UpdateTime.AsTime().UTC().Format(timeFormatRFC3339)
+	}
+	if revision.DeleteTime != nil {
+		summary.DeleteTime = revision.DeleteTime.AsTime().UTC().Format(timeFormatRFC3339)
+	}
+	if revision.Timeout != nil {
+		summary.TimeoutSeconds = int64(revision.Timeout.AsDuration().Seconds())
+	}
+	if revision.Scaling != nil {
+		summary.MinInstances = revision.Scaling.MinInstanceCount
+		summary.MaxInstances = revision.Scaling.MaxInstanceCount
+	}
+	if revision.VpcAccess != nil {
+		summary.VPCConnector = revision.VpcAccess.Connector
+		summary.VPCEgress = revision.VpcAccess.Egress.String()
+	}
+
+	for _, container := range revision.Containers {
+		if container == nil {
+			continue
+		}
+		out := models.RevisionContainer{Name: container.Name, Image: container.Image}
+		if container.Resources != nil {
+			out.ResourceLimits = container.Resources.Limits
+			out.CPUIdle = container.Resources.CpuIdle
+			out.StartupCPUBoost = container.Resources.StartupCpuBoost
+		}
+		for _, env := range container.Env {
+			if env == nil {
+				continue
+			}
+			out.EnvironmentNames = append(out.EnvironmentNames, env.Name)
+			if source := env.GetValueSource(); source != nil && source.SecretKeyRef != nil {
+				ref := source.SecretKeyRef.Secret
+				if source.SecretKeyRef.Version != "" {
+					ref += ":" + source.SecretKeyRef.Version
+				}
+				out.SecretReferences = append(out.SecretReferences, ref)
+			}
+		}
+		sort.Strings(out.EnvironmentNames)
+		sort.Strings(out.SecretReferences)
+		summary.Containers = append(summary.Containers, out)
+	}
+
+	for _, condition := range revision.Conditions {
+		if condition == nil {
+			continue
+		}
+		reason := ""
+		if condition.GetRevisionReason() != runpb.Condition_REVISION_REASON_UNDEFINED {
+			reason = condition.GetRevisionReason().String()
+		} else if condition.GetReason() != runpb.Condition_COMMON_REASON_UNDEFINED {
+			reason = condition.GetReason().String()
+		}
+		message := condition.Message
+		if runes := []rune(message); len(runes) > 512 {
+			message = string(runes[:512]) + "…"
+		}
+		out := models.RevisionCondition{
+			Type:     condition.Type,
+			State:    condition.State.String(),
+			Reason:   reason,
+			Severity: condition.Severity.String(),
+			Message:  message,
+		}
+		if condition.LastTransitionTime != nil {
+			out.LastTransitionTime = condition.LastTransitionTime.AsTime().UTC().Format(timeFormatRFC3339)
+		}
+		summary.Conditions = append(summary.Conditions, out)
+		if condition.Type == "Ready" && condition.State == runpb.Condition_CONDITION_SUCCEEDED {
+			summary.Ready = true
+		}
+	}
+
+	summary.ConfigFingerprint = revisionConfigFingerprint(revision)
+	return summary
+}
+
+const timeFormatRFC3339 = "2006-01-02T15:04:05Z"
+
+func parseRevisionResourceName(fullName string) (region, service, revision string) {
+	parts := strings.Split(fullName, "/")
+	if len(parts) == 8 && parts[0] == "projects" && parts[2] == "locations" && parts[4] == "services" && parts[6] == "revisions" {
+		return parts[3], parts[5], parts[7]
+	}
+	return "", "", fullName
+}
+
+func revisionConfigFingerprint(revision *runpb.Revision) string {
+	type fingerprintContainer struct {
+		Name            string
+		Image           string
+		Env             []string
+		Limits          map[string]string
+		CPUIdle         bool
+		StartupCPUBoost bool
+	}
+	type fingerprint struct {
+		ServiceAccount string
+		Concurrency    int32
+		Timeout        string
+		MinInstances   int32
+		MaxInstances   int32
+		VPCConnector   string
+		VPCEgress      string
+		Containers     []fingerprintContainer
+	}
+
+	value := fingerprint{
+		ServiceAccount: revision.ServiceAccount,
+		Concurrency:    revision.MaxInstanceRequestConcurrency,
+	}
+	if revision.Timeout != nil {
+		value.Timeout = revision.Timeout.AsDuration().String()
+	}
+	if revision.Scaling != nil {
+		value.MinInstances = revision.Scaling.MinInstanceCount
+		value.MaxInstances = revision.Scaling.MaxInstanceCount
+	}
+	if revision.VpcAccess != nil {
+		value.VPCConnector = revision.VpcAccess.Connector
+		value.VPCEgress = revision.VpcAccess.Egress.String()
+	}
+	for _, container := range revision.Containers {
+		if container == nil {
+			continue
+		}
+		out := fingerprintContainer{Name: container.Name, Image: container.Image}
+		if container.Resources != nil {
+			out.Limits = container.Resources.Limits
+			out.CPUIdle = container.Resources.CpuIdle
+			out.StartupCPUBoost = container.Resources.StartupCpuBoost
+		}
+		for _, env := range container.Env {
+			if env == nil {
+				continue
+			}
+			entry := env.Name + "=value:" + env.GetValue()
+			if source := env.GetValueSource(); source != nil && source.SecretKeyRef != nil {
+				entry = env.Name + "=secret:" + source.SecretKeyRef.Secret + ":" + source.SecretKeyRef.Version
+			}
+			out.Env = append(out.Env, entry)
+		}
+		sort.Strings(out.Env)
+		value.Containers = append(value.Containers, out)
+	}
+	encoded, _ := json.Marshal(value)
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("sha256:%x", digest)
 }
 
 // UpdateTraffic updates the traffic split for a Cloud Run service.

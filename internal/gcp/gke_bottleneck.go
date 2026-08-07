@@ -120,13 +120,16 @@ func aggregateBottlenecks(
 		memCritThresh = 0.95
 	)
 
+	cpuPoints := metricResponsePoints(cpu)
+	memPoints := metricResponsePoints(mem)
+
 	report := models.ClusterBottleneckReport{
 		ProjectID:     req.ProjectID,
 		ClusterName:   req.ClusterName,
 		Location:      req.Location,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		CPUMetrics:    cpu.Points,
-		MemoryMetrics: mem.Points,
+		CPUMetrics:    cpuPoints,
+		MemoryMetrics: memPoints,
 		LogSummary: models.LogSummary{
 			ErrorCount:   countBySeverity(logs.Entries, "ERROR"),
 			WarningCount: countBySeverity(logs.Entries, "WARNING"),
@@ -136,7 +139,7 @@ func aggregateBottlenecks(
 
 	severity := models.SeverityNone
 
-	if peak := peakValue(cpu.Points); peak > cpuCritThresh {
+	if peak := peakValue(cpuPoints); peak > cpuCritThresh {
 		severity = maxSeverity(severity, models.SeverityCritical)
 		report.Bottlenecks = append(report.Bottlenecks, models.ResourceBottleneck{
 			Resource:    fmt.Sprintf("cluster/%s", req.ClusterName),
@@ -145,7 +148,7 @@ func aggregateBottlenecks(
 			Threshold:   cpuCritThresh,
 			Description: fmt.Sprintf("CPU peaked at %.1f%%, exceeding critical threshold of %.0f%%", peak*100, cpuCritThresh*100),
 		})
-	} else if peak := peakValue(cpu.Points); peak > cpuWarnThresh {
+	} else if peak := peakValue(cpuPoints); peak > cpuWarnThresh {
 		severity = maxSeverity(severity, models.SeverityMedium)
 		report.Bottlenecks = append(report.Bottlenecks, models.ResourceBottleneck{
 			Resource:    fmt.Sprintf("cluster/%s", req.ClusterName),
@@ -156,7 +159,7 @@ func aggregateBottlenecks(
 		})
 	}
 
-	if peak := peakValue(mem.Points); peak > memCritThresh {
+	if peak := peakValue(memPoints); peak > memCritThresh {
 		severity = maxSeverity(severity, models.SeverityCritical)
 		report.Bottlenecks = append(report.Bottlenecks, models.ResourceBottleneck{
 			Resource:    fmt.Sprintf("cluster/%s", req.ClusterName),
@@ -165,7 +168,7 @@ func aggregateBottlenecks(
 			Threshold:   memCritThresh,
 			Description: fmt.Sprintf("Memory peaked at %.1f%%, exceeding critical threshold of %.0f%%", peak*100, memCritThresh*100),
 		})
-	} else if peak := peakValue(mem.Points); peak > memWarnThresh {
+	} else if peak := peakValue(memPoints); peak > memWarnThresh {
 		severity = maxSeverity(severity, models.SeverityMedium)
 		report.Bottlenecks = append(report.Bottlenecks, models.ResourceBottleneck{
 			Resource:    fmt.Sprintf("cluster/%s", req.ClusterName),
@@ -185,6 +188,17 @@ func aggregateBottlenecks(
 	report.Severity = severity
 	report.Summary = buildSummary(report)
 	return report
+}
+
+func metricResponsePoints(resp models.GetMetricsResponse) []models.MetricPoint {
+	if len(resp.Series) == 0 {
+		return resp.Points
+	}
+	var points []models.MetricPoint
+	for _, series := range resp.Series {
+		points = append(points, series.Points...)
+	}
+	return points
 }
 
 func peakValue(pts []models.MetricPoint) float64 {

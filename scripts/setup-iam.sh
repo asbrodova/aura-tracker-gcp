@@ -1,60 +1,81 @@
 #!/usr/bin/env bash
-# setup-iam.sh — One-time team-admin setup for the aura-tracker-mcp service account.
+# setup-iam.sh — Idempotent team-admin setup for the aura-tracker-mcp service account.
 #
-# Run once per GCP project. If the SA already exists, the script prints onboarding
-# instructions for other team members and exits without making any changes.
+# Run whenever the required role or optional-feature set changes. The script creates
+# the service account when missing and otherwise reconciles its project IAM roles.
+# Optional API flags enable the corresponding API as well as granting its viewer role.
+# Flags are additive: false/omitted options do not disable APIs or revoke old roles.
 #
 # Usage:
 #   PROJECT_ID=my-project bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+#   PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?PROJECT_ID environment variable is required}"
 MUTATION_ROLES="${MUTATION_ROLES:-false}"
 RECOMMENDER_ENABLED="${RECOMMENDER_ENABLED:-false}"
+SERVICE_HEALTH_ENABLED="${SERVICE_HEALTH_ENABLED:-false}"
 
 SA_NAME="aura-tracker-mcp"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
+validate_boolean() {
+  local name="$1"
+  local value="$2"
+  if [[ "$value" != "true" && "$value" != "false" ]]; then
+    echo "ERROR: ${name} must be 'true' or 'false' (got '${value}')." >&2
+    exit 2
+  fi
+}
+
+grant_project_role() {
+  local role="$1"
+  echo "  Reconciling ${role}"
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="$role" \
+    --condition=None \
+    --quiet
+}
+
+enable_api() {
+  local api="$1"
+  echo "  Enabling ${api}"
+  gcloud services enable "$api" \
+    --project="$PROJECT_ID" \
+    --quiet
+}
+
+validate_boolean MUTATION_ROLES "$MUTATION_ROLES"
+validate_boolean RECOMMENDER_ENABLED "$RECOMMENDER_ENABLED"
+validate_boolean SERVICE_HEALTH_ENABLED "$SERVICE_HEALTH_ENABLED"
+
 # ── Existence check ────────────────────────────────────────────────────────────
-# If the SA already exists, print onboarding instructions and exit cleanly.
-# This prevents a second team member from accidentally re-running setup.
-if gcloud iam service-accounts describe "$SA_EMAIL" \
-     --project="$PROJECT_ID" --format="value(email)" &>/dev/null; then
-  echo ""
+describe_output=""
+describe_status=0
+if describe_output="$(gcloud iam service-accounts describe "$SA_EMAIL" \
+     --project="$PROJECT_ID" --format="value(email)" 2>&1)"; then
   echo "INFO: Service account ${SA_EMAIL} already exists in project ${PROJECT_ID}."
-  echo "      The team admin has already run this setup — you do NOT need to run it again."
-  echo ""
-  echo "  To develop locally, choose one of:"
-  echo ""
-  echo "  Option A — your own gcloud credentials (simplest, if your account has the roles):"
-  echo "    gcloud auth application-default login"
-  echo "    export GCP_PROJECT_ID=${PROJECT_ID}"
-  echo ""
-  echo "  Option B — shared SA key file (ask a project admin to generate one for you):"
-  echo "    gcloud iam service-accounts keys create sa-key.json \\"
-  echo "      --iam-account=${SA_EMAIL} --project=${PROJECT_ID}"
-  echo "    export GOOGLE_APPLICATION_CREDENTIALS=\$(pwd)/sa-key.json"
-  echo "    export GCP_PROJECT_ID=${PROJECT_ID}"
-  echo "    # Add sa-key.json to .gitignore — never commit key files"
-  echo ""
-  echo "  To view currently granted roles:"
-  echo "    gcloud projects get-iam-policy ${PROJECT_ID} \\"
-  echo "      --flatten='bindings[].members' \\"
-  echo "      --filter=\"bindings.members:${SA_EMAIL}\" \\"
-  echo "      --format='table(bindings.role)'"
-  exit 0
+  echo "Reconciling requested APIs and IAM roles."
+else
+  describe_status=$?
+  if [[ "$describe_output" == *"NOT_FOUND"* || "$describe_output" == *"does not exist"* ]]; then
+    echo "Creating service account: ${SA_EMAIL}"
+    gcloud iam service-accounts create "$SA_NAME" \
+      --project="$PROJECT_ID" \
+      --display-name="Aura Tracker MCP Server" \
+      --description="Least-privilege SA for aura-tracker-gcp MCP server"
+  else
+    echo "ERROR: Unable to determine whether ${SA_EMAIL} exists; refusing to create it." >&2
+    echo "$describe_output" >&2
+    exit "$describe_status"
+  fi
 fi
 
-# ── First-time setup ───────────────────────────────────────────────────────────
-echo "Creating service account: ${SA_EMAIL}"
-gcloud iam service-accounts create "$SA_NAME" \
-  --project="$PROJECT_ID" \
-  --display-name="Aura Tracker MCP Server" \
-  --description="Least-privilege SA for aura-tracker-gcp MCP server"
-
-echo "Granting read-only roles..."
+# ── Role reconciliation ────────────────────────────────────────────────────────
+echo "Reconciling core read-only roles..."
 
 # Read-only roles — grants only list/get on the specific services this server calls.
 # No roles/viewer, roles/editor, or roles/owner are used.
@@ -67,40 +88,38 @@ for role in \
   roles/bigquery.metadataViewer \
   roles/storage.objectViewer \
   roles/cloudsql.viewer \
+  roles/vpcaccess.viewer \
   roles/browser; do
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="$role" \
-    --condition=None \
-    --quiet
+  grant_project_role "$role"
 done
+
+# Personalized Service Health is optional. The incident tool queries its Cloud
+# Logging event stream only when include_platform_health=true.
+if [[ "$SERVICE_HEALTH_ENABLED" == "true" ]]; then
+  echo "Configuring optional Personalized Service Health correlation..."
+  enable_api servicehealth.googleapis.com
+  grant_project_role roles/servicehealth.viewer
+fi
 
 # Mutation roles (opt-in) — required only for gcp_gke_scale_deployment and
 # gcp_cloudrun_update_traffic. Both tools enforce two-step HITL confirmation.
 if [[ "$MUTATION_ROLES" == "true" ]]; then
-  echo "Granting mutation roles (container.admin, run.admin)..."
+  echo "Reconciling mutation roles (container.admin, run.admin)..."
   for role in roles/container.admin roles/run.admin; do
-    gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-      --member="serviceAccount:${SA_EMAIL}" \
-      --role="$role" \
-      --condition=None \
-      --quiet
+    grant_project_role "$role"
   done
   echo "WARNING: Mutation roles granted. Consider scoping to specific resources via IAM Conditions."
 fi
 
-# Recommender role (opt-in) — required only when RECOMMENDER_ENABLED=true.
+# Recommender API and role (opt-in) — required only when RECOMMENDER_ENABLED=true.
 if [[ "$RECOMMENDER_ENABLED" == "true" ]]; then
-  echo "Granting recommender.viewer..."
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="roles/recommender.viewer" \
-    --condition=None \
-    --quiet
+  echo "Configuring optional Cloud Recommender integration..."
+  enable_api recommender.googleapis.com
+  grant_project_role roles/recommender.viewer
 fi
 
 echo ""
-echo "Done. Service account: ${SA_EMAIL}"
+echo "Done. APIs and IAM roles are reconciled for: ${SA_EMAIL}"
 echo ""
 echo "--- Option A: Key file (local dev) ---"
 echo "  gcloud iam service-accounts keys create sa-key.json \\"

@@ -39,8 +39,8 @@ func main() {
 	}
 
 	modulesFlag := flag.String("modules", "",
-		"Comma-separated tool modules to enable: gke,cloudrun,pubsub,logging,monitoring,iam,topology,aura.\n"+
-			"Use 'none' for zero tools (resources and prompts remain available). Default: all modules.")
+		"Comma-separated tool modules to enable: "+strings.Join(mcpserver.AllModules, ",")+".\n"+
+			"Use 'none' for zero tools (resources and non-module prompts remain available). Default: all modules.")
 	flag.Parse()
 
 	enabledModules := parseModulesFlag(*modulesFlag)

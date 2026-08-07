@@ -67,6 +67,9 @@ func (s *stubService) ListServices(_ context.Context, _ models.ListServicesReque
 func (s *stubService) GetServiceDetails(_ context.Context, _ models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
 	return models.ServiceDetails{}, nil
 }
+func (s *stubService) ListRevisions(_ context.Context, _ models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
+	return models.ListRevisionsResponse{}, nil
+}
 func (s *stubService) ListTopics(_ context.Context, _ models.ListTopicsRequest) (models.ListTopicsResponse, error) {
 	return models.ListTopicsResponse{}, nil
 }

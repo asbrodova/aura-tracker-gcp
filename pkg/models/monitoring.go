@@ -1,22 +1,58 @@
 package models
 
 type MetricPoint struct {
-	Timestamp string  `json:"timestamp"`
-	Value     float64 `json:"value"`
+	Timestamp    string                     `json:"timestamp"`
+	Value        float64                    `json:"value"`
+	ValueType    string                     `json:"value_type,omitempty"`
+	TextValue    string                     `json:"text_value,omitempty"`
+	Distribution *MetricDistributionSummary `json:"distribution,omitempty"`
+}
+
+// MetricDistributionSummary is a compact representation of a Monitoring
+// distribution point. Request a percentile aligner when an exact P50/P95/P99
+// scalar is needed; otherwise this summary preserves the raw count and range.
+type MetricDistributionSummary struct {
+	Count int64   `json:"count"`
+	Mean  float64 `json:"mean"`
+	Min   float64 `json:"min,omitempty"`
+	Max   float64 `json:"max,omitempty"`
+}
+
+// MetricSeries preserves the labels that identify a Monitoring time series.
+type MetricSeries struct {
+	MetricLabels   map[string]string `json:"metric_labels,omitempty"`
+	ResourceType   string            `json:"resource_type,omitempty"`
+	ResourceLabels map[string]string `json:"resource_labels,omitempty"`
+	MetricKind     string            `json:"metric_kind,omitempty"`
+	ValueType      string            `json:"value_type,omitempty"`
+	Unit           string            `json:"unit,omitempty"`
+	Points         []MetricPoint     `json:"points"`
 }
 
 type GetMetricsRequest struct {
 	ProjectID              string            `json:"project_id"`
 	MetricType             string            `json:"metric_type"`
 	ResourceLabels         map[string]string `json:"resource_labels,omitempty"`
+	MetricLabels           map[string]string `json:"metric_labels,omitempty"`
 	LookbackMinutes        int               `json:"lookback_minutes"`
 	AlignmentPeriodSeconds int               `json:"alignment_period_seconds"`
+	PerSeriesAligner       string            `json:"per_series_aligner,omitempty"`
+	CrossSeriesReducer     string            `json:"cross_series_reducer,omitempty"`
+	GroupByFields          []string          `json:"group_by_fields,omitempty"`
+	MaxTimeSeries          int               `json:"max_time_series,omitempty"`
 }
 
 type GetMetricsResponse struct {
-	MetricType string        `json:"metric_type"`
-	Points     []MetricPoint `json:"points"`
-	Unit       string        `json:"unit"`
+	MetricType string `json:"metric_type"`
+	// Points is retained for compatibility and contains the first returned
+	// series. New callers should use Series so labels are not lost.
+	Points             []MetricPoint  `json:"points"`
+	Series             []MetricSeries `json:"series"`
+	Unit               string         `json:"unit"`
+	PerSeriesAligner   string         `json:"per_series_aligner"`
+	CrossSeriesReducer string         `json:"cross_series_reducer"`
+	NoData             bool           `json:"no_data"`
+	Truncated          bool           `json:"truncated"`
 }
 
 // MetricDescriptorSummary is a lightweight view of a Cloud Monitoring metric descriptor.

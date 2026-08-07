@@ -30,6 +30,9 @@ jobs:
       - name: Test
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
+      - name: Test IAM setup script
+        run: bash scripts/setup-iam_test.sh
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

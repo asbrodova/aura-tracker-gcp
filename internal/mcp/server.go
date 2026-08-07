@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
+	"github.com/asbrodova/aura-tracker-gcp/internal/diagnostics"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/middleware"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/resources"
@@ -147,6 +148,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewCoverageTools(svc, log),
 		tools.NewArchGraphTools(svc, log),
 		tools.NewTaggingTools(svc, log),
+		tools.NewIncidentTools(diagnostics.New(svc, log), log),
 	}
 	if o.enableRecommenderExport {
 		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log))
@@ -180,11 +182,14 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 
 	// --- Prompts ---
 	prm := prompts.NewGCPPrompts(svc, log)
-	s.AddPrompts(
+	promptList := []server.ServerPrompt{
 		prm.AuditSecurityPosture(),
 		prm.OptimizeBigQueryCosts(),
-		prm.IncidentResponseHelper(),
-	)
+	}
+	if o.enabledModules == nil || o.enabledModules[ModuleIncident] {
+		promptList = append(promptList, prm.IncidentResponseHelper())
+	}
+	s.AddPrompts(promptList...)
 
 	return s
 }

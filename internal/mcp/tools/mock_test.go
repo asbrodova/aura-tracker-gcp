@@ -62,6 +62,9 @@ func (m *mockGCPService) ListServices(_ context.Context, _ models.ListServicesRe
 func (m *mockGCPService) GetServiceDetails(_ context.Context, _ models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
 	return m.returnGetServiceDetails, m.returnGetServiceDetailsErr
 }
+func (m *mockGCPService) ListRevisions(_ context.Context, _ models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
+	return models.ListRevisionsResponse{}, nil
+}
 func (m *mockGCPService) UpdateTraffic(_ context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
 	m.capturedUpdateTraffic = req
 	return m.returnUpdateTraffic, m.returnUpdateTrafficErr

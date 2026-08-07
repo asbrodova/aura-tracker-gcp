@@ -52,6 +52,7 @@ type NetworkingService interface {
 type CloudRunService interface {
 	ListServices(ctx context.Context, req models.ListServicesRequest) (models.ListServicesResponse, error)
 	GetServiceDetails(ctx context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error)
+	ListRevisions(ctx context.Context, req models.ListRevisionsRequest) (models.ListRevisionsResponse, error)
 	UpdateTraffic(ctx context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error)
 	ListJobs(ctx context.Context, req models.ListJobsRequest) (models.ListJobsResponse, error)
 	GetJobDetails(ctx context.Context, req models.GetJobDetailsRequest) (models.JobDetails, error)

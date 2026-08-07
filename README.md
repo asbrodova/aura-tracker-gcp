@@ -13,7 +13,7 @@
 
 `aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with mandatory human approval before any infrastructure change.
 
-**69 Tools · 10 Resources · 3 Prompts · 26 Modules**
+**70 Tools · 10 Resources · 3 Prompts · 27 Modules**
 
 > For architecture deep-dives, per-service guides, and full configuration reference, see the **[GitHub Wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)**.
 
@@ -28,7 +28,7 @@
 
 ### Safety First, by Default
 
-Every opt-in feature that costs money or could expose sensitive data is **off by default**:
+Cost-bearing integrations and sensitive-data features have explicit controls:
 
 | Feature | Env var | Default |
 |---|---|---|
@@ -37,7 +37,7 @@ Every opt-in feature that costs money or could expose sensitive data is **off by
 | PII / credential scrubbing | `ANONYMIZE_ENABLED` | off |
 | HITL mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
 
-No surprises on your GCP bill. No accidental credential exposure. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); all 67 others are strictly read-only `list`/`get` API calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
+Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. No accidental credential exposure. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); all 68 others are strictly read-only calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
 
 ### Human-in-the-Loop for Every Mutation
 
@@ -52,7 +52,7 @@ Calling a mutation tool without a plan returns a `confirmation required` error w
 
 ### Token Efficiency: Load Only What You Need
 
-All 69 tools are registered by default, which consumes LLM context on every turn. Use `--modules` to load only the services relevant to your workflow — each excluded module also skips its GCP client connections at startup:
+All 70 tools are registered by default, which consumes LLM context on every turn. Use `--modules` to load only the services relevant to your workflow — each excluded module also skips its GCP client connections at startup:
 
 ```json
 "args": ["--modules=cloudrun,aura,monitoring,iam"]
@@ -60,12 +60,13 @@ All 69 tools are registered by default, which consumes LLM context on every turn
 
 | Workflow | `--modules` | Tools |
 |---|---|---|
+| Production incident diagnosis | `incident` | 1 |
 | Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | Data / logging | `logging,monitoring,iam` | 4 |
 | Storage inspection | `storage` | 3 |
-| Full toolkit | *(omit flag)* | 69 |
+| Full toolkit | *(omit flag)* | 70 |
 
 See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
 
@@ -147,7 +148,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 69 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 70 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
 
 ```json
 {
@@ -163,16 +164,17 @@ By default all 69 tools are registered. Use the `--modules` flag to load only th
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging`. Use `--modules=none` to register zero tools (resources and prompts are always available). Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging` · `incident`. Use `--modules=none` to register zero tools. Resources remain available; the incident prompt is registered only when the `incident` module is enabled. Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
+| Production incident diagnosis | `incident` | 1 |
 | Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Storage inspection | `storage` | 3 |
 | Data / logging | `logging,monitoring,iam` | 4 |
-| Full toolkit | *(omit flag)* | 69 |
+| Full toolkit | *(omit flag)* | 70 |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
@@ -213,7 +215,7 @@ The last prompt triggers the two-step HITL flow: the LLM calls `gcp_gke_scale_de
 
 ### Cloud Run
 
-**Modules:** `cloudrun` · add `functions`, `eventarc` for the full serverless tier  
+**Modules:** `cloudrun` · add `incident` for correlated production diagnosis · add `functions`, `eventarc` for the full serverless tier
 **IAM role:** `roles/run.viewer` · add `roles/run.admin` for traffic split mutations
 
 ```json
@@ -221,7 +223,7 @@ The last prompt triggers the two-step HITL flow: the LLM calls `gcp_gke_scale_de
   "mcpServers": {
     "aura-tracker-gcp": {
       "command": "aura-tracker-gcp",
-      "args": ["--modules=cloudrun,functions,eventarc,aura,monitoring,iam"],
+      "args": ["--modules=cloudrun,incident,functions,eventarc,aura,monitoring,iam"],
       "env": { "GCP_PROJECT_ID": "my-project" }
     }
   }
@@ -232,7 +234,86 @@ The last prompt triggers the two-step HITL flow: the LLM calls `gcp_gke_scale_de
 > "List all Cloud Run services in my-project."  
 > "What's the traffic split for the api-gateway service in us-central1?"  
 > "Show me the last 50 ERROR logs from my-service."  
+> "Production is failing. Diagnose the most likely cause and show me the evidence."
 > "Update the api-gateway traffic split to send 10% to revision-2 — show me a plan first."
+
+---
+
+### Production Incident Diagnosis
+
+**Module:** `incident`
+
+**IAM roles:** `roles/run.viewer`, `roles/logging.viewer`, `roles/monitoring.viewer`, `roles/pubsub.viewer`, `roles/cloudsql.viewer`, `roles/vpcaccess.viewer`.
+
+> [!IMPORTANT]
+> **Platform-health correlation is optional and off by default.** To use it, the project must have billing enabled, the Service Health API must be enabled, and the runtime identity must have both `roles/logging.viewer` and `roles/servicehealth.viewer`. The tool reads Google's documented `servicehealth.googleapis.com/activity` log stream only when `include_platform_health=true`. Without these optional prerequisites, the rest of the incident diagnosis still runs and reports platform health as skipped or a coverage gap.
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=incident"],
+      "env": { "GCP_PROJECT_ID": "my-project" }
+    }
+  }
+}
+```
+
+`gcp_incident_diagnose` is one bounded, read-only call. It discovers a production scope from `env`, `environment`, or `stage` labels when a service is omitted, then correlates the active window with a baseline across deployments, Cloud Run revisions and traffic, 5xx rate, p99 latency, error fingerprints, Admin Activity/IAM changes, dependency state, and optional Personalized Service Health events. Collector failures are reported as coverage gaps instead of discarding completed evidence.
+
+The response contains ranked hypotheses with independent 0–100 evidence scores, supporting and contradicting evidence, a timeline, and suggested read-only investigations. Scores are confidence aids, not probabilities and do not need to sum to 100.
+
+#### Enable optional platform-health correlation
+
+Run the idempotent admin setup command. It works whether the `aura-tracker-mcp` service account is new or already exists, enables the Service Health API, and reconciles the optional viewer role:
+
+```bash
+export PROJECT_ID=my-project
+SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
+```
+
+`roles/logging.viewer` is already part of the core incident-diagnosis role set. If Aura Tracker runs with your user Application Default Credentials instead, grant `roles/servicehealth.viewer` to that user rather than to the service account.
+
+The equivalent manual commands are:
+
+```bash
+SA_EMAIL="aura-tracker-mcp@${PROJECT_ID}.iam.gserviceaccount.com"
+
+gcloud services enable servicehealth.googleapis.com \
+  --project="${PROJECT_ID}"
+
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${SA_EMAIL}" \
+  --role="roles/servicehealth.viewer" \
+  --condition=None
+```
+
+Finally, opt in on the diagnosis call:
+
+```json
+{
+  "project_id": "my-project",
+  "include_platform_health": true
+}
+```
+
+Verify that the API is enabled and that the identity can query the stream:
+
+```bash
+gcloud services list \
+  --enabled \
+  --project="${PROJECT_ID}" \
+  --filter='config.name:servicehealth.googleapis.com'
+
+gcloud logging read \
+  "logName=\"projects/${PROJECT_ID}/logs/servicehealth.googleapis.com%2Factivity\"" \
+  --project="${PROJECT_ID}" \
+  --freshness=30d \
+  --limit=5
+```
+
+An empty log query can simply mean there were no matching Service Health events. Google notes that new events can take a few hours to appear after API enablement. See Google's [Service Health logs](https://cloud.google.com/service-health/docs/logs) and [Service Health access control](https://cloud.google.com/service-health/docs/manage-access) documentation.
 
 ---
 
@@ -348,7 +429,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 
 ## Tools
 
-69 tools across 26 modules. Load only what you need with `--modules`.
+70 tools across 27 modules. Load only what you need with `--modules`.
 
 | Module | Flag | Tools | Mutation? |
 |---|---|---|---|
@@ -367,9 +448,9 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 | Serverless VPC Access | `vpcaccess` | 1 | — |
 | Cloud SQL | `cloudsql` | 1 | — |
 | Cloud Logging | `logging` | 1 | — |
-| Cloud Monitoring | `monitoring` | 9 | — |
+| Cloud Monitoring | `monitoring` | 8 | — |
 | IAM | `iam` | 3 | — |
-| Topology & Aura Score | `topology`, `aura` | 6 | — |
+| Topology & Aura Score | `topology`, `aura` | 5 | — |
 | Cloud Storage | `storage` | 3 | — |
 | Data Stores | `datastores` | 4 | — |
 | Supply Chain | `supplychain` | 4 | — |
@@ -377,6 +458,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 | Architecture Graph | `archgraph` | 1 | — |
 | Observability Coverage | `coverage` | 1 | — |
 | Resource Tagging | `tagging` | 1 | — |
+| Incident Diagnosis | `incident` | 1 | — |
 
 → Full tool reference with parameters and descriptions: [Module Reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/Module-Reference)
 
@@ -385,6 +467,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 ## What You Can Ask
 
 ### Health & Incident Response
+> "Production is failing. Diagnose likely root causes and show the evidence."
 > "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."  
 > "What's the Aura Score for all resources in my-project? Show me the worst first."  
 > "Show me ERROR logs from the api-gateway Cloud Run service in the last hour."  
@@ -425,7 +508,7 @@ Prompt Templates pre-configure the AI for complex multi-step GCP workflows. Invo
 |--------|-----------|-------------|
 | `audit-security-posture` | `project_id` (required), `focus` (iam\|network\|all) | Reads IAM permissions + Cloud Run ingress config; returns severity-ranked findings with gcloud remediation commands |
 | `optimize-bigquery-costs` | `project_id` (required), `dataset_id` (optional) | Reads schemas + slot usage metrics; recommends partitioning, clustering, expiration, and slot rightsizing |
-| `incident-response-helper` | `project_id`, `service_name`, `region` (all required) | Pulls error logs + request metrics + Aura score; synthesises a structured incident report with rollback commands |
+| `incident-response-helper` | `project_id` (required); `service_name`, `region`, `environment` (optional) | Calls `gcp_incident_diagnose` once and presents ranked causes, evidence, timeline, investigations, and coverage gaps without executing a mutation |
 
 ---
 
@@ -557,7 +640,7 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 
 > "Check my IAM permissions and tell me which GCP tools you can and cannot use in this project."
 
-> "Use the incident-response-helper prompt for the api-gateway service in us-central1."
+> "Use the incident-response-helper prompt: production is failing in my-project."
 
 > "Run the audit-security-posture prompt on my-project and focus on network exposure."
 
@@ -569,17 +652,22 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 - A GCP project with [Application Default Credentials](https://cloud.google.com/docs/authentication/application-default-credentials) configured
 - IAM roles for the modules you use — run the setup script below or check what you have with `gcp_iam_test_permissions`
 
-The `scripts/setup-iam.sh` script creates the `aura-tracker-mcp` service account with least-privilege roles in one command:
+The idempotent `scripts/setup-iam.sh` script creates or updates the `aura-tracker-mcp` service account with least-privilege roles:
 
 ```bash
 PROJECT_ID=my-project bash scripts/setup-iam.sh
 
-# With mutation tools (node pool scale, traffic split)
+# Reconcile mutation roles (node pool scale, traffic split)
 PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 
-# With Recommender API (on by default — grant role to avoid silent permission errors)
-PROJECT_ID=my-project RECOMMENDER_ROLES=true bash scripts/setup-iam.sh
+# Enable Recommender API and reconcile its viewer role
+PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+
+# Enable Service Health API and reconcile its viewer role
+PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
 ```
+
+Re-running the script is safe: it keeps an existing service account and reconciles the requested roles and optional APIs. Setup flags are additive—setting a flag to `false` or omitting it does not disable an API or revoke a previously granted role. Run it as a team admin with permission to change project IAM; API-enabling options also require permission to enable services.
 
 → Full per-module IAM role table: [Getting Started — IAM Setup](https://github.com/asbrodova/aura-tracker-gcp/wiki/Getting-Started#iam-setup)
 
@@ -614,20 +702,25 @@ The environment variable takes precedence when both are set.
 
 ## IAM Setup
 
-`scripts/setup-iam.sh` is a **one-time team-admin setup**. Run it once per GCP project to create the `aura-tracker-mcp` service account with least-privilege roles. If the SA already exists, the script prints onboarding instructions for other team members and exits without making any changes.
+`scripts/setup-iam.sh` is an **idempotent team-admin setup**. It creates the `aura-tracker-mcp` service account when missing and reconciles core plus requested optional roles on every run. This makes it safe to enable an integration later without recreating the account.
 
 ```bash
-# First-time setup (team admin only)
+# Create the account or reconcile its core roles (team admin only)
 PROJECT_ID=my-project bash scripts/setup-iam.sh
 
-# With mutation tools (gcp_gke_scale_deployment, gcp_cloudrun_update_traffic)
+# Reconcile mutation roles (gcp_gke_scale_deployment, gcp_cloudrun_update_traffic)
 PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 
-# With Recommender API
+# Enable Recommender API and reconcile its viewer role
 PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+
+# Enable Service Health API and reconcile its viewer role
+PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
 ```
 
-**For developers joining the team:** the SA already exists. Either ask your admin for a key file (`GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa-key.json`) or use `gcloud auth application-default login` with your own account if it already has the required roles.
+The optional flags can be combined in one invocation and also work when the service account already exists. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
+
+**For developers joining the team:** you do not need to run the admin setup unless you are responsible for changing the account's project roles or optional APIs. Ask your admin for credentials, or use `gcloud auth application-default login` with your own account if it already has the required roles.
 
 **Why not `roles/owner`?** Primitive roles grant write access to every GCP service in the project — a compromised MCP session could delete databases, modify firewall rules, or exfiltrate secrets. The read-only set grants only `list`/`get` on the specific services this server calls. Mutation roles (`roles/container.admin`, `roles/run.admin`) are opt-in and always gated by the two-step HITL confirmation protocol.
 
@@ -650,9 +743,9 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **Read-only guarantees**: all 67 non-mutation tools are strictly read-only — they call only `list`/`get` GCP API methods and never modify any resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Read-only guarantees**: all 68 non-mutation tools are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 69 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all 70 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -723,7 +816,7 @@ Cloud Run metrics require the resource label `location` to match the region wher
 }
 ```
 
-**Cause 3 — Distribution metric with incompatible aligner.**
+**Cause 3 — Distribution metric without a percentile aligner.**
 
 Some Cloud Run metrics are `DELTA DISTRIBUTION` types (`run.googleapis.com/request_latencies`, `run.googleapis.com/container/cpu/utilizations`). Calling `gcp_monitoring_get_metrics` on them directly may return:
 
@@ -731,7 +824,7 @@ Some Cloud Run metrics are `DELTA DISTRIBUTION` types (`run.googleapis.com/reque
 The per-series aligner ALIGN_MEAN is not compatible with the value type DISTRIBUTION
 ```
 
-Use `gcp_get_aura_score` instead — it selects the correct percentile aligner per metric automatically, and its 5-minute in-process cache means repeat calls are free.
+Pass `per_series_aligner="ALIGN_PERCENTILE_95"` or `"ALIGN_PERCENTILE_99"`. The tool now preserves every labeled time series in `series`; `points` remains as a backward-compatible view of the first series. Use `cross_series_reducer` and `group_by_fields` only when you intentionally want to combine series.
 
 ---
 
@@ -739,7 +832,21 @@ Use `gcp_get_aura_score` instead — it selects the correct percentile aligner p
 
 **Symptom:** `gcp_logging_query_recent` returns no entries for a Cloud Run service.
 
-The tool's filter uses `resource.type` to scope logs to a specific GCP resource. Common mistakes:
+The tool accepts either a native Cloud Logging `filter` or structured `resource_type` / `resource_labels` selectors. For Cloud Run, use:
+
+```json
+{
+  "resource_type": "cloud_run_revision",
+  "resource_labels": {
+    "service_name": "payments-api",
+    "location": "us-central1"
+  },
+  "min_severity": "ERROR",
+  "lookback_minutes": 60
+}
+```
+
+Common monitored-resource types:
 
 | Resource | Correct `resource_type` |
 |---|---|
@@ -771,13 +878,20 @@ Commonly missing roles:
 | `roles/monitoring.viewer` | `gcp_monitoring_get_metrics`, `gcp_monitoring_list_metric_descriptors`, all Aura Score tools |
 | `roles/cloudtrace.user` | `gcp_trace_list_services`, `gcp_trace_list_dependency_edges` |
 | `roles/logging.viewer` | `gcp_logging_query_recent` |
+| `roles/vpcaccess.viewer` | Incident dependency checks for Serverless VPC Access connectors |
+| `roles/servicehealth.viewer` | Optional Personalized Service Health correlation in `gcp_incident_diagnose` |
 | `roles/recommender.viewer` | Aura Score efficiency signals (Recommender integration is on by default; set `RECOMMENDER_ENABLED=false` to disable) |
 
 Run `scripts/setup-iam.sh` to provision all least-privilege roles automatically:
 
 ```bash
 PROJECT_ID=my-project bash scripts/setup-iam.sh
+
+# Enable the API and reconcile roles/servicehealth.viewer, including for an existing SA:
+PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
 ```
+
+See [Enable optional platform-health correlation](#enable-optional-platform-health-correlation) for the complete setup and verification commands.
 
 ---
 
@@ -812,13 +926,20 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 │              workflows · tasks · pubsub · secretmanager           │
 │              vpcaccess · cloudsql · logging · monitoring          │
 │              iam · topology · aura · storage · serverlessgraph    │
+│              incident                                               │
 │   resources/ bigquery · cloudrun · storage · iam                 │
 │   prompts/   audit-security · optimize-bq · incident-response    │
 └─────────────────────────────┬───────────────────────────────────┘
-                              │ calls only ▼
+                              │ incident path ▼
+┌─────────────────────────────▼───────────────────────────────────┐
+│       internal/diagnostics/   (Application Correlation Layer)    │
+│ scope · collectors · baselines · detectors · evidence scoring   │
+│ partial failures become explicit coverage gaps                  │
+└─────────────────────────────┬───────────────────────────────────┘
+                              │ narrow DataSource; other tools call ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
 │           ports/gcp_service.go   (Hexagon Boundary)              │
-│                    GCPService interface (38 methods)              │
+│                    composite GCPService interfaces                │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ implements ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
@@ -841,7 +962,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
                           GCP APIs
 ```
 
-**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Both depend only on `ports/`. `internal/safety` sits at the port boundary — it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
+**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Ordinary tool modules depend on `ports/`; the incident module delegates to `internal/diagnostics`, whose narrow `DataSource` is satisfied by the same `GCPService`. `internal/safety` sits at the port boundary — it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
 
 Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. The MCP protocol layer is identical in both modes.
 
@@ -873,6 +994,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
 
 ## Project Layout
 
-The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) are fully decoupled — both depend only on `ports/gcp_service.go`. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
+The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident scope resolution, collectors, baseline comparisons, detectors, and scoring without importing either MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
 
 → Full annotated project layout and contributor guide: [Architecture & Contributing](https://github.com/asbrodova/aura-tracker-gcp/wiki/Architecture-and-Contributing)

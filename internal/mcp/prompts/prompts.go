@@ -155,22 +155,24 @@ Return a prioritised table ordered by estimated monthly savings (highest first).
 	}, nil
 }
 
-// IncidentResponseHelper guides the AI through a structured incident triage for a Cloud Run service.
+// IncidentResponseHelper invokes the incident correlation engine and asks the
+// model to present its evidence without inventing causal certainty.
 func (p *GCPPrompts) IncidentResponseHelper() server.ServerPrompt {
 	return server.ServerPrompt{
 		Prompt: mcp.NewPrompt("incident-response-helper",
-			mcp.WithPromptDescription("Pull error logs, key metrics, and Aura score for a Cloud Run service to diagnose an active incident"),
+			mcp.WithPromptDescription("Correlate deployments, metrics, revisions, IAM changes, logs, dependencies, and platform health for an active production incident"),
 			mcp.WithArgument("project_id",
-				mcp.ArgumentDescription("GCP project ID"),
+				mcp.ArgumentDescription("GCP project ID to diagnose"),
 				mcp.RequiredArgument(),
 			),
 			mcp.WithArgument("service_name",
-				mcp.ArgumentDescription("Cloud Run service name"),
-				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Cloud Run service name (optional; production services are inferred from labels when omitted)"),
 			),
 			mcp.WithArgument("region",
-				mcp.ArgumentDescription("GCP region where the service is deployed"),
-				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Cloud Run region (optional; discovered when omitted)"),
+			),
+			mcp.WithArgument("environment",
+				mcp.ArgumentDescription("Environment label to infer (default: production)"),
 			),
 		),
 		Handler: p.incidentResponseHelperHandler,
@@ -181,50 +183,40 @@ func (p *GCPPrompts) incidentResponseHelperHandler(_ context.Context, req mcp.Ge
 	project := req.Params.Arguments["project_id"]
 	service := req.Params.Arguments["service_name"]
 	region := req.Params.Arguments["region"]
+	environment := req.Params.Arguments["environment"]
 
-	if project == "" || service == "" || region == "" {
-		return nil, fmt.Errorf("project_id, service_name, and region are required")
+	if project == "" {
+		return nil, fmt.Errorf("project_id is required")
+	}
+	if environment == "" {
+		environment = "production"
 	}
 
-	instructions := fmt.Sprintf(`You are an SRE responding to an active incident for Cloud Run service %q in project %q (region: %s).
-Work through these steps quickly and systematically:
+	instructions := fmt.Sprintf(`You are the incident commander for GCP project %q.
 
-Step 1 — Read current service state:
-  Read resource gcp://%s/cloudrun/%s/%s
-  Note: current URL, traffic splits, latest revision name, and any labels that indicate environment/version.
+Call gcp_incident_diagnose exactly once with:
+  project_id=%q
+  environment=%q
+  service_name=%q
+  region=%q
+  lookback_minutes=60
+  baseline_minutes=240
+  include_platform_health=true
 
-Step 2 — Pull error logs (last 2 hours):
-  Call tool gcp_logging_query_recent with:
-    project_id=%q
-    filter=resource.type="cloud_run_revision" AND resource.labels.service_name="%s" AND severity>=ERROR
-    hours=2
-    limit=50
-  Identify: most frequent error messages, first occurrence timestamp, affected revisions.
+If service_name or region is empty, omit that argument. The tool will discover a safely labelled production scope; if it returns needs_scope, show the candidates and ask the operator to select one.
 
-Step 3 — Pull request metrics (last 30 minutes):
-  Call tool gcp_monitoring_get_metrics with project_id=%q, metric_type=run.googleapis.com/request/count, hours=1
-  Then call again with metric_type=run.googleapis.com/request/latencies
-  Identify: request rate drop, latency spike, or error rate increase.
+Present the tool result as:
+1. Status and scope
+2. Possible root causes in returned rank order, preserving each likelihood score and band
+3. Evidence and contradicting evidence for every hypothesis
+4. Timeline
+5. Suggested investigation in priority order
+6. Coverage gaps and warnings
 
-Step 4 — Get Aura health score:
-  Call tool gcp_get_aura_score with:
-    project_id=%q
-    resource_kind=cloud_run
-    region=%q
-    resource_name=%q
-
-Step 5 — Synthesise incident report:
-  Produce a structured report containing:
-  1. Status: CRITICAL / DEGRADED / RECOVERING / HEALTHY (based on error rate and Aura score)
-  2. Timeline: when errors started, correlation with recent deployments (check latest_revision vs traffic)
-  3. Root cause hypothesis: the most probable cause based on error patterns
-  4. Immediate actions (in priority order):
-     - If latest revision is causing errors: call gcp_cloudrun_update_traffic to roll back traffic to previous revision
-     - Include the exact arguments needed for the rollback call
-  5. Follow-up: monitoring thresholds to set, code fixes to investigate`, service, project, region, project, region, service, project, service, project, project, region, service)
+Do not describe a hypothesis as confirmed unless the evidence says so. Do not execute mutations or rollbacks; the diagnosis and its suggested investigations are read-only.`, project, project, environment, service, region)
 
 	return &mcp.GetPromptResult{
-		Description: fmt.Sprintf("Incident response for Cloud Run service %q in project %q", service, project),
+		Description: fmt.Sprintf("Production incident diagnosis for project %q", project),
 		Messages: []mcp.PromptMessage{
 			mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(instructions)),
 		},

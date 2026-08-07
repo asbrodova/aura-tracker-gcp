@@ -114,42 +114,43 @@ func WithGraphTimeout(d time.Duration) Option {
 // then bool fields last to avoid padding between same-size groups.
 type gcpAdapter struct {
 	// --- GCP SDK clients (pointer-sized, 8 bytes each) ---
-	clusterMgr          *container.ClusterManagerClient
-	runSvc              *run.ServicesClient
-	runJobs             *run.JobsClient
-	runExecs            *run.ExecutionsClient
-	fnGen1              *cloudfunctions.Service
-	eventarcClient      *eventarc.Client
-	schedulerClient     *scheduler.CloudSchedulerClient
-	workflowsClient     *workflows.Client
-	workflowExecClient  *workflowexecutions.Client
-	tasksClient         *cloudtasks.Client
-	secretMgrClient     *secretmanager.Client
-	vpcAccess           *vpcaccess.Service
-	sqlAdmin            *sqladmin.Service
-	computeSvc          *compute.Service
-	apiGatewaySvc       *apigateway.Service
-	artifactRegistrySvc *artifactregistry.Service
-	cloudBuildSvc       *cloudbuild.Service
-	serviceDirectorySvc *servicedirectory.APIService
-	traceClient         *cloudtrace.Service
-	pubsub              *pubsub.Client
-	logAdmin            *logadmin.Client
-	metric              *monitoring.MetricClient
-	crm                 *cloudresourcemanager.Service
-	bq                  *bigquery.Client
-	gcs                 *storage.Client
-	spannerSvc          *spanner.Service
-	alloydbSvc          *alloydb.Service
-	firestoreSvc        *firestore.Service
-	redisSvc            *redis.Service
-	iamAdminSvc         *iam.Service
-	monitoringSvc       *monitoringv3.Service
-	monitoringV1Svc     *monitoringv1.Service
-	crmV3Svc            *crmv3.Service
-	rec                 *recommender.Client
-	limiter             *rate.Limiter
-	log                 *slog.Logger
+	clusterMgr                *container.ClusterManagerClient
+	runSvc                    *run.ServicesClient
+	runRevisions              *run.RevisionsClient
+	runJobs                   *run.JobsClient
+	runExecs                  *run.ExecutionsClient
+	fnGen1                    *cloudfunctions.Service
+	eventarcClient            *eventarc.Client
+	schedulerClient           *scheduler.CloudSchedulerClient
+	workflowsClient           *workflows.Client
+	workflowExecClient        *workflowexecutions.Client
+	tasksClient               *cloudtasks.Client
+	secretMgrClient           *secretmanager.Client
+	vpcAccess                 *vpcaccess.Service
+	sqlAdmin                  *sqladmin.Service
+	computeSvc                *compute.Service
+	apiGatewaySvc             *apigateway.Service
+	artifactRegistrySvc       *artifactregistry.Service
+	cloudBuildSvc             *cloudbuild.Service
+	serviceDirectorySvc       *servicedirectory.APIService
+	traceClient               *cloudtrace.Service
+	pubsub                    *pubsub.Client
+	logAdmin                  *logadmin.Client
+	metric                    *monitoring.MetricClient
+	crm                       *cloudresourcemanager.Service
+	bq                        *bigquery.Client
+	gcs                       *storage.Client
+	spannerSvc                *spanner.Service
+	alloydbSvc                *alloydb.Service
+	firestoreSvc              *firestore.Service
+	redisSvc                  *redis.Service
+	iamAdminSvc               *iam.Service
+	monitoringSvc             *monitoringv3.Service
+	monitoringV1Svc           *monitoringv1.Service
+	crmV3Svc                  *crmv3.Service
+	rec                       *recommender.Client
+	limiter                   *rate.Limiter
+	log                       *slog.Logger
 	auraCache                 *ttlCache[models.AuraReport]
 	regionsCache              *ttlCache[[]string]
 	graphCache                *ttlCache[models.ServerlessGraph]
@@ -203,6 +204,13 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		a.runSvc, err = run.NewServicesClient(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create run services client: %w", err)
+		}
+	}
+
+	if needed[clientRunRevisions] {
+		a.runRevisions, err = run.NewRevisionsClient(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create run revisions client: %w", err)
 		}
 	}
 
@@ -446,6 +454,11 @@ func (a *gcpAdapter) Close() error {
 	if a.runSvc != nil {
 		if err := a.runSvc.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close run client: %w", err))
+		}
+	}
+	if a.runRevisions != nil {
+		if err := a.runRevisions.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close run revisions client: %w", err))
 		}
 	}
 	if a.runJobs != nil {
