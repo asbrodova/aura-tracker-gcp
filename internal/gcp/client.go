@@ -35,7 +35,9 @@ import (
 	"google.golang.org/api/cloudtrace/v1"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/firestore/v1"
+	"google.golang.org/api/gkehub/v1"
 	"google.golang.org/api/iam/v1"
+	iamv2 "google.golang.org/api/iam/v2"
 	monitoringv1 "google.golang.org/api/monitoring/v1"
 	monitoringv3 "google.golang.org/api/monitoring/v3"
 	"google.golang.org/api/option"
@@ -93,6 +95,34 @@ func WithCostReasoning(cfg CostAdapterConfig) Option {
 	return func(a *gcpAdapter) {
 		a.enableCostReasoning = true
 		a.costConfig = cfg
+	}
+}
+
+// SecurityAdapterConfig controls bounded Kubernetes enrichment for the
+// security posture collector.
+type SecurityAdapterConfig struct {
+	KubernetesAccess    string
+	FleetProjectID      string
+	ClusterConcurrency  int
+	PerClusterTimeout   time.Duration
+	MaxResourcesPerKind int
+}
+
+func WithSecurityAudit(cfg SecurityAdapterConfig) Option {
+	return func(a *gcpAdapter) {
+		if cfg.KubernetesAccess == "" {
+			cfg.KubernetesAccess = "auto"
+		}
+		if cfg.ClusterConcurrency <= 0 {
+			cfg.ClusterConcurrency = 4
+		}
+		if cfg.PerClusterTimeout <= 0 {
+			cfg.PerClusterTimeout = 20 * time.Second
+		}
+		if cfg.MaxResourcesPerKind <= 0 {
+			cfg.MaxResourcesPerKind = 2000
+		}
+		a.securityConfig = cfg
 	}
 }
 
@@ -159,6 +189,8 @@ type gcpAdapter struct {
 	crmV3Svc                  *crmv3.Service
 	rec                       *recommender.Client
 	assetSvc                  *cloudasset.Service
+	iamV2Svc                  *iamv2.Service
+	gkeHubSvc                 *gkehub.Service
 	costBQ                    *bigquery.Client
 	limiter                   *rate.Limiter
 	log                       *slog.Logger
@@ -176,6 +208,7 @@ type gcpAdapter struct {
 	enabledModules map[string]bool
 	traceBackend   string
 	costConfig     CostAdapterConfig
+	securityConfig SecurityAdapterConfig
 	// --- bool (1 byte, grouped at end to minimise padding) ---
 	enableRecommender   bool
 	enableCostReasoning bool
@@ -419,10 +452,24 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		}
 	}
 
-	if a.enableCostReasoning && needed[clientAsset] {
+	if needed[clientAsset] {
 		a.assetSvc, err = cloudasset.NewService(ctx, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloud asset client: %w", err)
+		}
+	}
+
+	if needed[clientIAMv2] {
+		a.iamV2Svc, err = iamv2.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create IAM v2 client: %w", err)
+		}
+	}
+
+	if needed[clientGKEHub] {
+		a.gkeHubSvc, err = gkehub.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create GKE Hub client: %w", err)
 		}
 	}
 

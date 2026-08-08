@@ -6,6 +6,21 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/config"
 )
 
+func TestSecurityAuditConfigConversion(t *testing.T) {
+	got := securityAuditConfig(config.SecurityAuditConfig{
+		KubernetesAccess: "connect_gateway", FleetProjectID: "fleet", ClusterConcurrency: 3,
+		PerClusterTimeoutSeconds: 15, MaxResourcesPerKind: 500,
+		Suppressions: []config.SecurityAuditSuppressionConfig{{
+			RuleID: "PUB-001", Resource: "//run.googleapis.com/*", Reason: "public API", Owner: "platform", ExpiresAt: "2026-12-01",
+		}},
+	})
+	if got.KubernetesAccess != "connect_gateway" || got.FleetProjectID != "fleet" || got.ClusterConcurrency != 3 ||
+		got.PerClusterTimeoutSeconds != 15 || got.MaxResourcesPerKind != 500 || len(got.Suppressions) != 1 ||
+		got.Suppressions[0].Owner != "platform" || got.Suppressions[0].RuleID != "PUB-001" {
+		t.Fatalf("conversion = %+v", got)
+	}
+}
+
 func TestApplyCostReasoningEnvOverridesConfig(t *testing.T) {
 	setCostEnv(t)
 	t.Setenv("COST_REASONING_ENABLED", "true")

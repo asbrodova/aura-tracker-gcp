@@ -451,6 +451,34 @@ func (d *SafetyDecorator) ListServiceAccounts(ctx context.Context, req models.Li
 	return d.inner.ListServiceAccounts(ctx, req)
 }
 
+func (d *SafetyDecorator) SearchSecurityIAMPolicies(ctx context.Context, req models.SecurityFactsRequest) (models.SecurityIAMPolicyFacts, error) {
+	return d.inner.SearchSecurityIAMPolicies(ctx, req)
+}
+
+func (d *SafetyDecorator) ListServiceAccountSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.ServiceAccountSecurityFacts, error) {
+	return d.inner.ListServiceAccountSecurityFacts(ctx, req)
+}
+
+func (d *SafetyDecorator) ListSecretSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.SecretSecurityFacts, error) {
+	return d.inner.ListSecretSecurityFacts(ctx, req)
+}
+
+func (d *SafetyDecorator) ListPublicServiceSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.PublicServiceSecurityFacts, error) {
+	return d.inner.ListPublicServiceSecurityFacts(ctx, req)
+}
+
+func (d *SafetyDecorator) ListFirewallSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.FirewallSecurityFacts, error) {
+	return d.inner.ListFirewallSecurityFacts(ctx, req)
+}
+
+func (d *SafetyDecorator) ListWorkloadIdentitySecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.WorkloadIdentitySecurityFacts, error) {
+	return d.inner.ListWorkloadIdentitySecurityFacts(ctx, req)
+}
+
+func (d *SafetyDecorator) ListSecurityRecommendations(ctx context.Context, req models.SecurityFactsRequest) (models.SecurityRecommendationFacts, error) {
+	return d.inner.ListSecurityRecommendations(ctx, req)
+}
+
 func (d *SafetyDecorator) ListAlertPolicies(ctx context.Context, req models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error) {
 	return d.inner.ListAlertPolicies(ctx, req)
 }

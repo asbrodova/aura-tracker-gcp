@@ -76,6 +76,15 @@ func dialClusterWithTokenSource(endpoint, caCertBase64 string, tokenSrc oauth2.T
 	}, nil
 }
 
+func dialGatewayWithTokenSource(endpoint string, tokenSrc oauth2.TokenSource) *k8sClient {
+	return &k8sClient{
+		baseURL: strings.TrimSuffix(endpoint, "/"),
+		httpClient: &http.Client{Transport: &tokenRoundTripper{
+			base: http.DefaultTransport, tokenSrc: tokenSrc,
+		}},
+	}
+}
+
 // get performs a GET request to the K8s API and decodes the JSON response into out.
 func (c *k8sClient) get(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
@@ -220,6 +229,22 @@ func (c *k8sClient) listIngresses(ctx context.Context, ns string) ([]models.GKEI
 	return result, nil
 }
 
+func (c *k8sClient) listGateways(ctx context.Context, ns string) ([]k8sGateway, error) {
+	var list k8sGatewayList
+	if err := c.get(ctx, resourcePath("apis/gateway.networking.k8s.io/v1", ns, "gateways"), &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (c *k8sClient) listKubernetesServiceAccounts(ctx context.Context, ns string) ([]k8sServiceAccount, error) {
+	var list k8sServiceAccountList
+	if err := c.get(ctx, resourcePath("api/v1", ns, "serviceaccounts"), &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 // listNetworkPolicies returns Kubernetes NetworkPolicy summaries.
 func (c *k8sClient) listNetworkPolicies(ctx context.Context, ns string) ([]models.GKENetworkPolicySummary, error) {
 	var list k8sNetworkPolicyList
@@ -328,16 +353,17 @@ func toWorkloadSummary(w k8sWorkload, kind string) models.GKEWorkloadSummary {
 	kindConst := workloadKindConst(kind)
 
 	return models.GKEWorkloadSummary{
-		Name:           w.Metadata.Name,
-		Namespace:      w.Metadata.Namespace,
-		Kind:           kindConst,
-		Replicas:       replicas,
-		ReadyReplicas:  w.Status.ReadyReplicas,
-		Image:          image,
-		ServiceAccount: sa,
-		SecretRefs:     extractSecretRefs(podSpec),
-		Labels:         w.Metadata.Labels,
-		OtelSidecar:    detectOtelSidecar(podSpec, podMeta),
+		Name:                         w.Metadata.Name,
+		Namespace:                    w.Metadata.Namespace,
+		Kind:                         kindConst,
+		Replicas:                     replicas,
+		ReadyReplicas:                w.Status.ReadyReplicas,
+		Image:                        image,
+		ServiceAccount:               sa,
+		AutomountServiceAccountToken: podSpec.AutomountServiceAccountToken,
+		SecretRefs:                   extractSecretRefs(podSpec),
+		Labels:                       w.Metadata.Labels,
+		OtelSidecar:                  detectOtelSidecar(podSpec, podMeta),
 	}
 }
 
@@ -412,16 +438,27 @@ func toServiceSummary(s k8sService) models.GKEServiceSummary {
 			NodePort:   p.NodePort,
 		})
 	}
+	addresses := append([]string(nil), s.Spec.ExternalIPs...)
+	for _, ingress := range s.Status.LoadBalancer.Ingress {
+		addresses = appendUnique(addresses, firstNonEmpty(ingress.IP, ingress.Hostname))
+	}
+	internal := strings.EqualFold(s.Metadata.Annotations["networking.gke.io/load-balancer-type"], "Internal") ||
+		strings.EqualFold(s.Metadata.Annotations["cloud.google.com/load-balancer-type"], "Internal")
 	return models.GKEServiceSummary{
-		Name:          s.Metadata.Name,
-		Namespace:     s.Metadata.Namespace,
-		Type:          s.Spec.Type,
-		ClusterIP:     s.Spec.ClusterIP,
-		ExternalIPs:   s.Spec.ExternalIPs,
-		Ports:         ports,
-		Selector:      s.Spec.Selector,
-		NEGAnnotation: s.Metadata.Annotations["cloud.google.com/neg"],
-		Labels:        s.Metadata.Labels,
+		Name:                     s.Metadata.Name,
+		Namespace:                s.Metadata.Namespace,
+		Type:                     s.Spec.Type,
+		ClusterIP:                s.Spec.ClusterIP,
+		ExternalIPs:              s.Spec.ExternalIPs,
+		Ports:                    ports,
+		Selector:                 s.Spec.Selector,
+		NEGAnnotation:            s.Metadata.Annotations["cloud.google.com/neg"],
+		Labels:                   s.Metadata.Labels,
+		LoadBalancerAddresses:    addresses,
+		LoadBalancerSourceRanges: append([]string(nil), s.Spec.LoadBalancerSourceRanges...),
+		LoadBalancerClass:        s.Spec.LoadBalancerClass,
+		ExternalTrafficPolicy:    s.Spec.ExternalTrafficPolicy,
+		Internal:                 internal,
 	}
 }
 
@@ -452,15 +489,30 @@ func toIngressSummary(ing k8sIngress) models.GKEIngressSummary {
 		gcpLB = ing.Metadata.Annotations["ingress.gcp.kubernetes.io/pre-shared-cert"]
 	}
 
+	addresses := make([]string, 0, len(ing.Status.LoadBalancer.Ingress))
+	for _, address := range ing.Status.LoadBalancer.Ingress {
+		addresses = appendUnique(addresses, firstNonEmpty(address.IP, address.Hostname))
+	}
+	ingressClass := firstNonEmpty(ing.Spec.IngressClassName, ing.Metadata.Annotations["kubernetes.io/ingress.class"])
+	internal := strings.Contains(strings.ToLower(ingressClass), "internal")
+	defaultBackend := ""
+	if ing.Spec.DefaultBackend != nil && ing.Spec.DefaultBackend.Service != nil {
+		defaultBackend = ing.Spec.DefaultBackend.Service.Name
+	}
 	return models.GKEIngressSummary{
-		Name:       ing.Metadata.Name,
-		Namespace:  ing.Metadata.Namespace,
-		Kind:       "Ingress",
-		Hosts:      hosts,
-		TLSEnabled: len(ing.Spec.TLS) > 0,
-		Rules:      rules,
-		GCPLBName:  gcpLB,
-		Labels:     ing.Metadata.Labels,
+		Name:             ing.Metadata.Name,
+		Namespace:        ing.Metadata.Namespace,
+		Kind:             "Ingress",
+		Hosts:            hosts,
+		TLSEnabled:       len(ing.Spec.TLS) > 0,
+		PlaintextEnabled: !strings.EqualFold(ing.Metadata.Annotations["kubernetes.io/ingress.allow-http"], "false"),
+		Rules:            rules,
+		GCPLBName:        gcpLB,
+		Labels:           ing.Metadata.Labels,
+		Addresses:        addresses,
+		IngressClass:     ingressClass,
+		DefaultBackend:   defaultBackend,
+		Internal:         internal,
 	}
 }
 
@@ -468,6 +520,17 @@ func toHTTPRouteSummary(hr k8sHTTPRoute) models.GKEIngressSummary {
 	hosts := make([]string, 0, len(hr.Spec.Hostnames))
 	for _, h := range hr.Spec.Hostnames {
 		hosts = append(hosts, h)
+	}
+	parents := make([]string, 0, len(hr.Spec.ParentRefs))
+	for _, parent := range hr.Spec.ParentRefs {
+		if parent.Kind != "" && !strings.EqualFold(parent.Kind, "Gateway") {
+			continue
+		}
+		namespace := parent.Namespace
+		if namespace == "" {
+			namespace = hr.Metadata.Namespace
+		}
+		parents = appendUnique(parents, namespace+"/"+parent.Name)
 	}
 	rules := make([]models.GKEIngressRule, 0, len(hr.Spec.Rules))
 	for _, r := range hr.Spec.Rules {
@@ -481,12 +544,13 @@ func toHTTPRouteSummary(hr k8sHTTPRoute) models.GKEIngressSummary {
 		rules = append(rules, ir)
 	}
 	return models.GKEIngressSummary{
-		Name:      hr.Metadata.Name,
-		Namespace: hr.Metadata.Namespace,
-		Kind:      "HTTPRoute",
-		Hosts:     hosts,
-		Rules:     rules,
-		Labels:    hr.Metadata.Labels,
+		Name:           hr.Metadata.Name,
+		Namespace:      hr.Metadata.Namespace,
+		Kind:           "HTTPRoute",
+		Hosts:          hosts,
+		Rules:          rules,
+		Labels:         hr.Metadata.Labels,
+		ParentGateways: parents,
 	}
 }
 

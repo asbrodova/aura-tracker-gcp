@@ -13,7 +13,7 @@
 
 `aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with mandatory human approval before any infrastructure change.
 
-**71 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 28 Modules**
+**72 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 29 Modules**
 
 > For architecture deep-dives, per-service guides, and full configuration reference, see the **[GitHub Wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)**.
 
@@ -53,7 +53,7 @@ Calling a mutation tool without a plan returns a `confirmation required` error w
 
 ### Token Efficiency: Load Only What You Need
 
-All 71 default tools are registered when `--modules` is omitted. The cost tool is registered only when its feature flag and export configuration are present. Use `--modules` to load only the services relevant to your workflow—each excluded module also skips its GCP client connections at startup:
+All 72 default tools are registered when `--modules` is omitted. The cost tool is registered only when its feature flag and export configuration are present. Use `--modules` to load only the services relevant to your workflow—each excluded module also skips its GCP client connections at startup:
 
 ```json
 "args": ["--modules=cloudrun,aura,monitoring,iam"]
@@ -62,6 +62,7 @@ All 71 default tools are registered when `--modules` is omitted. The cost tool i
 | Workflow | `--modules` | Tools |
 |---|---|---|
 | Production incident diagnosis | `incident` | 1 |
+| Project security audit | `security` | 1 |
 | Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
@@ -69,7 +70,7 @@ All 71 default tools are registered when `--modules` is omitted. The cost tool i
 | Storage inspection | `storage` | 3 |
 | Production architecture diagram | `archgraph` | 2 |
 | Cost investigation | `cost` | 1 (requires `COST_REASONING_ENABLED=true`) |
-| Full toolkit | *(omit flag)* | 71 (72 if cost reasoning is enabled) |
+| Full toolkit | *(omit flag)* | 72 (73 if cost reasoning is enabled) |
 
 See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
 
@@ -151,7 +152,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 71 base tools are registered. Use the `--modules` flag to load only the services you work with—each excluded module also skips its GCP client connection at startup. The opt-in cost tool is additional.
+By default all 72 base tools are registered. Use the `--modules` flag to load only the services you work with—each excluded module also skips its GCP client connection at startup. The opt-in cost tool is additional.
 
 ```json
 {
@@ -167,11 +168,12 @@ By default all 71 base tools are registered. Use the `--modules` flag to load on
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging` · `incident` · `cost`. The `cost` module also requires `COST_REASONING_ENABLED=true`. Use `--modules=none` to register zero tools. Resources remain available; the incident prompt is registered only when the `incident` module is enabled. Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `security` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging` · `incident` · `cost`. The `cost` module also requires `COST_REASONING_ENABLED=true`. Use `--modules=none` to register zero tools. Resources remain available; module-specific prompts are registered only when their module is enabled. Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
 | Production incident diagnosis | `incident` | 1 |
+| Project security audit | `security` | 1 |
 | Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
@@ -179,7 +181,7 @@ Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `sch
 | Production architecture diagram | `archgraph` | 2 |
 | Data / logging | `logging,monitoring,iam` | 4 |
 | Cost investigation | `cost` | 1 (opt-in) |
-| Full toolkit | *(omit flag)* | 71 (72 if cost reasoning is enabled) |
+| Full toolkit | *(omit flag)* | 72 (73 if cost reasoning is enabled) |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
@@ -319,6 +321,30 @@ gcloud logging read \
 ```
 
 An empty log query can simply mean there were no matching Service Health events. Google notes that new events can take a few hours to appear after API enablement. See Google's [Service Health logs](https://cloud.google.com/service-health/docs/logs) and [Service Health access control](https://cloud.google.com/service-health/docs/manage-access) documentation.
+
+---
+
+### Project Security Posture
+
+**Module:** `security`
+**Mutation:** none — the complete audit is read-only
+
+`gcp_project_security_audit` turns broad requests such as “I need a project audit,” “is my GCP setup secure?”, or “give me a security score” into one deterministic assessment. It covers inherited organization/folder/project IAM and deny policies, service-account keys, Secret Manager, public serverless and GKE endpoints, effective classic/hierarchical/network firewall policies, KSA/GSA Workload Identity mappings, and Active Assist recommendations.
+
+The response always contains Score, Critical, High, Medium, Low, prioritized recommendations, and coverage gaps. Missing permissions reduce coverage instead of being treated as a clean result.
+
+```bash
+PROJECT_ID=my-project SECURITY_AUDIT_ENABLED=true bash scripts/setup-iam.sh
+```
+
+**Try it:**
+> "I need a project audit."
+>
+> "Is my GCP project secure? Show the score and highest-risk findings."
+>
+> "Check IAM, secrets, public services, service accounts, firewalls, and Workload Identity."
+
+See the [Project Security Posture guide](https://github.com/asbrodova/aura-tracker-gcp/wiki/Security-Posture) for scoring, permissions, limitations, and the architecture diagram.
 
 ---
 
@@ -505,7 +531,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 
 ## Tools
 
-71 base tools plus one opt-in cost-reasoning tool across 28 module flags. Load only what you need with `--modules`.
+72 base tools plus one opt-in cost-reasoning tool across 29 module flags. Load only what you need with `--modules`.
 
 | Module | Flag | Tools | Mutation? |
 |---|---|---|---|
@@ -526,6 +552,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 | Cloud Logging | `logging` | 1 | — |
 | Cloud Monitoring | `monitoring` | 8 | — |
 | IAM | `iam` | 3 | — |
+| Project Security Posture | `security` | 1 | — |
 | Topology & Aura Score | `topology`, `aura` | 5 | — |
 | Cloud Storage | `storage` | 3 | — |
 | Data Stores | `datastores` | 4 | — |
@@ -595,7 +622,7 @@ Prompt Templates pre-configure the AI for complex multi-step GCP workflows. Invo
 
 | Prompt | Arguments | What it does |
 |--------|-----------|-------------|
-| `audit-security-posture` | `project_id` (required), `focus` (iam\|network\|all) | Reads IAM permissions + Cloud Run ingress config; returns severity-ranked findings with gcloud remediation commands |
+| `audit-security-posture` | `project_id` (required), `focus` (iam\|network\|all) | Calls `gcp_project_security_audit` once and presents its score, severity-ranked evidence, remediation, and coverage gaps |
 | `optimize-bigquery-costs` | `project_id` (required), `dataset_id` (optional) | Reads schemas + slot usage metrics; recommends partitioning, clustering, expiration, and slot rightsizing |
 | `incident-response-helper` | `project_id` (required); `service_name`, `region`, `environment` (optional) | Calls `gcp_incident_diagnose` once and presents ranked causes, evidence, timeline, investigations, and coverage gaps without executing a mutation |
 
@@ -729,6 +756,8 @@ The server speaks JSON-RPC 2.0 over stdio — the transport used by every MCP cl
 
 > "Check my IAM permissions and tell me which GCP tools you can and cannot use in this project."
 
+> "I need a project audit. Show Critical, High, Medium, Low, recommendations, and the security score."
+
 > "Use the incident-response-helper prompt: production is failing in my-project."
 
 > "Run the audit-security-posture prompt on my-project and focus on network exposure."
@@ -751,6 +780,9 @@ PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 
 # Enable Recommender API and reconcile its viewer role
 PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+
+# Enable the read-only project security posture collectors
+PROJECT_ID=my-project SECURITY_AUDIT_ENABLED=true bash scripts/setup-iam.sh
 
 # Enable Service Health API and reconcile its viewer role
 PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
@@ -808,9 +840,23 @@ cost_reasoning:
   timezone: UTC
   history_days: 90
   max_bytes_billed: 5368709120
+
+# Optional accepted risks. Every suppression requires a reason and expiry.
+security_audit:
+  kubernetes_access: auto       # auto, direct, connect_gateway, or disabled
+  fleet_project_id: platform-fleet
+  cluster_concurrency: 4
+  per_cluster_timeout_seconds: 20
+  max_resources_per_kind: 2000
+  suppressions:
+    - rule_id: PUB-001
+      resource: "//run.googleapis.com/projects/my-gcp-project-id/locations/*/services/public-api"
+      reason: "Approved public API behind the external application load balancer"
+      owner: "platform-security@example.com"
+      expires_at: "2026-12-01T00:00:00Z"
 ```
 
-The environment variable takes precedence when both are set.
+The environment variable takes precedence when both are set. Security suppression resources support `*` and `?` wildcards. Matches are excluded from the active score only until expiry and remain visible in the audit report.
 
 ## IAM Setup
 
@@ -826,6 +872,9 @@ PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 # Enable Recommender API and reconcile its viewer role
 PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 
+# Enable the read-only project security posture collectors
+PROJECT_ID=my-project SECURITY_AUDIT_ENABLED=true bash scripts/setup-iam.sh
+
 # Enable Service Health API and reconcile its viewer role
 PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
 
@@ -837,7 +886,7 @@ PROJECT_ID=my-project COST_REASONING_ENABLED=true \
   bash scripts/setup-iam.sh
 ```
 
-The optional flags can be combined in one invocation and also work when the service account already exists. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. `COST_REASONING_ENABLED=true` enables BigQuery and Cloud Asset Inventory, grants BigQuery Job User on the query project, grants Cloud Asset Viewer on the workload project, and grants BigQuery Data Viewer on the export project. The script uses a project-wide Data Viewer binding for idempotent setup; prefer a dataset-level binding in tightly scoped production environments. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
+The optional flags can be combined in one invocation and also work when the service account already exists. `SECURITY_AUDIT_ENABLED=true` enables the project-security and Connect Gateway APIs and grants read-only Cloud Asset, IAM service-account, Secret Manager, Compute, Functions, Recommender IAM, Service Usage, GKE Hub Viewer, and Gateway Reader access. Set `SECURITY_AUDIT_FLEET_PROJECT_ID` when the fleet host differs; set `SECURITY_AUDIT_ORGANIZATION_ID` to let an organization admin add the read-only ancestor IAM/deny roles. Kubernetes object collection also needs the RBAC template in `deploy/security-audit-rbac.yaml.tmpl`. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. `COST_REASONING_ENABLED=true` enables BigQuery and Cloud Asset Inventory, grants BigQuery Job User on the query project, grants Cloud Asset Viewer on the workload project, and grants BigQuery Data Viewer on the export project. The script uses a project-wide Data Viewer binding for idempotent setup; prefer a dataset-level binding in tightly scoped production environments. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
 
 **For developers joining the team:** you do not need to run the admin setup unless you are responsible for changing the account's project roles or optional APIs. Ask your admin for credentials, or use `gcloud auth application-default login` with your own account if it already has the required roles.
 
@@ -862,9 +911,9 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **Read-only guarantees**: all 69 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Read-only guarantees**: all 70 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all registered tools (71 by default, 72 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all registered tools (72 by default, 73 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---

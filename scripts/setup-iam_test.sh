@@ -86,6 +86,35 @@ test_optional_flags_work_for_existing_account() {
   assert_contains "$output" "--role=roles/run.admin"
 }
 
+test_security_audit_setup_is_read_only() {
+  local output
+  output="$(run_setup true env SECURITY_AUDIT_ENABLED=true)"
+
+  assert_contains "$output" "services enable cloudasset.googleapis.com"
+  assert_contains "$output" "services enable secretmanager.googleapis.com"
+	assert_contains "$output" "services enable gkehub.googleapis.com"
+	assert_contains "$output" "services enable connectgateway.googleapis.com"
+  assert_contains "$output" "--role=roles/cloudasset.viewer"
+  assert_contains "$output" "--role=roles/iam.serviceAccountViewer"
+  assert_contains "$output" "--role=roles/secretmanager.viewer"
+  assert_contains "$output" "--role=roles/compute.viewer"
+  assert_contains "$output" "--role=roles/recommender.iamViewer"
+	assert_contains "$output" "--role=roles/gkehub.viewer"
+	assert_contains "$output" "--role=roles/gkehub.gatewayReader"
+  assert_not_contains "$output" "roles/secretmanager.secretAccessor"
+  assert_not_contains "$output" "roles/owner"
+}
+
+test_security_audit_organization_roles_are_opt_in() {
+  local output
+  output="$(run_setup true env SECURITY_AUDIT_ENABLED=true SECURITY_AUDIT_ORGANIZATION_ID=123456789)"
+
+  assert_contains "$output" "organizations add-iam-policy-binding 123456789"
+  assert_contains "$output" "--role=roles/iam.securityReviewer"
+  assert_contains "$output" "--role=roles/iam.denyReviewer"
+  assert_contains "$output" "--role=roles/browser"
+}
+
 test_invalid_boolean_is_rejected() {
   local output
   local status
@@ -118,6 +147,8 @@ test_lookup_error_does_not_attempt_creation() {
 test_existing_account_reconciles_service_health
 test_missing_account_is_created
 test_optional_flags_work_for_existing_account
+test_security_audit_setup_is_read_only
+test_security_audit_organization_roles_are_opt_in
 test_invalid_boolean_is_rejected
 test_lookup_error_does_not_attempt_creation
 

@@ -31,17 +31,18 @@ type GKEContainerSummary struct {
 // GKEWorkloadSummary is the list-level view of a GKE workload (Deployment,
 // StatefulSet, DaemonSet, CronJob, or Job).
 type GKEWorkloadSummary struct {
-	Name                string            `json:"name"`
-	Namespace           string            `json:"namespace"`
-	Kind                string            `json:"kind"` // one of the KindGKE* constants
-	Replicas            int32             `json:"replicas,omitempty"`
-	ReadyReplicas       int32             `json:"ready_replicas,omitempty"`
-	Image               string            `json:"image"` // primary container image (first container)
-	ServiceAccount      string            `json:"service_account,omitempty"`
-	SecretRefs          []string          `json:"secret_refs,omitempty"` // Secret names referenced by any container
-	Labels              map[string]string `json:"labels,omitempty"`
-	OtelSidecar         bool              `json:"otel_sidecar"`                    // true if OTel instrumentation detected
-	WorkloadAPIFallback bool              `json:"workload_api_fallback,omitempty"` // true if returned via GKE Workloads API fallback
+	Name                         string            `json:"name"`
+	Namespace                    string            `json:"namespace"`
+	Kind                         string            `json:"kind"` // one of the KindGKE* constants
+	Replicas                     int32             `json:"replicas,omitempty"`
+	ReadyReplicas                int32             `json:"ready_replicas,omitempty"`
+	Image                        string            `json:"image"` // primary container image (first container)
+	ServiceAccount               string            `json:"service_account,omitempty"`
+	AutomountServiceAccountToken *bool             `json:"automount_service_account_token,omitempty"`
+	SecretRefs                   []string          `json:"secret_refs,omitempty"` // Secret names referenced by any container
+	Labels                       map[string]string `json:"labels,omitempty"`
+	OtelSidecar                  bool              `json:"otel_sidecar"`                    // true if OTel instrumentation detected
+	WorkloadAPIFallback          bool              `json:"workload_api_fallback,omitempty"` // true if returned via GKE Workloads API fallback
 }
 
 // GKEWorkloadDetails extends GKEWorkloadSummary with full container specs,
@@ -95,15 +96,20 @@ type GKEServicePort struct {
 // NEGAnnotation is non-empty when the cloud.google.com/neg annotation is
 // present, indicating this service has a linked Network Endpoint Group.
 type GKEServiceSummary struct {
-	Name          string            `json:"name"`
-	Namespace     string            `json:"namespace"`
-	Type          string            `json:"type"` // ClusterIP, NodePort, LoadBalancer, ExternalName
-	ClusterIP     string            `json:"cluster_ip,omitempty"`
-	ExternalIPs   []string          `json:"external_ips,omitempty"`
-	Ports         []GKEServicePort  `json:"ports,omitempty"`
-	Selector      map[string]string `json:"selector,omitempty"`
-	NEGAnnotation string            `json:"neg_annotation,omitempty"` // raw value of cloud.google.com/neg
-	Labels        map[string]string `json:"labels,omitempty"`
+	Name                     string            `json:"name"`
+	Namespace                string            `json:"namespace"`
+	Type                     string            `json:"type"` // ClusterIP, NodePort, LoadBalancer, ExternalName
+	ClusterIP                string            `json:"cluster_ip,omitempty"`
+	ExternalIPs              []string          `json:"external_ips,omitempty"`
+	Ports                    []GKEServicePort  `json:"ports,omitempty"`
+	Selector                 map[string]string `json:"selector,omitempty"`
+	NEGAnnotation            string            `json:"neg_annotation,omitempty"` // raw value of cloud.google.com/neg
+	Labels                   map[string]string `json:"labels,omitempty"`
+	LoadBalancerAddresses    []string          `json:"load_balancer_addresses,omitempty"`
+	LoadBalancerSourceRanges []string          `json:"load_balancer_source_ranges,omitempty"`
+	LoadBalancerClass        string            `json:"load_balancer_class,omitempty"`
+	ExternalTrafficPolicy    string            `json:"external_traffic_policy,omitempty"`
+	Internal                 bool              `json:"internal,omitempty"`
 }
 
 // ListGKEServicesRequest is the input for gcp_gke_list_services.
@@ -140,14 +146,20 @@ type GKEIngressRule struct {
 // HTTPRoute resources. GCPLBName is non-empty when GKE has linked this
 // ingress to a Compute load balancer (from annotations or status).
 type GKEIngressSummary struct {
-	Name       string            `json:"name"`
-	Namespace  string            `json:"namespace"`
-	Kind       string            `json:"kind"` // "Ingress" or "HTTPRoute"
-	Hosts      []string          `json:"hosts,omitempty"`
-	TLSEnabled bool              `json:"tls_enabled,omitempty"`
-	Rules      []GKEIngressRule  `json:"rules,omitempty"`
-	GCPLBName  string            `json:"gcp_lb_name,omitempty"` // linked Compute LB name
-	Labels     map[string]string `json:"labels,omitempty"`
+	Name             string            `json:"name"`
+	Namespace        string            `json:"namespace"`
+	Kind             string            `json:"kind"` // "Ingress" or "HTTPRoute"
+	Hosts            []string          `json:"hosts,omitempty"`
+	TLSEnabled       bool              `json:"tls_enabled,omitempty"`
+	PlaintextEnabled bool              `json:"plaintext_enabled,omitempty"`
+	Rules            []GKEIngressRule  `json:"rules,omitempty"`
+	GCPLBName        string            `json:"gcp_lb_name,omitempty"` // linked Compute LB name
+	Labels           map[string]string `json:"labels,omitempty"`
+	Addresses        []string          `json:"addresses,omitempty"`
+	IngressClass     string            `json:"ingress_class,omitempty"`
+	DefaultBackend   string            `json:"default_backend,omitempty"`
+	ParentGateways   []string          `json:"parent_gateways,omitempty"`
+	Internal         bool              `json:"internal,omitempty"`
 }
 
 // ListGKEIngressesRequest is the input for gcp_gke_list_ingresses.

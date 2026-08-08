@@ -1,0 +1,36 @@
+# Replace AURA_SECURITY_PRINCIPAL with the service-account email or user email
+# used by aura-tracker-gcp, then apply this file to every audited cluster.
+# These permissions are read-only and limited to posture evidence.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: aura-security-auditor
+rules:
+  - apiGroups: [""]
+    resources: ["services", "serviceaccounts"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["gateways", "httproutes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: aura-security-auditor
+subjects:
+  - kind: User
+    name: AURA_SECURITY_PRINCIPAL
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: aura-security-auditor
+  apiGroup: rbac.authorization.k8s.io

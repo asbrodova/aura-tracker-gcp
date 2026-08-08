@@ -37,3 +37,24 @@ func TestNeededClientsForCostModule(t *testing.T) {
 		}
 	}
 }
+
+func TestNeededClientsForSecurityModule(t *testing.T) {
+	t.Parallel()
+	needed := neededClients(map[string]bool{"security": true})
+	for _, client := range []clientKey{
+		clientAsset,
+		clientIAMAdmin,
+		clientSecretMgr,
+		clientRunSvc,
+		clientFunctionsV1,
+		clientCompute,
+		clientClusterMgr,
+		clientCRMv3,
+		clientIAMv2,
+		clientGKEHub,
+	} {
+		if !needed[client] {
+			t.Errorf("security module did not initialize %s", client)
+		}
+	}
+}

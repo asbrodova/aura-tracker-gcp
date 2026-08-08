@@ -6,9 +6,73 @@ import (
 	"strings"
 
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/gkehub/v1"
+	"google.golang.org/api/iterator"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
+
+func (a *gcpAdapter) dialSecurityK8s(ctx context.Context, projectID, location, clusterName string) (*k8sClient, string, error) {
+	mode := a.securityConfig.KubernetesAccess
+	if mode == "" {
+		mode = "auto"
+	}
+	if mode == "disabled" {
+		return nil, "disabled", fmt.Errorf("Kubernetes security enrichment is disabled")
+	}
+	if mode == "auto" || mode == "direct" {
+		client, err := a.dialK8s(ctx, projectID, location, clusterName)
+		if err == nil {
+			return client, "direct", nil
+		}
+		if mode == "direct" {
+			return nil, "direct", err
+		}
+	}
+	client, err := a.dialSecurityK8sGateway(ctx, projectID, location, clusterName)
+	if err != nil {
+		return nil, "connect_gateway", err
+	}
+	return client, "connect_gateway", nil
+}
+
+func (a *gcpAdapter) dialSecurityK8sGateway(ctx context.Context, projectID, location, clusterName string) (*k8sClient, error) {
+	if a.gkeHubSvc == nil {
+		return nil, fmt.Errorf("GKE Hub client is unavailable")
+	}
+	fleetProject := a.securityConfig.FleetProjectID
+	if fleetProject == "" {
+		fleetProject = projectID
+	}
+	resourceLink := fmt.Sprintf("//container.googleapis.com/projects/%s/locations/%s/clusters/%s", projectID, location, clusterName)
+	var membershipName string
+	err := a.gkeHubSvc.Projects.Locations.Memberships.List("projects/"+fleetProject+"/locations/-").Pages(ctx, func(page *gkehub.ListMembershipsResponse) error {
+		for _, membership := range page.Resources {
+			if membership.Endpoint != nil && membership.Endpoint.GkeCluster != nil && membership.Endpoint.GkeCluster.ResourceLink == resourceLink {
+				membershipName = membership.Name
+				return iterator.Done
+			}
+		}
+		return nil
+	})
+	if err != nil && err != iterator.Done {
+		return nil, fmt.Errorf("list fleet memberships: %w", err)
+	}
+	if membershipName == "" {
+		return nil, fmt.Errorf("cluster is not registered in fleet project %q", fleetProject)
+	}
+	parts := strings.Split(membershipName, "/")
+	if len(parts) != 6 {
+		return nil, fmt.Errorf("unexpected fleet membership name %q", membershipName)
+	}
+	endpoint := fmt.Sprintf("https://connectgateway.googleapis.com/v1/projects/%s/locations/%s/gkeMemberships/%s", parts[1], parts[3], parts[5])
+	tokenSource, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
+	if err != nil {
+		return nil, fmt.Errorf("connect gateway token source: %w", err)
+	}
+	return dialGatewayWithTokenSource(endpoint, tokenSource), nil
+}
 
 // dialK8s fetches cluster endpoint + CA cert from the GKE API and constructs
 // a thin K8s REST client authenticated via ADC. It returns a PermissionDeniedError

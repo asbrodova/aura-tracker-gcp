@@ -38,6 +38,8 @@ const (
 	clientMonitoringV1     clientKey = "monitoringV1"
 	clientCRMv3            clientKey = "crmV3"
 	clientAsset            clientKey = "asset"
+	clientIAMv2            clientKey = "iamV2"
+	clientGKEHub           clientKey = "gkeHub"
 )
 
 // moduleClientDeps maps each module name to the GCP clients it requires.
@@ -70,6 +72,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"tagging":            {clientCRMv3},
 	"incident":           {clientRunSvc, clientRunRevisions, clientLogAdmin, clientMetric, clientPubSub, clientSQLAdmin, clientVPCAccess},
 	"cost":               {clientBQ, clientMetric, clientAsset},
+	"security":           {clientAsset, clientIAMAdmin, clientSecretMgr, clientRunSvc, clientFunctionsV1, clientCompute, clientClusterMgr, clientCRMv3, clientIAMv2, clientGKEHub},
 	"recommender_export": {clientBQ},                                                         // BQ is also in _resources; listed here for --modules= explicit selection
 	"_resources":         {clientBQ, clientGCS, clientCRM, clientRunSvc, clientRunRevisions}, // always initialized for MCP Resources
 }
