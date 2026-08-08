@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
+	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	"github.com/asbrodova/aura-tracker-gcp/internal/diagnostics"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/middleware"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
@@ -31,6 +32,8 @@ type serverOptions struct {
 	defaultProjectID        string
 	projectIDPlaceholder    string
 	enableRecommenderExport bool
+	enableCostReasoning     bool
+	costReasoningConfig     costreasoning.Config
 }
 
 // WithAnonymizer attaches an Anonymizer to every registered tool handler.
@@ -64,6 +67,14 @@ func WithProjectIDPlaceholder(placeholder string) Option {
 // Off by default; enable via RECOMMENDER_BQ_EXPORT_ENABLED=true.
 func WithRecommenderExport() Option {
 	return func(o *serverOptions) { o.enableRecommenderExport = true }
+}
+
+// WithCostReasoning registers the opt-in, read-only billing explanation tool.
+func WithCostReasoning(cfg costreasoning.Config) Option {
+	return func(o *serverOptions) {
+		o.enableCostReasoning = true
+		o.costReasoningConfig = cfg
+	}
 }
 
 // New creates and configures the MCP server, registering all tools, resources, and prompts.
@@ -152,6 +163,9 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	}
 	if o.enableRecommenderExport {
 		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log))
+	}
+	if o.enableCostReasoning {
+		allModules = append(allModules, tools.NewCostTools(costreasoning.New(svc, log, o.costReasoningConfig), log))
 	}
 	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
 		s.AddTools(wrap(t))

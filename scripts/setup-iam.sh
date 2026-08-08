@@ -11,12 +11,17 @@
 #   PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
+#   PROJECT_ID=my-project COST_REASONING_ENABLED=true BILLING_EXPORT_DATASET=cloud_billing bash scripts/setup-iam.sh
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?PROJECT_ID environment variable is required}"
 MUTATION_ROLES="${MUTATION_ROLES:-false}"
 RECOMMENDER_ENABLED="${RECOMMENDER_ENABLED:-false}"
 SERVICE_HEALTH_ENABLED="${SERVICE_HEALTH_ENABLED:-false}"
+COST_REASONING_ENABLED="${COST_REASONING_ENABLED:-false}"
+COST_QUERY_PROJECT_ID="${COST_QUERY_PROJECT_ID:-$PROJECT_ID}"
+BILLING_EXPORT_PROJECT_ID="${BILLING_EXPORT_PROJECT_ID:-$PROJECT_ID}"
+BILLING_EXPORT_DATASET="${BILLING_EXPORT_DATASET:-}"
 
 SA_NAME="aura-tracker-mcp"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -32,8 +37,14 @@ validate_boolean() {
 
 grant_project_role() {
   local role="$1"
-  echo "  Reconciling ${role}"
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  grant_role_on_project "$PROJECT_ID" "$role"
+}
+
+grant_role_on_project() {
+  local target_project="$1"
+  local role="$2"
+  echo "  Reconciling ${role} on ${target_project}"
+  gcloud projects add-iam-policy-binding "$target_project" \
     --member="serviceAccount:${SA_EMAIL}" \
     --role="$role" \
     --condition=None \
@@ -42,15 +53,27 @@ grant_project_role() {
 
 enable_api() {
   local api="$1"
+  enable_api_on_project "$PROJECT_ID" "$api"
+}
+
+enable_api_on_project() {
+  local target_project="$1"
+  local api="$2"
   echo "  Enabling ${api}"
   gcloud services enable "$api" \
-    --project="$PROJECT_ID" \
+    --project="$target_project" \
     --quiet
 }
 
 validate_boolean MUTATION_ROLES "$MUTATION_ROLES"
 validate_boolean RECOMMENDER_ENABLED "$RECOMMENDER_ENABLED"
 validate_boolean SERVICE_HEALTH_ENABLED "$SERVICE_HEALTH_ENABLED"
+validate_boolean COST_REASONING_ENABLED "$COST_REASONING_ENABLED"
+
+if [[ "$COST_REASONING_ENABLED" == "true" && -z "$BILLING_EXPORT_DATASET" ]]; then
+  echo "ERROR: BILLING_EXPORT_DATASET is required when COST_REASONING_ENABLED=true." >&2
+  exit 2
+fi
 
 # ── Existence check ────────────────────────────────────────────────────────────
 describe_output=""
@@ -116,6 +139,22 @@ if [[ "$RECOMMENDER_ENABLED" == "true" ]]; then
   echo "Configuring optional Cloud Recommender integration..."
   enable_api recommender.googleapis.com
   grant_project_role roles/recommender.viewer
+fi
+
+# Cost reasoning is opt-in because it executes chargeable BigQuery queries over
+# a detailed billing export. The data-viewer binding is project-scoped for an
+# idempotent CLI-only setup; production teams can replace it with the same role
+# granted only on BILLING_EXPORT_DATASET.
+if [[ "$COST_REASONING_ENABLED" == "true" ]]; then
+  echo "Configuring optional cost reasoning..."
+  enable_api_on_project "$COST_QUERY_PROJECT_ID" bigquery.googleapis.com
+  enable_api cloudasset.googleapis.com
+  grant_role_on_project "$COST_QUERY_PROJECT_ID" roles/bigquery.jobUser
+  grant_role_on_project "$BILLING_EXPORT_PROJECT_ID" roles/bigquery.dataViewer
+  grant_project_role roles/cloudasset.viewer
+  grant_project_role roles/serviceusage.serviceUsageConsumer
+  echo "INFO: roles/bigquery.dataViewer was granted project-wide on ${BILLING_EXPORT_PROJECT_ID}."
+  echo "      For tighter access, grant it only on dataset ${BILLING_EXPORT_DATASET} and remove the project binding."
 fi
 
 echo ""

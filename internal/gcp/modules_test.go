@@ -27,3 +27,13 @@ func TestAlwaysOnResourcesInitializeCloudRunRevisionClients(t *testing.T) {
 		t.Fatalf("resource clients missing: run=%v revisions=%v", needed[clientRunSvc], needed[clientRunRevisions])
 	}
 }
+
+func TestNeededClientsForCostModule(t *testing.T) {
+	t.Parallel()
+	needed := neededClients(map[string]bool{"cost": true})
+	for _, client := range []clientKey{clientBQ, clientMetric, clientAsset} {
+		if !needed[client] {
+			t.Errorf("cost module did not initialize %s", client)
+		}
+	}
+}

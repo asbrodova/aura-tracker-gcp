@@ -146,6 +146,11 @@ type FakeGCPService struct {
 	// ArchGraph
 	ExportArchitectureGraphFunc func(context.Context, models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error)
 
+	// Cost reasoning
+	CollectCostFactsFunc        func(context.Context, models.CollectCostFactsRequest) (models.BillingCostFacts, error)
+	ListCostRecommendationsFunc func(context.Context, models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error)
+	ListCreatedAssetsFunc       func(context.Context, models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error)
+
 	// Additional Aura scores (added in main after branch cut)
 	GetGKEAuraScoreFunc func(context.Context, models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error)
 	GetGCSAuraScoreFunc func(context.Context, models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error)
@@ -591,4 +596,25 @@ func (f *FakeGCPService) GetGCSAuraScore(ctx context.Context, req models.GetGCSA
 }
 func (f *FakeGCPService) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
 	return models.ExportRecommendationsToBQResponse{}, nil
+}
+
+func (f *FakeGCPService) CollectCostFacts(ctx context.Context, req models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
+	if f.CollectCostFactsFunc != nil {
+		return f.CollectCostFactsFunc(ctx, req)
+	}
+	return models.BillingCostFacts{}, nil
+}
+
+func (f *FakeGCPService) ListCostRecommendations(ctx context.Context, req models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error) {
+	if f.ListCostRecommendationsFunc != nil {
+		return f.ListCostRecommendationsFunc(ctx, req)
+	}
+	return models.ListCostRecommendationsResponse{}, nil
+}
+
+func (f *FakeGCPService) ListCreatedAssets(ctx context.Context, req models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error) {
+	if f.ListCreatedAssetsFunc != nil {
+		return f.ListCreatedAssetsFunc(ctx, req)
+	}
+	return models.ListCreatedAssetsResponse{}, nil
 }

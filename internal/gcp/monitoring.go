@@ -373,6 +373,20 @@ func (a *gcpAdapter) GetMetrics(ctx context.Context, req models.GetMetricsReques
 
 	now := time.Now().UTC()
 	startTime := now.Add(-time.Duration(req.LookbackMinutes) * time.Minute)
+	if req.StartTime != "" || req.EndTime != "" {
+		if req.StartTime == "" || req.EndTime == "" {
+			return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: start_time and end_time must be provided together")
+		}
+		var err error
+		startTime, err = time.Parse(time.RFC3339, req.StartTime)
+		if err != nil {
+			return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: invalid start_time: %w", err)
+		}
+		now, err = time.Parse(time.RFC3339, req.EndTime)
+		if err != nil || !startTime.Before(now) {
+			return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: invalid end_time")
+		}
+	}
 
 	filter, err := buildMetricFilter(req)
 	if err != nil {

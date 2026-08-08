@@ -27,6 +27,7 @@ import (
 	"google.golang.org/api/alloydb/v1"
 	"google.golang.org/api/apigateway/v1beta"
 	"google.golang.org/api/artifactregistry/v1"
+	"google.golang.org/api/cloudasset/v1"
 	"google.golang.org/api/cloudbuild/v1"
 	"google.golang.org/api/cloudfunctions/v1"
 	"google.golang.org/api/cloudresourcemanager/v1"
@@ -85,6 +86,14 @@ func WithClientOptions(opts ...option.ClientOption) Option {
 // permissions listed in the README).
 func WithRecommender() Option {
 	return func(a *gcpAdapter) { a.enableRecommender = true }
+}
+
+// WithCostReasoning configures the optional Cloud Billing export reader.
+func WithCostReasoning(cfg CostAdapterConfig) Option {
+	return func(a *gcpAdapter) {
+		a.enableCostReasoning = true
+		a.costConfig = cfg
+	}
 }
 
 // WithModules restricts GCP client initialization to only the clients required
@@ -149,12 +158,15 @@ type gcpAdapter struct {
 	monitoringV1Svc           *monitoringv1.Service
 	crmV3Svc                  *crmv3.Service
 	rec                       *recommender.Client
+	assetSvc                  *cloudasset.Service
+	costBQ                    *bigquery.Client
 	limiter                   *rate.Limiter
 	log                       *slog.Logger
 	auraCache                 *ttlCache[models.AuraReport]
 	regionsCache              *ttlCache[[]string]
 	graphCache                *ttlCache[models.ServerlessGraph]
 	recommenderCache          *ttlCache[[]recommenderInsight]
+	costRecommendationCache   *ttlCache[models.ListCostRecommendationsResponse]
 	recommenderQuotaExhausted atomic.Bool
 	// --- time.Duration (8 bytes each) ---
 	callTimeout  time.Duration
@@ -163,8 +175,11 @@ type gcpAdapter struct {
 	clientOpts     []option.ClientOption
 	enabledModules map[string]bool
 	traceBackend   string
+	costConfig     CostAdapterConfig
 	// --- bool (1 byte, grouped at end to minimise padding) ---
-	enableRecommender bool
+	enableRecommender   bool
+	enableCostReasoning bool
+	ownsCostBQ          bool
 }
 
 // Compile-time assertion that gcpAdapter satisfies the full composite port.
@@ -188,6 +203,12 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 	}
 	for _, o := range opts {
 		o(a)
+	}
+	a.costConfig = normalizeCostAdapterConfig(a.costConfig, projectID)
+	if a.enableCostReasoning {
+		if err := validateCostAdapterConfig(a.costConfig); err != nil {
+			return nil, fmt.Errorf("gcp: cost reasoning: %w", err)
+		}
 	}
 
 	needed := neededClients(a.enabledModules)
@@ -398,11 +419,30 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		}
 	}
 
+	if a.enableCostReasoning && needed[clientAsset] {
+		a.assetSvc, err = cloudasset.NewService(ctx, a.clientOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("gcp: create cloud asset client: %w", err)
+		}
+	}
+
 	if needed[clientBQ] {
 		a.bq, err = bigquery.NewClient(ctx, projectID, a.clientOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create bigquery client: %w", err)
 		}
+	}
+	if a.enableCostReasoning {
+		if a.costConfig.QueryProjectID == projectID && a.bq != nil {
+			a.costBQ = a.bq
+		} else {
+			a.costBQ, err = bigquery.NewClient(ctx, a.costConfig.QueryProjectID, a.clientOpts...)
+			if err != nil {
+				return nil, fmt.Errorf("gcp: create cost BigQuery client: %w", err)
+			}
+			a.ownsCostBQ = true
+		}
+		a.costRecommendationCache = newTTLCache[models.ListCostRecommendationsResponse](12 * time.Hour)
 	}
 
 	if needed[clientGCS] {
@@ -519,6 +559,11 @@ func (a *gcpAdapter) Close() error {
 	if a.rec != nil {
 		if err := a.rec.Close(); err != nil {
 			errs = append(errs, fmt.Errorf("close recommender client: %w", err))
+		}
+	}
+	if a.ownsCostBQ && a.costBQ != nil {
+		if err := a.costBQ.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close cost bigquery client: %w", err))
 		}
 	}
 	if a.bq != nil {

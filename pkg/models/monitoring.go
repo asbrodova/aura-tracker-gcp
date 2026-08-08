@@ -32,6 +32,8 @@ type MetricSeries struct {
 type GetMetricsRequest struct {
 	ProjectID              string            `json:"project_id"`
 	MetricType             string            `json:"metric_type"`
+	StartTime              string            `json:"start_time,omitempty"`
+	EndTime                string            `json:"end_time,omitempty"`
 	ResourceLabels         map[string]string `json:"resource_labels,omitempty"`
 	MetricLabels           map[string]string `json:"metric_labels,omitempty"`
 	LookbackMinutes        int               `json:"lookback_minutes"`
