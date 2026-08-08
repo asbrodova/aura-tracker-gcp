@@ -486,3 +486,15 @@ func (d *SafetyDecorator) ListTaggedResources(ctx context.Context, req models.Li
 func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
 	return d.inner.ExportRecommendationsToBQ(ctx, req)
 }
+
+func (d *SafetyDecorator) CollectCostFacts(ctx context.Context, req models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
+	return d.inner.CollectCostFacts(ctx, req)
+}
+
+func (d *SafetyDecorator) ListCostRecommendations(ctx context.Context, req models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error) {
+	return d.inner.ListCostRecommendations(ctx, req)
+}
+
+func (d *SafetyDecorator) ListCreatedAssets(ctx context.Context, req models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error) {
+	return d.inner.ListCreatedAssets(ctx, req)
+}

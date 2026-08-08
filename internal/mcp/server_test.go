@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -414,6 +415,25 @@ func TestIncidentModuleRegistersToolAndPromptTogether(t *testing.T) {
 	}
 }
 
+func TestCostModuleIsOptInAndFilterable(t *testing.T) {
+	withoutCost := New(&mockSvc{}, slog.Default(), "test")
+	if _, ok := withoutCost.ListTools()["gcp_cost_explain"]; ok {
+		t.Fatal("cost explanation tool must not register without explicit configuration")
+	}
+
+	withCost := New(&mockSvc{}, slog.Default(), "test",
+		WithCostReasoning(costreasoning.Config{}),
+		WithModules(map[string]bool{ModuleCost: true}),
+	)
+	registered := withCost.ListTools()
+	if len(registered) != 1 {
+		t.Fatalf("cost module tool count = %d, want 1", len(registered))
+	}
+	if _, ok := registered["gcp_cost_explain"]; !ok {
+		t.Fatal("cost module did not register gcp_cost_explain")
+	}
+}
+
 func TestIncidentPromptIsHiddenWhenModuleDisabled(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test",
 		WithModules(map[string]bool{ModuleGKE: true}),
@@ -490,4 +510,16 @@ func (m *mockSvc) ListTaggedResources(_ context.Context, _ models.ListTaggedReso
 }
 func (m *mockSvc) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
 	return models.ExportRecommendationsToBQResponse{}, nil
+}
+
+func (m *mockSvc) CollectCostFacts(_ context.Context, _ models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
+	return models.BillingCostFacts{}, nil
+}
+
+func (m *mockSvc) ListCostRecommendations(_ context.Context, _ models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error) {
+	return models.ListCostRecommendationsResponse{}, nil
+}
+
+func (m *mockSvc) ListCreatedAssets(_ context.Context, _ models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error) {
+	return models.ListCreatedAssetsResponse{}, nil
 }

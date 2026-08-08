@@ -202,6 +202,14 @@ type RecommenderExportService interface {
 	ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error)
 }
 
+// CostDataService exposes normalized, read-only facts used by the cost
+// reasoning application layer. It does not expose arbitrary SQL execution.
+type CostDataService interface {
+	CollectCostFacts(ctx context.Context, req models.CollectCostFactsRequest) (models.BillingCostFacts, error)
+	ListCostRecommendations(ctx context.Context, req models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error)
+	ListCreatedAssets(ctx context.Context, req models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error)
+}
+
 // ─── Composite port ───────────────────────────────────────────────────────────
 
 // GCPService is the single composite secondary-port interface that all GCP
@@ -240,4 +248,5 @@ type GCPService interface {
 	CoverageService
 	ArchGraphService
 	RecommenderExportService
+	CostDataService
 }

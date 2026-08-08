@@ -32,6 +32,7 @@ const (
 	ModuleArchGraph    = "archgraph"
 	ModuleTagging      = "tagging"
 	ModuleIncident     = "incident"
+	ModuleCost         = "cost"
 
 	// Opt-in modules (NOT in AllModules; must be explicitly requested)
 	ModuleRecommenderExport = "recommender_export"
@@ -48,6 +49,7 @@ var AllModules = []string{
 	ModuleGKEWorkloads, ModuleGKEMesh, ModuleNetworking, ModuleDatastores, ModuleSupplyChain,
 	ModuleCoverage, ModuleArchGraph, ModuleTagging,
 	ModuleIncident,
+	ModuleCost,
 }
 
 // ToolModule is the interface every tool domain struct must satisfy.

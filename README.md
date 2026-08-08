@@ -13,7 +13,7 @@
 
 `aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with mandatory human approval before any infrastructure change.
 
-**70 Tools · 10 Resources · 3 Prompts · 27 Modules**
+**70 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 28 Modules**
 
 > For architecture deep-dives, per-service guides, and full configuration reference, see the **[GitHub Wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)**.
 
@@ -34,10 +34,11 @@ Cost-bearing integrations and sensitive-data features have explicit controls:
 |---|---|---|
 | Cloud Recommender API integration | `RECOMMENDER_ENABLED` | **on** — disable with `=false` |
 | Recommender BigQuery export tool | `RECOMMENDER_BQ_EXPORT_ENABLED` | off |
+| Cost reasoning over detailed billing export | `COST_REASONING_ENABLED` | off |
 | PII / credential scrubbing | `ANONYMIZE_ENABLED` | off |
 | HITL mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
 
-Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. No accidental credential exposure. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); all 68 others are strictly read-only calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
+Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. Cost reasoning is off by default because it runs chargeable BigQuery queries. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); the default 68 others—and the optional cost tool—are strictly read-only calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
 
 ### Human-in-the-Loop for Every Mutation
 
@@ -52,7 +53,7 @@ Calling a mutation tool without a plan returns a `confirmation required` error w
 
 ### Token Efficiency: Load Only What You Need
 
-All 70 tools are registered by default, which consumes LLM context on every turn. Use `--modules` to load only the services relevant to your workflow — each excluded module also skips its GCP client connections at startup:
+All 70 default tools are registered when `--modules` is omitted. The cost tool is registered only when its feature flag and export configuration are present. Use `--modules` to load only the services relevant to your workflow—each excluded module also skips its GCP client connections at startup:
 
 ```json
 "args": ["--modules=cloudrun,aura,monitoring,iam"]
@@ -66,7 +67,8 @@ All 70 tools are registered by default, which consumes LLM context on every turn
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | Data / logging | `logging,monitoring,iam` | 4 |
 | Storage inspection | `storage` | 3 |
-| Full toolkit | *(omit flag)* | 70 |
+| Cost investigation | `cost` | 1 (requires `COST_REASONING_ENABLED=true`) |
+| Full toolkit | *(omit flag)* | 70 (71 if cost reasoning is enabled) |
 
 See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
 
@@ -148,7 +150,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 70 tools are registered. Use the `--modules` flag to load only the services you work with — each excluded module also skips its GCP client connection at startup.
+By default all 70 base tools are registered. Use the `--modules` flag to load only the services you work with—each excluded module also skips its GCP client connection at startup. The opt-in cost tool is additional.
 
 ```json
 {
@@ -164,7 +166,7 @@ By default all 70 tools are registered. Use the `--modules` flag to load only th
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging` · `incident`. Use `--modules=none` to register zero tools. Resources remain available; the incident prompt is registered only when the `incident` module is enabled. Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging` · `incident` · `cost`. The `cost` module also requires `COST_REASONING_ENABLED=true`. Use `--modules=none` to register zero tools. Resources remain available; the incident prompt is registered only when the `incident` module is enabled. Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
@@ -174,7 +176,8 @@ Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `sch
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Storage inspection | `storage` | 3 |
 | Data / logging | `logging,monitoring,iam` | 4 |
-| Full toolkit | *(omit flag)* | 70 |
+| Cost investigation | `cost` | 1 (opt-in) |
+| Full toolkit | *(omit flag)* | 70 (71 if cost reasoning is enabled) |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
@@ -375,6 +378,77 @@ This three-step read prevents hallucinated column names — the model knows actu
 
 ---
 
+### Cost Reasoning
+
+**Module:** `cost` (opt-in)
+
+**Required data:** Cloud Billing **Detailed usage cost** export in BigQuery
+
+**Required IAM:** `roles/bigquery.jobUser` on the query project, `roles/bigquery.dataViewer` on the billing-export dataset, and `roles/cloudasset.viewer` plus `roles/serviceusage.serviceUsageConsumer` on the workload project. Add `roles/recommender.viewer` for idle-resource findings.
+
+`gcp_cost_explain` answers more than “what did we spend?” It compares complete calendar-day windows and returns:
+
+- current, baseline, delta, percentage change, daily history, and billing-export freshness;
+- top spenders and top increases by service, SKU, and resource;
+- ranked, reconciling drivers such as new resources, usage growth, traffic spikes, effective-rate changes, credit changes, and unattributed residuals;
+- newly billed resources, upgraded to confirmed-new when Cloud Asset Inventory shows a matching creation time;
+- active idle-resource recommendations with estimated monthly savings;
+- traffic-like billing increases, with high confidence only when Cloud Monitoring confirms the same increase across the current and baseline windows;
+- explicit coverage checks and warnings when optional evidence, resource attribution, export history, or freshness is incomplete.
+
+Enable the [detailed billing export](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-setup), then configure the MCP server:
+
+```json
+{
+  "mcpServers": {
+    "aura-tracker-gcp": {
+      "command": "aura-tracker-gcp",
+      "args": ["--modules=cost"],
+      "env": {
+        "GCP_PROJECT_ID": "workload-project",
+        "COST_REASONING_ENABLED": "true",
+        "COST_QUERY_PROJECT_ID": "finops-project",
+        "BILLING_EXPORT_PROJECT_ID": "finops-project",
+        "BILLING_EXPORT_DATASET": "cloud_billing",
+        "COST_REASONING_TIMEZONE": "UTC",
+        "COST_QUERY_MAX_BYTES": "5368709120"
+      }
+    }
+  }
+}
+```
+
+`BILLING_EXPORT_TABLE` is optional. When omitted, startup accepts the dataset and the first analysis discovers the sole table named `gcp_billing_export_resource_v1_*`; if multiple detailed exports exist, configure the table explicitly.
+
+For the repository service account, the setup script enables the APIs and reconciles the project-level roles:
+
+```bash
+PROJECT_ID=workload-project \
+COST_REASONING_ENABLED=true \
+COST_QUERY_PROJECT_ID=finops-project \
+BILLING_EXPORT_PROJECT_ID=finops-project \
+BILLING_EXPORT_DATASET=cloud_billing \
+RECOMMENDER_ENABLED=true \
+bash scripts/setup-iam.sh
+```
+
+For tighter production access, grant `roles/bigquery.dataViewer` only on the billing dataset instead of the whole export project. The workload service account must be grantable in each referenced project.
+
+The query path is bounded: every statement is dry-run first, rejected above `COST_QUERY_MAX_BYTES`, then executed with the same BigQuery maximum-bytes limit. BigQuery performs aggregation and ranking before rows reach the process; responses are cached for 15 minutes. The default limit is 5 GiB per statement, and one uncached analysis normally executes two statements.
+
+The comparison uses regular net usage cost (`cost + credits`, excluding tax and adjustment rows) and excludes the incomplete current local day. Version 1 supports equal-length `previous_period` comparisons for the last 7 complete days, last 30 complete days, month-to-date, or a custom inclusive date range of at most 366 days. Currency conversion is not attempted; if the selected export contains multiple currencies, the response warns that its aggregated amounts are not directly comparable.
+
+> [!NOTE]
+> Detailed-export resource identifiers are service-dependent, GKE resource detail requires GKE cost allocation, and billing exports have no delivery-latency guarantee. “Newly billed” means first seen in the available export history; only a matching Asset Inventory creation time is labeled “confirmed new.” These limitations are surfaced in `coverage` and `warnings` rather than hidden.
+
+**Try it:**
+> "Why did GCP costs increase in the last 7 complete days? Show the top offenders and evidence."
+> "Which resources appeared for the first time this month, and how much did they cost?"
+> "Find idle resources and unexpected traffic behind this month's increase."
+> "Compare the last 30 complete days with the previous 30 and explain usage versus rate effects."
+
+---
+
 ### Firebase / Firestore
 
 Firestore is available through the `datastores` module (Phase 2), which also covers Cloud Spanner, AlloyDB, and Memorystore for Redis. It lists Firestore databases in both **Native** and **Datastore** mode — it does not read collection or document data.
@@ -429,7 +503,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 
 ## Tools
 
-70 tools across 27 modules. Load only what you need with `--modules`.
+70 base tools plus one opt-in cost-reasoning tool across 28 module flags. Load only what you need with `--modules`.
 
 | Module | Flag | Tools | Mutation? |
 |---|---|---|---|
@@ -459,6 +533,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 | Observability Coverage | `coverage` | 1 | — |
 | Resource Tagging | `tagging` | 1 | — |
 | Incident Diagnosis | `incident` | 1 | — |
+| Cost Reasoning | `cost` | 1 (opt-in) | — |
 
 → Full tool reference with parameters and descriptions: [Module Reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/Module-Reference)
 
@@ -480,6 +555,9 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 > "Export a full serverless event graph for my-project."
 
 ### Cost & Efficiency
+> "Why did costs increase in the last 7 complete days? Rank the drivers and show the evidence."
+> "Show top spenders, newly billed resources, idle resources, and unexpected traffic."
+> "Compare this month to the previous equal period and separate usage growth from rate or credit changes."
 > "Which Cloud SQL instances are idle or over-provisioned? Estimate monthly savings."  
 > "Show me GCS buckets without lifecycle rules or public access prevention."  
 > "Give me an Aura Score for the legacy-db Cloud SQL instance."
@@ -665,6 +743,10 @@ PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 
 # Enable Service Health API and reconcile its viewer role
 PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
+
+# Enable cost reasoning (detailed billing export must already exist)
+PROJECT_ID=my-project COST_REASONING_ENABLED=true \
+  BILLING_EXPORT_DATASET=cloud_billing bash scripts/setup-iam.sh
 ```
 
 Re-running the script is safe: it keeps an existing service account and reconciles the requested roles and optional APIs. Setup flags are additive—setting a flag to `false` or omitting it does not disable an API or revoke a previously granted role. Run it as a team admin with permission to change project IAM; API-enabling options also require permission to enable services.
@@ -683,6 +765,14 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Aura Scores include idle/over-provisioned signals with estimated monthly USD savings. Results are cached for 12 h; 429 quota errors emit an explicit LLM stop signal instead of retrying. Requires the Recommender Viewer role. |
 | `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to register the `gcp_export_recommendations_to_bq` tool. Off by default. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name used by `gcp_export_recommendations_to_bq`. Overrides `recommender_export.dataset` in `~/.aura-tracker.yaml`. |
+| `COST_REASONING_ENABLED` | No | Set `true` to register `gcp_cost_explain`. Off by default; `BILLING_EXPORT_DATASET` is then required. |
+| `COST_QUERY_PROJECT_ID` | No | Project that owns chargeable BigQuery query jobs. Defaults to `GCP_PROJECT_ID`. |
+| `BILLING_EXPORT_PROJECT_ID` | No | Project containing the detailed Cloud Billing export dataset. Defaults to `COST_QUERY_PROJECT_ID`. |
+| `BILLING_EXPORT_DATASET` | When cost reasoning is enabled | Dataset containing `gcp_billing_export_resource_v1_*`. |
+| `BILLING_EXPORT_TABLE` | No | Exact detailed-export table ID. Omit when the dataset contains exactly one matching table. |
+| `COST_REASONING_TIMEZONE` | No | IANA timezone used for complete calendar-day windows. Default: `UTC`. |
+| `COST_REASONING_HISTORY_DAYS` | No | History queried for freshness, trends, and first-seen classification; `14`–`366`. Default: `90`. |
+| `COST_QUERY_MAX_BYTES` | No | Positive per-statement BigQuery maximum bytes billed. Default: `5368709120` (5 GiB). |
 | `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
 | `TRACE_BACKEND` | No | Backend for `gcp_trace_list_services`: `trace` (Cloud Trace v1 REST, default) or `monitoring` (Monitoring metric proxy). Use `monitoring` if Cloud Trace API is disabled but OpenCensus/OpenTelemetry metrics exist. |
 | `GRAPH_TIMEOUT_SECONDS` | No | Outer context timeout in seconds for `gcp_export_serverless_graph`. Default: `120`. Individual sub-calls still use `callTimeout` (30 s). |
@@ -696,6 +786,16 @@ Avoid setting `GCP_PROJECT_ID` on every launch by adding a `~/.aura-tracker.yaml
 
 ```yaml
 project_id: my-gcp-project-id
+
+cost_reasoning:
+  enabled: false
+  query_project_id: finops-project
+  export_project_id: finops-project
+  dataset: cloud_billing
+  table: ""                    # auto-discover the sole detailed export
+  timezone: UTC
+  history_days: 90
+  max_bytes_billed: 5368709120
 ```
 
 The environment variable takes precedence when both are set.
@@ -716,9 +816,16 @@ PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 
 # Enable Service Health API and reconcile its viewer role
 PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
+
+# Enable cost reasoning and grant BigQuery/Asset Inventory access
+PROJECT_ID=my-project COST_REASONING_ENABLED=true \
+  COST_QUERY_PROJECT_ID=finops-project \
+  BILLING_EXPORT_PROJECT_ID=finops-project \
+  BILLING_EXPORT_DATASET=cloud_billing \
+  bash scripts/setup-iam.sh
 ```
 
-The optional flags can be combined in one invocation and also work when the service account already exists. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
+The optional flags can be combined in one invocation and also work when the service account already exists. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. `COST_REASONING_ENABLED=true` enables BigQuery and Cloud Asset Inventory, grants BigQuery Job User on the query project, grants Cloud Asset Viewer on the workload project, and grants BigQuery Data Viewer on the export project. The script uses a project-wide Data Viewer binding for idempotent setup; prefer a dataset-level binding in tightly scoped production environments. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
 
 **For developers joining the team:** you do not need to run the admin setup unless you are responsible for changing the account's project roles or optional APIs. Ask your admin for credentials, or use `gcloud auth application-default login` with your own account if it already has the required roles.
 
@@ -743,9 +850,9 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **Read-only guarantees**: all 68 non-mutation tools are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Read-only guarantees**: all 68 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all 70 tools carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations — clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all registered tools (70 by default, 71 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -926,14 +1033,14 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 │              workflows · tasks · pubsub · secretmanager           │
 │              vpcaccess · cloudsql · logging · monitoring          │
 │              iam · topology · aura · storage · serverlessgraph    │
-│              incident                                               │
+│              incident · cost                                      │
 │   resources/ bigquery · cloudrun · storage · iam                 │
 │   prompts/   audit-security · optimize-bq · incident-response    │
 └─────────────────────────────┬───────────────────────────────────┘
-                              │ incident path ▼
+                              │ correlation / reasoning paths ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
-│       internal/diagnostics/   (Application Correlation Layer)    │
-│ scope · collectors · baselines · detectors · evidence scoring   │
+│ internal/diagnostics/ · internal/costreasoning/                  │
+│ scopes · windows · collectors · detectors · evidence scoring    │
 │ partial failures become explicit coverage gaps                  │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ narrow DataSource; other tools call ▼
@@ -956,13 +1063,14 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 │   scheduler · workflows · tasks · secretmanager · vpcaccess       │
 │   cloudsql · pubsub · logging · monitoring · iam                  │
 │   topology · aura · bigquery · storage · serverlessgraph          │
+│   cost_billing · cost_assets · cost_recommendations               │
 │   regions (discoverRegions helper, 3-tier fallback + 10-min TTL) │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ Google Cloud Go SDK (gRPC / REST)
                           GCP APIs
 ```
 
-**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Ordinary tool modules depend on `ports/`; the incident module delegates to `internal/diagnostics`, whose narrow `DataSource` is satisfied by the same `GCPService`. `internal/safety` sits at the port boundary — it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
+**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Ordinary tool modules depend on `ports/`; incident diagnosis and cost reasoning delegate to deterministic application-layer engines whose narrow `DataSource` interfaces are satisfied by the same `GCPService`. `internal/safety` sits at the port boundary—it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
 
 Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. The MCP protocol layer is identical in both modes.
 
@@ -994,6 +1102,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
 
 ## Project Layout
 
-The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident scope resolution, collectors, baseline comparisons, detectors, and scoring without importing either MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
+The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident correlation; `internal/costreasoning` owns complete-day windows, deterministic cost attribution, confidence, and coverage. Neither imports MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
 
 → Full annotated project layout and contributor guide: [Architecture & Contributing](https://github.com/asbrodova/aura-tracker-gcp/wiki/Architecture-and-Contributing)

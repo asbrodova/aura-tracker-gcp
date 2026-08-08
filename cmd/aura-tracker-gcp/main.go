@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
 	"github.com/asbrodova/aura-tracker-gcp/internal/config"
+	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	gcpadapter "github.com/asbrodova/aura-tracker-gcp/internal/gcp"
 	mcpserver "github.com/asbrodova/aura-tracker-gcp/internal/mcp"
 	"github.com/asbrodova/aura-tracker-gcp/internal/safety"
@@ -86,6 +88,30 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 	if os.Getenv("RECOMMENDER_ENABLED") != "false" {
 		adapterOpts = append(adapterOpts, gcpadapter.WithRecommender())
 		log.Info("recommender integration enabled (set RECOMMENDER_ENABLED=false to disable)")
+	}
+
+	if err := applyCostReasoningEnv(&userCfg.CostReasoning); err != nil {
+		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: cost reasoning config: %v\n", err)
+		os.Exit(1)
+	}
+	costModuleEnabled := userCfg.CostReasoning.Enabled && (enabledModules == nil || enabledModules[mcpserver.ModuleCost])
+	if costModuleEnabled {
+		if strings.TrimSpace(userCfg.CostReasoning.Dataset) == "" {
+			fmt.Fprintln(os.Stderr, "aura-tracker-gcp: cost_reasoning.dataset or BILLING_EXPORT_DATASET is required when cost reasoning is enabled")
+			os.Exit(1)
+		}
+		if userCfg.CostReasoning.Timezone != "" {
+			if _, err := time.LoadLocation(userCfg.CostReasoning.Timezone); err != nil {
+				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: invalid cost reasoning timezone %q: %v\n", userCfg.CostReasoning.Timezone, err)
+				os.Exit(1)
+			}
+		}
+		adapterOpts = append(adapterOpts, gcpadapter.WithCostReasoning(gcpadapter.CostAdapterConfig{
+			QueryProjectID: userCfg.CostReasoning.QueryProjectID, ExportProjectID: userCfg.CostReasoning.ExportProjectID,
+			Dataset: userCfg.CostReasoning.Dataset, Table: userCfg.CostReasoning.Table,
+			MaxBytesBilled: userCfg.CostReasoning.MaxBytesBilled,
+		}))
+		log.Info("cost reasoning enabled", "export_project", userCfg.CostReasoning.ExportProjectID, "dataset", userCfg.CostReasoning.Dataset)
 	}
 
 	// RECOMMENDER_BQ_EXPORT_ENABLED/DATASET override yaml config.
@@ -159,6 +185,11 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		mcpOpts = append(mcpOpts, mcpserver.WithRecommenderExport())
 		log.Info("recommender BigQuery export enabled", "dataset", userCfg.RecommenderExport.Dataset)
 	}
+	if costModuleEnabled {
+		mcpOpts = append(mcpOpts, mcpserver.WithCostReasoning(costreasoning.Config{
+			Timezone: userCfg.CostReasoning.Timezone, HistoryDays: userCfg.CostReasoning.HistoryDays,
+		}))
+	}
 	s := mcpserver.New(gcpSvc, log, version, mcpOpts...)
 
 	switch os.Getenv("MCP_TRANSPORT") {
@@ -203,6 +234,58 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 			os.Exit(1)
 		}
 	}
+}
+
+func applyCostReasoningEnv(cfg *config.CostReasoningConfig) error {
+	if cfg == nil {
+		return errors.New("configuration is nil")
+	}
+	if value := os.Getenv("COST_REASONING_ENABLED"); value != "" {
+		switch value {
+		case "true":
+			cfg.Enabled = true
+		case "false":
+			cfg.Enabled = false
+		default:
+			return fmt.Errorf("COST_REASONING_ENABLED must be 'true' or 'false'")
+		}
+	}
+	stringOverrides := []struct {
+		name   string
+		target *string
+	}{
+		{"COST_QUERY_PROJECT_ID", &cfg.QueryProjectID},
+		{"BILLING_EXPORT_PROJECT_ID", &cfg.ExportProjectID},
+		{"BILLING_EXPORT_DATASET", &cfg.Dataset},
+		{"BILLING_EXPORT_TABLE", &cfg.Table},
+		{"COST_REASONING_TIMEZONE", &cfg.Timezone},
+	}
+	for _, override := range stringOverrides {
+		if value := os.Getenv(override.name); value != "" {
+			*override.target = value
+		}
+	}
+	if value := os.Getenv("COST_QUERY_MAX_BYTES"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed <= 0 {
+			return fmt.Errorf("COST_QUERY_MAX_BYTES must be a positive integer")
+		}
+		cfg.MaxBytesBilled = parsed
+	}
+	if value := os.Getenv("COST_REASONING_HISTORY_DAYS"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 14 || parsed > 366 {
+			return fmt.Errorf("COST_REASONING_HISTORY_DAYS must be between 14 and 366")
+		}
+		cfg.HistoryDays = parsed
+	}
+	if cfg.HistoryDays != 0 && (cfg.HistoryDays < 14 || cfg.HistoryDays > 366) {
+		return fmt.Errorf("history_days must be between 14 and 366")
+	}
+	if cfg.MaxBytesBilled < 0 {
+		return fmt.Errorf("max_bytes_billed must be positive")
+	}
+	return nil
 }
 
 // buildAnonymizer constructs the configured Anonymizer and returns a cleanup function.

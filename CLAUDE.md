@@ -36,6 +36,8 @@ internal/mcp/  NEVER imports internal/gcp/
 
 `go build ./internal/mcp/...` compiles zero GCP SDK code.
 
+Application-layer correlation engines live between MCP and the port: `internal/diagnostics` for incidents and `internal/costreasoning` for cost explanations. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
+
 ## Environment Variables
 
 | Variable | Required | Description |
@@ -48,6 +50,14 @@ internal/mcp/  NEVER imports internal/gcp/
 | `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Enriches Aura Scores with idle/overprovisioned signals; 12h cache prevents quota exhaustion. |
 | `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name for the recommendations export (overrides `recommender_export.dataset` in YAML). |
+| `COST_REASONING_ENABLED` | No | Set `true` to register the read-only `gcp_cost_explain` tool. Off by default. |
+| `COST_QUERY_PROJECT_ID` | No | Project that owns BigQuery query jobs. Defaults to `GCP_PROJECT_ID`. |
+| `BILLING_EXPORT_PROJECT_ID` | No | Project containing the detailed billing export. Defaults to the query project. |
+| `BILLING_EXPORT_DATASET` | Cost only | Required dataset containing `gcp_billing_export_resource_v1_*`. |
+| `BILLING_EXPORT_TABLE` | No | Optional exact detailed billing table; otherwise the sole matching table is discovered. |
+| `COST_REASONING_TIMEZONE` | No | IANA timezone for complete-day comparisons. Default `UTC`. |
+| `COST_REASONING_HISTORY_DAYS` | No | Billing history window, 14–366 days. Default 90. |
+| `COST_QUERY_MAX_BYTES` | No | Per-statement BigQuery bytes-billed ceiling. Default 5 GiB. |
 
 ## User Config File
 
@@ -59,13 +69,23 @@ project_id: my-gcp-project-id   # fallback when GCP_PROJECT_ID is not set
 recommender_export:
   enabled: false      # set true to enable gcp_export_recommendations_to_bq
   dataset: ""         # BigQuery dataset name
+
+cost_reasoning:
+  enabled: false
+  query_project_id: finops-project
+  export_project_id: finops-project
+  dataset: cloud_billing
+  table: ""
+  timezone: UTC
+  history_days: 90
+  max_bytes_billed: 5368709120
 ```
 
 ## CLI Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Incident correlation: `incident`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
+| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Correlation/reasoning: `incident`, `cost`; `cost` also requires `COST_REASONING_ENABLED=true`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
 | `--version` | — | Print version and exit. |
 
 ## README Hygiene

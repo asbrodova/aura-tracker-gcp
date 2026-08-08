@@ -477,3 +477,12 @@ func (s *stubService) ListTaggedResources(_ context.Context, _ models.ListTagged
 func (s *stubService) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
 	return models.ExportRecommendationsToBQResponse{}, nil
 }
+func (s *stubService) CollectCostFacts(_ context.Context, _ models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
+	return models.BillingCostFacts{}, nil
+}
+func (s *stubService) ListCostRecommendations(_ context.Context, _ models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error) {
+	return models.ListCostRecommendationsResponse{}, nil
+}
+func (s *stubService) ListCreatedAssets(_ context.Context, _ models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error) {
+	return models.ListCreatedAssetsResponse{}, nil
+}

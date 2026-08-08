@@ -35,13 +35,25 @@ var allKnownPermissions = []string{
 	"resourcemanager.projects.get",
 	"resourcemanager.projects.getIamPolicy",
 	// Recommender
-	"recommender.runServiceRecommendations.list",
-	"recommender.cloudsqlInstanceRecommendations.list",
+	"recommender.runServiceCostRecommendations.list",
+	"recommender.cloudsqlIdleInstanceRecommendations.list",
+	"recommender.cloudsqlOverprovisionedInstanceRecommendations.list",
+	"recommender.computeInstanceIdleResourceRecommendations.list",
+	"recommender.computeDiskIdleResourceRecommendations.list",
+	"recommender.computeAddressIdleResourceRecommendations.list",
+	"recommender.computeImageIdleResourceRecommendations.list",
+	"recommender.computeIdleResourceRecommendations.list",
+	"recommender.containerDiagnosisRecommendations.list",
 	// BigQuery
+	"bigquery.jobs.create",
 	"bigquery.datasets.get",
 	"bigquery.datasets.getIamPolicy",
 	"bigquery.tables.list",
 	"bigquery.tables.get",
+	"bigquery.tables.getData",
+	// Cost reasoning enrichment
+	"cloudasset.assets.searchAllResources",
+	"serviceusage.services.use",
 	// Cloud Storage
 	"storage.buckets.list",
 	"storage.buckets.get",
