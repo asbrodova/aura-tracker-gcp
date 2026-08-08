@@ -13,7 +13,7 @@
 
 `aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with mandatory human approval before any infrastructure change.
 
-**70 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 28 Modules**
+**71 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 28 Modules**
 
 > For architecture deep-dives, per-service guides, and full configuration reference, see the **[GitHub Wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)**.
 
@@ -38,7 +38,7 @@ Cost-bearing integrations and sensitive-data features have explicit controls:
 | PII / credential scrubbing | `ANONYMIZE_ENABLED` | off |
 | HITL mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
 
-Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. Cost reasoning is off by default because it runs chargeable BigQuery queries. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); the default 68 others—and the optional cost tool—are strictly read-only calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
+Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. Cost reasoning is off by default because it runs chargeable BigQuery queries. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); the default 69 others—and the optional cost tool—are strictly read-only calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
 
 ### Human-in-the-Loop for Every Mutation
 
@@ -53,7 +53,7 @@ Calling a mutation tool without a plan returns a `confirmation required` error w
 
 ### Token Efficiency: Load Only What You Need
 
-All 70 default tools are registered when `--modules` is omitted. The cost tool is registered only when its feature flag and export configuration are present. Use `--modules` to load only the services relevant to your workflow—each excluded module also skips its GCP client connections at startup:
+All 71 default tools are registered when `--modules` is omitted. The cost tool is registered only when its feature flag and export configuration are present. Use `--modules` to load only the services relevant to your workflow—each excluded module also skips its GCP client connections at startup:
 
 ```json
 "args": ["--modules=cloudrun,aura,monitoring,iam"]
@@ -67,8 +67,9 @@ All 70 default tools are registered when `--modules` is omitted. The cost tool i
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | Data / logging | `logging,monitoring,iam` | 4 |
 | Storage inspection | `storage` | 3 |
+| Production architecture diagram | `archgraph` | 2 |
 | Cost investigation | `cost` | 1 (requires `COST_REASONING_ENABLED=true`) |
-| Full toolkit | *(omit flag)* | 70 (71 if cost reasoning is enabled) |
+| Full toolkit | *(omit flag)* | 71 (72 if cost reasoning is enabled) |
 
 See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
 
@@ -150,7 +151,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 70 base tools are registered. Use the `--modules` flag to load only the services you work with—each excluded module also skips its GCP client connection at startup. The opt-in cost tool is additional.
+By default all 71 base tools are registered. Use the `--modules` flag to load only the services you work with—each excluded module also skips its GCP client connection at startup. The opt-in cost tool is additional.
 
 ```json
 {
@@ -175,9 +176,10 @@ Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `sch
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Storage inspection | `storage` | 3 |
+| Production architecture diagram | `archgraph` | 2 |
 | Data / logging | `logging,monitoring,iam` | 4 |
 | Cost investigation | `cost` | 1 (opt-in) |
-| Full toolkit | *(omit flag)* | 70 (71 if cost reasoning is enabled) |
+| Full toolkit | *(omit flag)* | 71 (72 if cost reasoning is enabled) |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
@@ -503,7 +505,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 
 ## Tools
 
-70 base tools plus one opt-in cost-reasoning tool across 28 module flags. Load only what you need with `--modules`.
+71 base tools plus one opt-in cost-reasoning tool across 28 module flags. Load only what you need with `--modules`.
 
 | Module | Flag | Tools | Mutation? |
 |---|---|---|---|
@@ -529,7 +531,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 | Data Stores | `datastores` | 4 | — |
 | Supply Chain | `supplychain` | 4 | — |
 | Serverless Graph | `serverlessgraph` | 1 | — |
-| Architecture Graph | `archgraph` | 1 | — |
+| Architecture Graph & Diagrams | `archgraph` | 2 | — |
 | Observability Coverage | `coverage` | 1 | — |
 | Resource Tagging | `tagging` | 1 | — |
 | Incident Diagnosis | `incident` | 1 | — |
@@ -549,10 +551,19 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 > "Which Cloud Run services have an error rate above 1% right now?"
 
 ### Infrastructure Exploration
+> "Show my production architecture."
+> "Show my production architecture as Graphviz."
+> "Generate an SVG diagram of the whole project, grouped by region."
 > "What does the payment-service depend on? Show me its full dependency graph."  
 > "List all Pub/Sub topics with subscription lag above 10,000 unacked messages."  
 > "What IAM permissions does my current service account have — and what's missing?"  
 > "Export a full serverless event graph for my-project."
+
+### Automatic Architecture Diagrams
+
+`gcp_generate_architecture_diagram` turns the live project graph into Mermaid (default), Graphviz DOT, or SVG. Production scope is inferred only from `env`, `environment`, or `stage` labels with `prod`/`production` values and exact `prod`/`production` GKE namespaces. Connected entrypoints and dependencies are included; explicitly labelled cross-environment resources are surfaced with a warning.
+
+Mermaid and Graphviz DOT require no extra runtime. SVG uses the Graphviz `dot` executable: it is included in the official container, auto-discovered on `PATH` for local installs, or can be configured with `GRAPHVIZ_DOT_PATH`. If no production scope can be inferred, the tool returns `needs_scope` with discovered environment candidates instead of silently diagramming the entire project.
 
 ### Cost & Efficiency
 > "Why did costs increase in the last 7 complete days? Rank the drivers and show the evidence."
@@ -775,7 +786,8 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `COST_QUERY_MAX_BYTES` | No | Positive per-statement BigQuery maximum bytes billed. Default: `5368709120` (5 GiB). |
 | `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
 | `TRACE_BACKEND` | No | Backend for `gcp_trace_list_services`: `trace` (Cloud Trace v1 REST, default) or `monitoring` (Monitoring metric proxy). Use `monitoring` if Cloud Trace API is disabled but OpenCensus/OpenTelemetry metrics exist. |
-| `GRAPH_TIMEOUT_SECONDS` | No | Outer context timeout in seconds for `gcp_export_serverless_graph`. Default: `120`. Individual sub-calls still use `callTimeout` (30 s). |
+| `GRAPH_TIMEOUT_SECONDS` | No | Outer context timeout in seconds for graph exports and diagram discovery. Default: `120`. Individual sub-calls still use `callTimeout` (30 s). |
+| `GRAPHVIZ_DOT_PATH` | No | Path to Graphviz `dot` for SVG diagram generation. Auto-discovered on `PATH`; set to `/usr/bin/dot` in the official container. Mermaid and Graphviz DOT source do not require it. |
 | `MCP_TRANSPORT` | No | Transport mode: `stdio` (default, for Claude Desktop) or `sse` (for Cloud Run / web-based MCP clients) |
 | `PORT` | No | HTTP port when `MCP_TRANSPORT=sse`. Cloud Run sets this automatically. Defaults to `8080`. |
 | `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Required for correct SSE endpoint URLs when deployed to Cloud Run. Defaults to `http://localhost:PORT` for local testing. |
@@ -850,9 +862,9 @@ The server runs under a specific service account (Application Default Credential
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
 - **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **Read-only guarantees**: all 68 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Read-only guarantees**: all 69 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all registered tools (70 by default, 71 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all registered tools (71 by default, 72 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -1033,14 +1045,14 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 │              workflows · tasks · pubsub · secretmanager           │
 │              vpcaccess · cloudsql · logging · monitoring          │
 │              iam · topology · aura · storage · serverlessgraph    │
-│              incident · cost                                      │
+│              archgraph · incident · cost                          │
 │   resources/ bigquery · cloudrun · storage · iam                 │
 │   prompts/   audit-security · optimize-bq · incident-response    │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ correlation / reasoning paths ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
-│ internal/diagnostics/ · internal/costreasoning/                  │
-│ scopes · windows · collectors · detectors · evidence scoring    │
+│ internal/diagnostics/ · internal/costreasoning/ · internal/diagram/│
+│ scopes · collectors · evidence scoring · deterministic renderers │
 │ partial failures become explicit coverage gaps                  │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ narrow DataSource; other tools call ▼
@@ -1102,6 +1114,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
 
 ## Project Layout
 
-The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident correlation; `internal/costreasoning` owns complete-day windows, deterministic cost attribution, confidence, and coverage. Neither imports MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
+The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident correlation; `internal/costreasoning` owns complete-day windows and deterministic cost attribution; `internal/diagram` owns environment scoping and deterministic Mermaid, Graphviz, and SVG rendering. None imports MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
 
 → Full annotated project layout and contributor guide: [Architecture & Contributing](https://github.com/asbrodova/aura-tracker-gcp/wiki/Architecture-and-Contributing)

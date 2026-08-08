@@ -16,13 +16,19 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./cmd/aura-tracker-gcp
 
 # ── Runtime ───────────────────────────────────────────────────────────────────
-# distroless/static has no shell or libc; runs as non-root (uid 65532) by default.
-FROM gcr.io/distroless/static-debian12
+# Graphviz powers the optional SVG renderer. The process still runs as the
+# distroless-compatible non-root uid/gid 65532.
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates graphviz
 
 COPY --from=builder /out/aura-tracker-gcp /aura-tracker-gcp
 
 # These must be overridden at runtime with -e flags.
 ENV GCP_PROJECT_ID=""
 ENV GOOGLE_APPLICATION_CREDENTIALS=""
+ENV GRAPHVIZ_DOT_PATH="/usr/bin/dot"
+
+USER 65532:65532
 
 ENTRYPOINT ["/aura-tracker-gcp"]

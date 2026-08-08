@@ -36,7 +36,7 @@ internal/mcp/  NEVER imports internal/gcp/
 
 `go build ./internal/mcp/...` compiles zero GCP SDK code.
 
-Application-layer correlation engines live between MCP and the port: `internal/diagnostics` for incidents and `internal/costreasoning` for cost explanations. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
+Application-layer engines live between MCP and the port: `internal/diagnostics` for incidents, `internal/costreasoning` for cost explanations, and `internal/diagram` for architecture scoping and deterministic rendering. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
 
 ## Environment Variables
 
@@ -58,6 +58,7 @@ Application-layer correlation engines live between MCP and the port: `internal/d
 | `COST_REASONING_TIMEZONE` | No | IANA timezone for complete-day comparisons. Default `UTC`. |
 | `COST_REASONING_HISTORY_DAYS` | No | Billing history window, 14–366 days. Default 90. |
 | `COST_QUERY_MAX_BYTES` | No | Per-statement BigQuery bytes-billed ceiling. Default 5 GiB. |
+| `GRAPHVIZ_DOT_PATH` | No | Path to Graphviz `dot` for SVG architecture diagrams. Mermaid and Graphviz DOT source do not require it. |
 
 ## User Config File
 
