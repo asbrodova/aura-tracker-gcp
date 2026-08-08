@@ -23,6 +23,7 @@ const (
 
 	// Phase 2 kinds — GKE workloads
 	KindGKEDeployment    = "gke_deployment"
+	KindGKECluster       = "gke_cluster"
 	KindGKEStatefulSet   = "gke_statefulset"
 	KindGKEDaemonSet     = "gke_daemonset"
 	KindGKECronJob       = "gke_cronjob"
@@ -205,6 +206,7 @@ type ServerlessGraph struct {
 	RegionsScanned []string `json:"regions_scanned,omitempty"` // GCP regions included
 	LookbackHours  int      `json:"lookback_hours,omitempty"`  // trace/log lookback window
 	ToolVersion    string   `json:"tool_version,omitempty"`    // server version for reproducibility
+	Truncated      bool     `json:"truncated,omitempty"`       // true when a view cap omitted nodes
 }
 
 // ExportServerlessGraphRequest is the input for gcp_export_serverless_graph.

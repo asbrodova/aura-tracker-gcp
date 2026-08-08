@@ -108,7 +108,7 @@ func WithTraceBackend(backend string) Option {
 	return func(a *gcpAdapter) { a.traceBackend = backend }
 }
 
-// WithGraphTimeout sets the outer context timeout for gcp_export_serverless_graph.
+// WithGraphTimeout sets the outer context timeout for graph exports and diagram discovery.
 // Each individual sub-call still uses the per-call callTimeout (default 30s).
 // Default: 120 seconds.
 func WithGraphTimeout(d time.Duration) Option {

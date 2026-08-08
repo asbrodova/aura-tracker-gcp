@@ -23,6 +23,12 @@ type ResolutionInput struct {
 	// service URL matching (triggers edges).
 	Subscriptions []SubscriptionSummary
 
+	// Event-driven configuration used by Pass 1 for deterministic trigger,
+	// topic, subscription, and dead-letter relationships.
+	Triggers      []TriggerSummary
+	SchedulerJobs []SchedulerJobSummary
+	Topics        []TopicSummary
+
 	// Mesh edges from gcp_gke_get_mesh_topology — used by Pass 3.
 	MeshEdges []GKEMeshEdge
 

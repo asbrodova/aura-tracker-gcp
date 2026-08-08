@@ -27,11 +27,12 @@ func (a *gcpAdapter) ListClusters(ctx context.Context, req models.ListClustersRe
 	}
 	for _, c := range resp.Clusters {
 		result.Clusters = append(result.Clusters, models.ClusterSummary{
-			Name:       c.Name,
-			Location:   c.Location,
-			Status:     c.Status.String(),
-			NodeCount:  c.CurrentNodeCount,
-			K8sVersion: c.CurrentMasterVersion,
+			Name:           c.Name,
+			Location:       c.Location,
+			Status:         c.Status.String(),
+			NodeCount:      c.CurrentNodeCount,
+			K8sVersion:     c.CurrentMasterVersion,
+			ResourceLabels: c.ResourceLabels,
 		})
 	}
 	return result, nil
@@ -66,16 +67,16 @@ func (a *gcpAdapter) GetClusterDetails(ctx context.Context, req models.GetCluste
 
 	return models.ClusterDetails{
 		ClusterSummary: models.ClusterSummary{
-			Name:       c.Name,
-			Location:   c.Location,
-			Status:     c.Status.String(),
-			NodeCount:  c.CurrentNodeCount,
-			K8sVersion: c.CurrentMasterVersion,
+			Name:           c.Name,
+			Location:       c.Location,
+			Status:         c.Status.String(),
+			NodeCount:      c.CurrentNodeCount,
+			K8sVersion:     c.CurrentMasterVersion,
+			ResourceLabels: c.ResourceLabels,
 		},
-		NodePools:      pools,
-		Endpoint:       c.Endpoint,
-		CreateTime:     c.CreateTime,
-		ResourceLabels: c.ResourceLabels,
+		NodePools:  pools,
+		Endpoint:   c.Endpoint,
+		CreateTime: c.CreateTime,
 	}, nil
 }
 

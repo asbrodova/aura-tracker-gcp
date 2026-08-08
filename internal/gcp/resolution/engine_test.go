@@ -124,6 +124,44 @@ func TestPass1_PubSubPushEndpoint(t *testing.T) {
 	}
 }
 
+func TestPass1_EventDrivenEdges(t *testing.T) {
+	trigger := node("trigger-id", models.KindEventarcTrigger, "orders-trigger", "proj")
+	scheduler := node("scheduler-id", models.KindSchedulerJob, "nightly", "proj")
+	subscription := node("subscription-id", models.KindPubSubSubscription, "orders-sub", "proj")
+	topic := node("topic-id", models.KindPubSubTopic, "orders", "proj")
+	deadLetter := node("dead-letter-id", models.KindPubSubTopic, "orders-dead", "proj")
+	service := node("service-id", models.KindCloudRunService, "orders-api", "proj")
+	service.URL = "https://orders-api.example.run.app"
+
+	out := resolution.Resolve(models.ResolutionInput{
+		Nodes: []models.GraphNode{trigger, scheduler, subscription, topic, deadLetter, service},
+		Triggers: []models.TriggerSummary{{
+			Name: "orders-trigger", DestinationURN: "orders-api",
+			TransportTopic: "projects/proj/topics/orders",
+		}},
+		SchedulerJobs: []models.SchedulerJobSummary{{
+			Name: "nightly", TargetKind: "http", TargetRef: "https://orders-api.example.run.app/tasks/nightly",
+		}},
+		Subscriptions: []models.SubscriptionSummary{{
+			Name: "orders-sub", Topic: "orders", DeadLetterTopic: "projects/proj/topics/orders-dead",
+		}},
+	})
+
+	for _, want := range []struct {
+		source, target, edgeType string
+	}{
+		{trigger.ID, service.ID, models.EdgeTriggers},
+		{trigger.ID, topic.ID, models.EdgeRoutesTo},
+		{scheduler.ID, service.ID, models.EdgeTriggers},
+		{subscription.ID, topic.ID, models.EdgeSubscribesTo},
+		{subscription.ID, deadLetter.ID, models.EdgeDeadLettersTo},
+	} {
+		if findEdge(out.Edges, want.source, want.target, want.edgeType) == nil {
+			t.Errorf("missing %s edge %s -> %s in %+v", want.edgeType, want.source, want.target, out.Edges)
+		}
+	}
+}
+
 // ─── Pass 2 ───────────────────────────────────────────────────────────────────
 
 func TestPass2_IAMSpannerBinding(t *testing.T) {

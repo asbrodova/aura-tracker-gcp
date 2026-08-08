@@ -15,7 +15,6 @@ import (
 
 const (
 	archGraphCacheTTL = 5 * time.Minute
-	archGraphTimeout  = 240 * time.Second
 	batch1Concurrency = 20
 	batch2Concurrency = 6
 )
@@ -23,10 +22,10 @@ const (
 func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.ExportArchitectureGraphRequest) (models.ServerlessGraph, error) {
 	cacheKey := archGraphCacheKey(req)
 	if cached, ok := a.graphCache.get(cacheKey); ok {
-		return filterExternal(cached, req.IncludeExternal), nil
+		return applyArchitectureGraphView(cached, req), nil
 	}
 
-	outerCtx, cancel := context.WithTimeout(ctx, archGraphTimeout)
+	outerCtx, cancel := context.WithTimeout(ctx, a.graphTimeout)
 	defer cancel()
 
 	lookbackHours := req.LookbackHours
@@ -41,6 +40,9 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 
 		// For the resolution engine
 		subscriptions []models.SubscriptionSummary
+		triggers      []models.TriggerSummary
+		schedulerJobs []models.SchedulerJobSummary
+		topics        []models.TopicSummary
 		workloads     []models.GKEWorkloadSummary
 		k8sServices   []models.GKEServiceSummary
 		ingresses     []models.GKEIngressSummary
@@ -84,7 +86,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			node := models.GraphNode{
 				ID:   graphURN("run", s.Region, req.ProjectID, models.KindCloudRunService, s.Name),
 				Kind: models.KindCloudRunService, Name: s.Name,
-				Region: s.Region, ProjectID: req.ProjectID, URL: s.URL,
+				Region: s.Region, ProjectID: req.ProjectID, URL: s.URL, Labels: s.Labels,
 			}
 			addNode(node)
 		}
@@ -100,7 +102,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			addNode(models.GraphNode{
 				ID:   graphURN("run", j.Region, req.ProjectID, models.KindCloudRunJob, j.Name),
 				Kind: models.KindCloudRunJob, Name: j.Name,
-				Region: j.Region, ProjectID: req.ProjectID,
+				Region: j.Region, ProjectID: req.ProjectID, Labels: j.Labels,
 			})
 		}
 		return nil
@@ -119,7 +121,8 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			addNode(models.GraphNode{
 				ID:   graphURN("cloudfunctions", f.Region, req.ProjectID, kind, f.Name),
 				Kind: kind, Name: f.Name,
-				Region: f.Region, ProjectID: req.ProjectID,
+				Region: f.Region, ProjectID: req.ProjectID, URL: f.URL,
+				Generation: f.Generation, Labels: f.Labels,
 			})
 		}
 		return nil
@@ -134,9 +137,13 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			addNode(models.GraphNode{
 				ID:   graphURN("eventarc", t.Region, req.ProjectID, models.KindEventarcTrigger, t.Name),
 				Kind: models.KindEventarcTrigger, Name: t.Name,
-				Region: t.Region, ProjectID: req.ProjectID,
+				Region: t.Region, ProjectID: req.ProjectID, Labels: t.Labels,
+				ServiceAccount: t.ServiceAccount,
 			})
 		}
+		mu.Lock()
+		triggers = r.Triggers
+		mu.Unlock()
 		return nil
 	})
 	b1.Go(func() error {
@@ -152,6 +159,9 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 				Region: j.Region, ProjectID: req.ProjectID,
 			})
 		}
+		mu.Lock()
+		schedulerJobs = r.Jobs
+		mu.Unlock()
 		return nil
 	})
 	b1.Go(func() error {
@@ -164,7 +174,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			addNode(models.GraphNode{
 				ID:   graphURN("workflows", w.Region, req.ProjectID, models.KindWorkflow, w.Name),
 				Kind: models.KindWorkflow, Name: w.Name,
-				Region: w.Region, ProjectID: req.ProjectID,
+				Region: w.Region, ProjectID: req.ProjectID, Labels: w.Labels,
 			})
 		}
 		return nil
@@ -193,7 +203,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 		for _, s := range r.Secrets {
 			addNode(models.GraphNode{
 				ID:   graphURN("secretmanager", "-", req.ProjectID, models.KindSecret, s.Name),
-				Kind: models.KindSecret, Name: s.Name, ProjectID: req.ProjectID,
+				Kind: models.KindSecret, Name: s.Name, ProjectID: req.ProjectID, Labels: s.Labels,
 			})
 		}
 		return nil
@@ -225,7 +235,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			addNode(models.GraphNode{
 				ID:   graphURN("vpcaccess", c.Region, req.ProjectID, models.KindVPCConnector, c.Name),
 				Kind: models.KindVPCConnector, Name: c.Name,
-				Region: c.Region, ProjectID: req.ProjectID,
+				Region: c.Region, ProjectID: req.ProjectID, Network: c.Network,
 			})
 		}
 		return nil
@@ -240,7 +250,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 			addNode(models.GraphNode{
 				ID:   graphURN("sqladmin", s.Region, req.ProjectID, models.KindCloudSQLInstance, s.Name),
 				Kind: models.KindCloudSQLInstance, Name: s.Name,
-				Region: s.Region, ProjectID: req.ProjectID,
+				Region: s.Region, ProjectID: req.ProjectID, Labels: s.Labels,
 			})
 		}
 		return nil
@@ -254,9 +264,12 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 		for _, t := range r.Topics {
 			addNode(models.GraphNode{
 				ID:   graphURN("pubsub", "-", req.ProjectID, models.KindPubSubTopic, t.Name),
-				Kind: models.KindPubSubTopic, Name: t.Name, ProjectID: req.ProjectID,
+				Kind: models.KindPubSubTopic, Name: t.Name, ProjectID: req.ProjectID, Labels: t.Labels,
 			})
 		}
+		mu.Lock()
+		topics = r.Topics
+		mu.Unlock()
 		return nil
 	})
 
@@ -500,9 +513,9 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 		}
 		for _, c := range r.Clusters {
 			addNode(models.GraphNode{
-				ID:   graphURN("container", c.Location, req.ProjectID, "gke_cluster", c.Name),
-				Kind: "gke_cluster", Name: c.Name,
-				Region: c.Location, ProjectID: req.ProjectID,
+				ID:   graphURN("container", c.Location, req.ProjectID, models.KindGKECluster, c.Name),
+				Kind: models.KindGKECluster, Name: c.Name,
+				Region: c.Location, ProjectID: req.ProjectID, Labels: c.ResourceLabels,
 			})
 		}
 		return nil
@@ -518,7 +531,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	var clusters []models.GraphNode
 	mu.Lock()
 	for _, n := range allNodes {
-		if n.Kind == "gke_cluster" {
+		if n.Kind == models.KindGKECluster {
 			clusters = append(clusters, n)
 		}
 	}
@@ -548,7 +561,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 						Region: cl.Region, ProjectID: req.ProjectID,
 						Namespace: w.Namespace, ClusterName: cl.Name,
 						Image: w.Image, Replicas: w.Replicas,
-						ServiceAccount: w.ServiceAccount,
+						ServiceAccount: w.ServiceAccount, Labels: w.Labels,
 					})
 				}
 				return nil
@@ -569,7 +582,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 						ID:   graphURN("k8s", cl.Region, req.ProjectID, models.KindGKEService, cl.Name+"/"+svc.Namespace+"/"+svc.Name),
 						Kind: models.KindGKEService, Name: svc.Name,
 						Region: cl.Region, ProjectID: req.ProjectID,
-						Namespace: svc.Namespace, ClusterName: cl.Name,
+						Namespace: svc.Namespace, ClusterName: cl.Name, Labels: svc.Labels,
 					})
 				}
 				return nil
@@ -590,7 +603,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 						ID:   graphURN("k8s", cl.Region, req.ProjectID, ing.Kind, cl.Name+"/"+ing.Namespace+"/"+ing.Name),
 						Kind: ing.Kind, Name: ing.Name,
 						Region: cl.Region, ProjectID: req.ProjectID,
-						Namespace: ing.Namespace, ClusterName: cl.Name,
+						Namespace: ing.Namespace, ClusterName: cl.Name, Labels: ing.Labels,
 					})
 				}
 				return nil
@@ -663,9 +676,12 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 		K8sServices:            k8sServices,
 		Ingresses:              ingresses,
 		Subscriptions:          subscriptions,
+		Triggers:               triggers,
+		SchedulerJobs:          schedulerJobs,
+		Topics:                 topics,
 		MeshEdges:              meshEdges,
 		TraceEdges:             traceEdges,
-		IncludeExternal:        req.IncludeExternal,
+		IncludeExternal:        true,
 		EnableFlowLogInference: req.EnableFlowLogInference,
 	})
 
@@ -674,15 +690,16 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 		nodeSlice = append(nodeSlice, n)
 	}
 
-	// Apply max_nodes cap.
-	if req.MaxNodes > 0 && len(nodeSlice) > req.MaxNodes {
-		nodeSlice = nodeSlice[:req.MaxNodes]
-	}
-
 	// ────────────────────────────────────────────────────────────────────
 	// Build groups
 	// ────────────────────────────────────────────────────────────────────
 	groups := buildArchGroups(req.ProjectID, nodeSlice)
+	sort.Slice(errs, func(i, j int) bool {
+		if errs[i].FailingAPI != errs[j].FailingAPI {
+			return errs[i].FailingAPI < errs[j].FailingAPI
+		}
+		return errs[i].Message < errs[j].Message
+	})
 
 	graph := models.ServerlessGraph{
 		Nodes:         nodeSlice,
@@ -699,7 +716,7 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	}
 
 	a.graphCache.set(cacheKey, graph)
-	return filterExternal(graph, req.IncludeExternal), nil
+	return applyArchitectureGraphView(graph, req), nil
 }
 
 func buildArchGroups(projectID string, nodes []models.GraphNode) []models.GraphGroup {
@@ -758,25 +775,15 @@ func buildArchGroups(projectID string, nodes []models.GraphNode) []models.GraphG
 	return groups
 }
 
-func filterExternal(g models.ServerlessGraph, include bool) models.ServerlessGraph {
-	if include {
-		return g
-	}
-	filtered := make([]models.GraphNode, 0, len(g.Nodes))
-	for _, n := range g.Nodes {
-		if n.Kind != models.KindExternalEndpoint {
-			filtered = append(filtered, n)
-		}
-	}
-	g.Nodes = filtered
-	return g
-}
-
 func archGraphCacheKey(req models.ExportArchitectureGraphRequest) string {
 	regions := make([]string, len(req.Regions))
 	copy(regions, req.Regions)
 	sort.Strings(regions)
-	key := req.ProjectID
+	lookback := req.LookbackHours
+	if lookback <= 0 {
+		lookback = 168
+	}
+	key := fmt.Sprintf("%s:lookback=%d:flowlogs=%t", req.ProjectID, lookback, req.EnableFlowLogInference)
 	for _, r := range regions {
 		key += ":" + r
 	}

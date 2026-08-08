@@ -24,8 +24,10 @@ func (a *gcpAdapter) ListSQLInstances(ctx context.Context, req models.ListSQLIns
 	instances := make([]models.SQLInstanceSummary, 0, len(resp.Items))
 	for _, inst := range resp.Items {
 		tier := ""
+		var labels map[string]string
 		if inst.Settings != nil {
 			tier = inst.Settings.Tier
+			labels = inst.Settings.UserLabels
 		}
 		instances = append(instances, models.SQLInstanceSummary{
 			Name:            inst.Name,
@@ -33,6 +35,7 @@ func (a *gcpAdapter) ListSQLInstances(ctx context.Context, req models.ListSQLIns
 			Region:          inst.Region,
 			State:           inst.State,
 			Tier:            tier,
+			Labels:          labels,
 		})
 	}
 	return models.ListSQLInstancesResponse{Instances: instances}, nil

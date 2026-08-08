@@ -7,11 +7,12 @@ type ListClustersRequest struct {
 }
 
 type ClusterSummary struct {
-	Name       string `json:"name"`
-	Location   string `json:"location"`
-	Status     string `json:"status"`
-	NodeCount  int32  `json:"node_count"`
-	K8sVersion string `json:"kubernetes_version"`
+	Name           string            `json:"name"`
+	Location       string            `json:"location"`
+	Status         string            `json:"status"`
+	NodeCount      int32             `json:"node_count"`
+	K8sVersion     string            `json:"kubernetes_version"`
+	ResourceLabels map[string]string `json:"resource_labels,omitempty"`
 }
 
 type ListClustersResponse struct {
@@ -33,10 +34,9 @@ type NodePoolSummary struct {
 
 type ClusterDetails struct {
 	ClusterSummary
-	NodePools      []NodePoolSummary `json:"node_pools"`
-	Endpoint       string            `json:"endpoint"`
-	CreateTime     string            `json:"create_time"`
-	ResourceLabels map[string]string `json:"resource_labels,omitempty"`
+	NodePools  []NodePoolSummary `json:"node_pools"`
+	Endpoint   string            `json:"endpoint"`
+	CreateTime string            `json:"create_time"`
 }
 
 type GetClusterBottlenecksRequest struct {

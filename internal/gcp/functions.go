@@ -76,6 +76,7 @@ func (a *gcpAdapter) listFunctionsV1(ctx context.Context, projectID, region stri
 				Runtime:    fn.Runtime,
 				Status:     fn.Status,
 				URL:        url,
+				Labels:     fn.Labels,
 			})
 		}
 		return nil
@@ -123,6 +124,7 @@ func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region stri
 			Status:       svc.TerminalCondition.GetMessage(),
 			LastModified: lastMod,
 			URL:          svc.Uri,
+			Labels:       svc.Labels,
 		})
 	}
 	return funcs, nil
@@ -187,11 +189,11 @@ func (a *gcpAdapter) getFunctionDetailsV2(ctx context.Context, req models.GetFun
 			Generation:   2,
 			LastModified: lastMod,
 			URL:          svc.Uri,
+			Labels:       svc.Labels,
 		},
 		EntryPoint:      image,
 		ServiceAccount:  sa,
 		VPCConnector:    vpcConn,
-		Labels:          svc.Labels,
 		CloudRunService: svc.Name,
 	}, nil
 }
@@ -222,13 +224,13 @@ func (a *gcpAdapter) getFunctionDetailsV1(ctx context.Context, req models.GetFun
 			Runtime:    fn.Runtime,
 			Status:     fn.Status,
 			URL:        httpsURL,
+			Labels:     fn.Labels,
 		},
 		EntryPoint:     fn.EntryPoint,
 		Memory:         fmt.Sprintf("%dMB", fn.AvailableMemoryMb),
 		Timeout:        fn.Timeout,
 		ServiceAccount: fn.ServiceAccountEmail,
 		VPCConnector:   fn.VpcConnector,
-		Labels:         fn.Labels,
 	}, nil
 }
 

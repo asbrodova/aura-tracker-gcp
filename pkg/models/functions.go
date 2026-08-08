@@ -2,24 +2,24 @@ package models
 
 // FunctionSummary is a lightweight view of a Cloud Function (Gen 1 or Gen 2).
 type FunctionSummary struct {
-	Name         string `json:"name"`
-	Region       string `json:"region"`
-	Generation   int    `json:"generation"`
-	Runtime      string `json:"runtime"`
-	Status       string `json:"status"`
-	LastModified string `json:"last_modified,omitempty"`
-	URL          string `json:"url,omitempty"`
+	Name         string            `json:"name"`
+	Region       string            `json:"region"`
+	Generation   int               `json:"generation"`
+	Runtime      string            `json:"runtime"`
+	Status       string            `json:"status"`
+	LastModified string            `json:"last_modified,omitempty"`
+	URL          string            `json:"url,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
 }
 
 // FunctionDetails extends FunctionSummary with full configuration.
 type FunctionDetails struct {
 	FunctionSummary
-	EntryPoint     string            `json:"entry_point,omitempty"`
-	Memory         string            `json:"memory,omitempty"`
-	Timeout        string            `json:"timeout,omitempty"`
-	ServiceAccount string            `json:"service_account,omitempty"`
-	VPCConnector   string            `json:"vpc_connector,omitempty"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	EntryPoint     string `json:"entry_point,omitempty"`
+	Memory         string `json:"memory,omitempty"`
+	Timeout        string `json:"timeout,omitempty"`
+	ServiceAccount string `json:"service_account,omitempty"`
+	VPCConnector   string `json:"vpc_connector,omitempty"`
 	// Gen 2 only: the underlying Cloud Run service resource name.
 	CloudRunService string `json:"cloud_run_service,omitempty"`
 }

@@ -13,8 +13,76 @@ func runPass1(c *resolveCtx) {
 	pass1Workloads(c)
 	pass1K8sServices(c)
 	pass1Ingresses(c)
+	pass1Eventarc(c)
+	pass1Scheduler(c)
+	pass1PubSubTopics(c)
 	pass1PubSubPush(c)
 	pass1PSCEndpoints(c)
+}
+
+// pass1Eventarc wires triggers to their configured destination and transport
+// topic. DestinationURN is a legacy field name; listers currently populate it
+// with either a bare resource name or a GCP resource path.
+func pass1Eventarc(c *resolveCtx) {
+	for _, trigger := range c.in.Triggers {
+		sourceID := c.lookupByName(trigger.Name, models.KindEventarcTrigger)
+		if sourceID == "" {
+			continue
+		}
+		if destination := lastResourceSegment(trigger.DestinationURN); destination != "" {
+			if targetID := c.lookupByName(destination); targetID != "" {
+				c.emit(models.GraphEdge{
+					Source: sourceID, Target: targetID, Type: models.EdgeTriggers,
+					Evidence: models.EvidenceEventarcDestination, Confidence: 0.95,
+				})
+			}
+		}
+		if topic := lastResourceSegment(trigger.TransportTopic); topic != "" {
+			if targetID := c.lookupByName(topic, models.KindPubSubTopic); targetID != "" {
+				c.emit(models.GraphEdge{
+					Source: sourceID, Target: targetID, Type: models.EdgeRoutesTo,
+					Evidence: models.EvidenceEventarcDestination, Confidence: 0.90,
+				})
+			}
+		}
+	}
+}
+
+func pass1Scheduler(c *resolveCtx) {
+	for _, job := range c.in.SchedulerJobs {
+		sourceID := c.lookupByName(job.Name, models.KindSchedulerJob)
+		if sourceID == "" || job.TargetRef == "" {
+			continue
+		}
+		switch job.TargetKind {
+		case "pubsub":
+			if targetID := c.lookupByName(lastResourceSegment(job.TargetRef), models.KindPubSubTopic); targetID != "" {
+				c.emit(models.GraphEdge{Source: sourceID, Target: targetID, Type: models.EdgeTriggers, Evidence: models.EvidenceSchedulerTarget, Confidence: 0.95})
+			}
+		case "http":
+			for _, node := range c.in.Nodes {
+				if node.URL != "" && urlHostMatches(job.TargetRef, node.URL) {
+					c.emit(models.GraphEdge{Source: sourceID, Target: node.ID, Type: models.EdgeTriggers, Evidence: models.EvidenceSchedulerTarget, Confidence: 0.85})
+					break
+				}
+			}
+		}
+	}
+}
+
+func pass1PubSubTopics(c *resolveCtx) {
+	for _, subscription := range c.in.Subscriptions {
+		sourceID := c.lookupByName(subscription.Name, models.KindPubSubSubscription)
+		if sourceID == "" {
+			continue
+		}
+		if topicID := c.lookupByName(lastResourceSegment(subscription.Topic), models.KindPubSubTopic); topicID != "" {
+			c.emit(models.GraphEdge{Source: sourceID, Target: topicID, Type: models.EdgeSubscribesTo, Evidence: models.EvidenceTopicPushEndpoint, Confidence: 0.95})
+		}
+		if deadLetterID := c.lookupByName(lastResourceSegment(subscription.DeadLetterTopic), models.KindPubSubTopic); deadLetterID != "" {
+			c.emit(models.GraphEdge{Source: sourceID, Target: deadLetterID, Type: models.EdgeDeadLettersTo, Evidence: models.EvidenceTopicPushEndpoint, Confidence: 0.95})
+		}
+	}
 }
 
 // pass1Workloads processes GKE workload summaries:
@@ -354,6 +422,17 @@ func extractHost(u string) string {
 		u = u[:i]
 	}
 	return strings.ToLower(u)
+}
+
+func lastResourceSegment(value string) string {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	if value == "" {
+		return ""
+	}
+	if i := strings.LastIndex(value, "/"); i >= 0 {
+		return value[i+1:]
+	}
+	return value
 }
 
 // extractNEGName parses the NEG name from the cloud.google.com/neg annotation
