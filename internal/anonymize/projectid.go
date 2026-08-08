@@ -2,6 +2,7 @@ package anonymize
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -29,12 +30,29 @@ func (m *ProjectIDMasker) Scrub(_ context.Context, result *mcp.CallToolResult) (
 	out.Content = make([]mcp.Content, len(result.Content))
 	copy(out.Content, result.Content)
 	for i, c := range out.Content {
-		tc, ok := c.(mcp.TextContent)
-		if !ok {
-			continue
+		switch content := c.(type) {
+		case mcp.TextContent:
+			content.Text = strings.ReplaceAll(content.Text, m.projectID, "[GCP_PROJECT_ID]")
+			out.Content[i] = content
+		case mcp.EmbeddedResource:
+			textResource, ok := content.Resource.(mcp.TextResourceContents)
+			if !ok {
+				continue
+			}
+			textResource.Text = strings.ReplaceAll(textResource.Text, m.projectID, "[GCP_PROJECT_ID]")
+			content.Resource = textResource
+			out.Content[i] = content
 		}
-		tc.Text = strings.ReplaceAll(tc.Text, m.projectID, "[GCP_PROJECT_ID]")
-		out.Content[i] = tc
+	}
+	if out.StructuredContent != nil {
+		encoded, err := json.Marshal(out.StructuredContent)
+		if err == nil {
+			encoded = []byte(strings.ReplaceAll(string(encoded), m.projectID, "[GCP_PROJECT_ID]"))
+			var scrubbed any
+			if json.Unmarshal(encoded, &scrubbed) == nil {
+				out.StructuredContent = scrubbed
+			}
+		}
 	}
 	return &out, nil
 }

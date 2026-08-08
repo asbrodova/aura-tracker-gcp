@@ -67,6 +67,22 @@ func TestScrubEmail(t *testing.T) {
 	}
 }
 
+func TestScrubEmbeddedTextResource(t *testing.T) {
+	result := &mcp.CallToolResult{Content: []mcp.Content{mcp.NewEmbeddedResource(mcp.TextResourceContents{
+		URI: "diagram://architecture/test.svg", MIMEType: "image/svg+xml",
+		Text: `<svg><text>admin@example.com</text></svg>`,
+	})}}
+	got, err := newScrubber(t).Scrub(context.Background(), result)
+	if err != nil {
+		t.Fatalf("Scrub() error = %v", err)
+	}
+	embedded := got.Content[0].(mcp.EmbeddedResource)
+	resource := embedded.Resource.(mcp.TextResourceContents)
+	if strings.Contains(resource.Text, "admin@example.com") || !strings.Contains(resource.Text, "[EMAIL_1]") {
+		t.Fatalf("embedded SVG was not scrubbed: %s", resource.Text)
+	}
+}
+
 func TestScrubServiceAccount(t *testing.T) {
 	s := newScrubber(t)
 	sa := "myapp-svc@my-project-123.iam.gserviceaccount.com"

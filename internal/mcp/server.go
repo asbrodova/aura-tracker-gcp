@@ -14,6 +14,7 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	"github.com/asbrodova/aura-tracker-gcp/internal/diagnostics"
+	"github.com/asbrodova/aura-tracker-gcp/internal/diagram"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/middleware"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/resources"
@@ -157,7 +158,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewDatastoreTools(svc, log),
 		tools.NewSupplyChainTools(svc, log),
 		tools.NewCoverageTools(svc, log),
-		tools.NewArchGraphTools(svc, log),
+		tools.NewArchGraphTools(svc, diagram.New(svc, log), log),
 		tools.NewTaggingTools(svc, log),
 		tools.NewIncidentTools(diagnostics.New(svc, log), log),
 	}

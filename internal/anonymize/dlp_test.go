@@ -51,6 +51,26 @@ func TestMaskByOffsets_Single(t *testing.T) {
 	}
 }
 
+func TestDLPScrubsEmbeddedTextResource(t *testing.T) {
+	text := `<svg><text>a@b.com</text></svg>`
+	offset := strings.Index(text, "a@b.com")
+	dlp := newDLP(&mockDLPService{resp: ports.DLPInspectResponse{Findings: []models.DLPFinding{{
+		InfoType: "EMAIL_ADDRESS", Offset: offset, Length: len("a@b.com"), Quote: "a@b.com",
+	}}}}, false)
+	result := &mcp.CallToolResult{Content: []mcp.Content{mcp.NewEmbeddedResource(mcp.TextResourceContents{
+		URI: "diagram://architecture/test.svg", MIMEType: "image/svg+xml", Text: text,
+	})}}
+	got, err := dlp.Scrub(context.Background(), result)
+	if err != nil {
+		t.Fatalf("Scrub() error = %v", err)
+	}
+	embedded := got.Content[0].(mcp.EmbeddedResource)
+	resource := embedded.Resource.(mcp.TextResourceContents)
+	if strings.Contains(resource.Text, "a@b.com") || !strings.Contains(resource.Text, "[EMAIL_ADDRESS_1]") {
+		t.Fatalf("embedded resource was not scrubbed: %s", resource.Text)
+	}
+}
+
 func TestMaskByOffsets_TwoNonAdjacent(t *testing.T) {
 	src := "ip=1.2.3.4 email=a@b.com"
 	findings := []models.DLPFinding{

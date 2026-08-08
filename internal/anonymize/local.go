@@ -132,18 +132,27 @@ func (s *LocalScrubber) Scrub(_ context.Context, result *mcp.CallToolResult) (*m
 	copy(out.Content, result.Content)
 
 	for i, c := range out.Content {
-		tc, ok := c.(mcp.TextContent)
-		if !ok {
-			continue
+		switch content := c.(type) {
+		case mcp.TextContent:
+			var findings []Finding
+			if json.Valid([]byte(content.Text)) {
+				content.Text, findings = s.scrubJSON(content.Text, reg, i)
+			} else {
+				content.Text, findings = s.scrubText(content.Text, reg, i, "")
+			}
+			out.Content[i] = content
+			allFindings = append(allFindings, findings...)
+		case mcp.EmbeddedResource:
+			textResource, ok := content.Resource.(mcp.TextResourceContents)
+			if !ok {
+				continue
+			}
+			var findings []Finding
+			textResource.Text, findings = s.scrubText(textResource.Text, reg, i, "resource.text")
+			content.Resource = textResource
+			out.Content[i] = content
+			allFindings = append(allFindings, findings...)
 		}
-		var findings []Finding
-		if json.Valid([]byte(tc.Text)) {
-			tc.Text, findings = s.scrubJSON(tc.Text, reg, i)
-		} else {
-			tc.Text, findings = s.scrubText(tc.Text, reg, i, "")
-		}
-		out.Content[i] = tc
-		allFindings = append(allFindings, findings...)
 	}
 
 	// StructuredContent is any — marshal → walk → unmarshal.

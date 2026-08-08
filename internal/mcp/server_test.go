@@ -242,6 +242,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_trace_list_dependency_edges",
 		"gcp_observability_coverage",
 		"gcp_export_architecture_graph",
+		"gcp_generate_architecture_diagram",
 		"gcp_export_serverless_graph",
 		"gcp_gke_list_workloads",
 		"gcp_gke_get_workload_details",

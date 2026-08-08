@@ -44,17 +44,29 @@ func (d *DLPAnonymizer) Scrub(ctx context.Context, result *mcp.CallToolResult) (
 	copy(out.Content, result.Content)
 
 	for i, c := range out.Content {
-		tc, ok := c.(mcp.TextContent)
-		if !ok {
-			continue
+		switch content := c.(type) {
+		case mcp.TextContent:
+			masked, findings, err := d.scrubString(ctx, content.Text, reg, i)
+			if err != nil {
+				return nil, err
+			}
+			content.Text = masked
+			out.Content[i] = content
+			allFindings = append(allFindings, findings...)
+		case mcp.EmbeddedResource:
+			textResource, ok := content.Resource.(mcp.TextResourceContents)
+			if !ok {
+				continue
+			}
+			masked, findings, err := d.scrubString(ctx, textResource.Text, reg, i)
+			if err != nil {
+				return nil, err
+			}
+			textResource.Text = masked
+			content.Resource = textResource
+			out.Content[i] = content
+			allFindings = append(allFindings, findings...)
 		}
-		masked, findings, err := d.scrubString(ctx, tc.Text, reg, i)
-		if err != nil {
-			return nil, err
-		}
-		tc.Text = masked
-		out.Content[i] = tc
-		allFindings = append(allFindings, findings...)
 	}
 
 	if out.StructuredContent != nil {
