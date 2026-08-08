@@ -10,6 +10,7 @@
 #   PROJECT_ID=my-project bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
+#   PROJECT_ID=my-project SECURITY_AUDIT_ENABLED=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project COST_REASONING_ENABLED=true BILLING_EXPORT_DATASET=cloud_billing bash scripts/setup-iam.sh
 set -euo pipefail
@@ -17,6 +18,9 @@ set -euo pipefail
 PROJECT_ID="${PROJECT_ID:?PROJECT_ID environment variable is required}"
 MUTATION_ROLES="${MUTATION_ROLES:-false}"
 RECOMMENDER_ENABLED="${RECOMMENDER_ENABLED:-false}"
+SECURITY_AUDIT_ENABLED="${SECURITY_AUDIT_ENABLED:-false}"
+SECURITY_AUDIT_FLEET_PROJECT_ID="${SECURITY_AUDIT_FLEET_PROJECT_ID:-$PROJECT_ID}"
+SECURITY_AUDIT_ORGANIZATION_ID="${SECURITY_AUDIT_ORGANIZATION_ID:-}"
 SERVICE_HEALTH_ENABLED="${SERVICE_HEALTH_ENABLED:-false}"
 COST_REASONING_ENABLED="${COST_REASONING_ENABLED:-false}"
 COST_QUERY_PROJECT_ID="${COST_QUERY_PROJECT_ID:-$PROJECT_ID}"
@@ -51,6 +55,17 @@ grant_role_on_project() {
     --quiet
 }
 
+grant_role_on_organization() {
+  local organization_id="$1"
+  local role="$2"
+  echo "  Reconciling ${role} on organizations/${organization_id}"
+  gcloud organizations add-iam-policy-binding "$organization_id" \
+    --member="serviceAccount:${SA_EMAIL}" \
+    --role="$role" \
+    --condition=None \
+    --quiet
+}
+
 enable_api() {
   local api="$1"
   enable_api_on_project "$PROJECT_ID" "$api"
@@ -67,6 +82,7 @@ enable_api_on_project() {
 
 validate_boolean MUTATION_ROLES "$MUTATION_ROLES"
 validate_boolean RECOMMENDER_ENABLED "$RECOMMENDER_ENABLED"
+validate_boolean SECURITY_AUDIT_ENABLED "$SECURITY_AUDIT_ENABLED"
 validate_boolean SERVICE_HEALTH_ENABLED "$SERVICE_HEALTH_ENABLED"
 validate_boolean COST_REASONING_ENABLED "$COST_REASONING_ENABLED"
 
@@ -139,6 +155,51 @@ if [[ "$RECOMMENDER_ENABLED" == "true" ]]; then
   echo "Configuring optional Cloud Recommender integration..."
   enable_api recommender.googleapis.com
   grant_project_role roles/recommender.viewer
+fi
+
+# Project security posture is opt-in at setup time because Cloud Asset Viewer
+# can inspect IAM policies across every supported resource in the project. All
+# granted roles are read-only; Secret Manager Viewer cannot access payloads.
+if [[ "$SECURITY_AUDIT_ENABLED" == "true" ]]; then
+  echo "Configuring project security posture audit..."
+  for api in \
+    cloudasset.googleapis.com \
+    iam.googleapis.com \
+    secretmanager.googleapis.com \
+    compute.googleapis.com \
+    cloudfunctions.googleapis.com \
+    recommender.googleapis.com; do
+    enable_api "$api"
+  done
+  for role in \
+    roles/cloudasset.viewer \
+    roles/iam.serviceAccountViewer \
+    roles/secretmanager.viewer \
+    roles/compute.viewer \
+    roles/cloudfunctions.viewer \
+    roles/recommender.iamViewer \
+    roles/serviceusage.serviceUsageConsumer; do
+    grant_project_role "$role"
+  done
+
+  # The security collector uses read-only Kubernetes API requests. Connect
+  # Gateway is the fallback for private/unreachable control planes.
+  enable_api_on_project "$SECURITY_AUDIT_FLEET_PROJECT_ID" gkehub.googleapis.com
+  enable_api_on_project "$SECURITY_AUDIT_FLEET_PROJECT_ID" connectgateway.googleapis.com
+  grant_role_on_project "$SECURITY_AUDIT_FLEET_PROJECT_ID" roles/gkehub.viewer
+  grant_role_on_project "$SECURITY_AUDIT_FLEET_PROJECT_ID" roles/gkehub.gatewayReader
+
+  # Parent policies are not readable from a project-level grant. An
+  # organization administrator can opt into these read-only organization
+  # bindings so folder/org allow policies and IAM deny policies are complete.
+  if [[ -n "$SECURITY_AUDIT_ORGANIZATION_ID" ]]; then
+    grant_role_on_organization "$SECURITY_AUDIT_ORGANIZATION_ID" roles/iam.securityReviewer
+    grant_role_on_organization "$SECURITY_AUDIT_ORGANIZATION_ID" roles/iam.denyReviewer
+    grant_role_on_organization "$SECURITY_AUDIT_ORGANIZATION_ID" roles/browser
+  else
+    echo "INFO: Set SECURITY_AUDIT_ORGANIZATION_ID to grant read-only ancestor IAM and deny-policy access."
+  fi
+  echo "INFO: Apply deploy/security-audit-rbac.yaml.tmpl to every audited cluster after replacing AURA_SECURITY_PRINCIPAL."
 fi
 
 # Cost reasoning is opt-in because it executes chargeable BigQuery queries over

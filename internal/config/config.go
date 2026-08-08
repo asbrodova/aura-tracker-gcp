@@ -27,11 +27,32 @@ type CostReasoningConfig struct {
 	MaxBytesBilled  int64  `yaml:"max_bytes_billed"`
 }
 
+// SecurityAuditSuppressionConfig describes one time-bounded accepted risk.
+// Resource supports * and ? wildcards and is matched against the canonical GCP
+// resource name returned in the finding.
+type SecurityAuditSuppressionConfig struct {
+	RuleID    string `yaml:"rule_id"`
+	Resource  string `yaml:"resource"`
+	Reason    string `yaml:"reason"`
+	Owner     string `yaml:"owner"`
+	ExpiresAt string `yaml:"expires_at"`
+}
+
+type SecurityAuditConfig struct {
+	KubernetesAccess         string                           `yaml:"kubernetes_access"`
+	FleetProjectID           string                           `yaml:"fleet_project_id"`
+	ClusterConcurrency       int                              `yaml:"cluster_concurrency"`
+	PerClusterTimeoutSeconds int                              `yaml:"per_cluster_timeout_seconds"`
+	MaxResourcesPerKind      int                              `yaml:"max_resources_per_kind"`
+	Suppressions             []SecurityAuditSuppressionConfig `yaml:"suppressions"`
+}
+
 // Config holds user-level defaults read from ~/.aura-tracker.yaml.
 type Config struct {
 	ProjectID         string                    `yaml:"project_id"`
 	RecommenderExport RecommenderBQExportConfig `yaml:"recommender_export"`
 	CostReasoning     CostReasoningConfig       `yaml:"cost_reasoning"`
+	SecurityAudit     SecurityAuditConfig       `yaml:"security_audit"`
 }
 
 // Load reads ~/.aura-tracker.yaml. A missing file is not an error; it returns

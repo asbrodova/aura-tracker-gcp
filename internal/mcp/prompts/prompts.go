@@ -23,17 +23,17 @@ func NewGCPPrompts(svc ports.GCPService, log *slog.Logger) *GCPPrompts {
 	return &GCPPrompts{svc: svc, log: log}
 }
 
-// AuditSecurityPosture guides the AI through a structured IAM + network security audit.
+// AuditSecurityPosture presents the deterministic project security audit.
 func (p *GCPPrompts) AuditSecurityPosture() server.ServerPrompt {
 	return server.ServerPrompt{
 		Prompt: mcp.NewPrompt("audit-security-posture",
-			mcp.WithPromptDescription("Gather IAM bindings and Cloud Run ingress configuration to surface security vulnerabilities"),
+			mcp.WithPromptDescription("Run one comprehensive project security audit and present its severity-ranked findings, score, remediation, and coverage gaps"),
 			mcp.WithArgument("project_id",
 				mcp.ArgumentDescription("GCP project ID to audit"),
 				mcp.RequiredArgument(),
 			),
 			mcp.WithArgument("focus",
-				mcp.ArgumentDescription("Audit scope: 'iam', 'network', or 'all' (default: all)"),
+				mcp.ArgumentDescription("Optional presentation emphasis: 'iam', 'network', or 'all'. The tool still performs a full audit so its score remains comparable."),
 			),
 		),
 		Handler: p.auditSecurityPostureHandler,
@@ -50,29 +50,22 @@ func (p *GCPPrompts) auditSecurityPostureHandler(_ context.Context, req mcp.GetP
 		focus = "all"
 	}
 
-	instructions := fmt.Sprintf(`You are a GCP security auditor for project %q. Follow these steps in order:
+	instructions := fmt.Sprintf(`Run the deterministic security posture audit for GCP project %q.
 
-Step 1 — Check server capabilities:
-  Read resource gcp://%s/iam/my-permissions
-  Note any denied permissions that may limit the audit scope.
+Call gcp_project_security_audit exactly once with project_id=%q and refresh=false.
 
-Step 2 — Audit IAM (if focus is 'iam' or 'all'):
-  Call tool gcp_iam_test_permissions with project_id=%q.
-  Look for: Owner/Editor primitive roles on non-admin principals, service accounts with excessive scope,
-  allUsers or allAuthenticatedUsers bindings.
+Present the returned summary in this order:
+1. Score, score status, and coverage
+2. Critical findings
+3. High findings
+4. Medium findings
+5. Low findings
+6. Prioritized recommendations
+7. Coverage gaps
 
-Step 3 — Audit Cloud Run ingress (if focus is 'network' or 'all'):
-  Call tool gcp_cloudrun_list_services with project_id=%q and region="-".
-  For each service, flag those where ingress allows all traffic (not 'internal-and-cloud-load-balancing').
+Preserve finding IDs, observed evidence, severity, and affected resources. Do not invent findings or describe an unassessed category as secure. Do not execute remediation or any mutation. If a score is unavailable, explain which coverage gap prevented a defensible score.
 
-Step 4 — Synthesise and report:
-  Return a structured report grouped by severity:
-  - CRITICAL: public + unauthenticated exposure, primitive Owner/Editor on external identities
-  - HIGH: public ingress without IAP, overly broad service account roles
-  - MEDIUM: missing resource labels, unused service accounts, no org policy constraints
-  For each finding include: affected resource, risk description, and the exact gcloud or Terraform remediation.
-
-Audit focus: %s`, project, project, project, project, focus)
+Presentation focus: %s. A focus other than "all" changes emphasis only; retain the full report and project-wide score.`, project, project, focus)
 
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Security posture audit for project %q (focus: %s)", project, focus),

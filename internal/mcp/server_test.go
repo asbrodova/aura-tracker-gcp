@@ -53,6 +53,27 @@ func (m *mockSvc) GetMetrics(_ context.Context, _ models.GetMetricsRequest) (mod
 func (m *mockSvc) TestPermissions(_ context.Context, _ models.TestPermissionsRequest) (models.TestPermissionsResponse, error) {
 	return models.TestPermissionsResponse{}, nil
 }
+func (m *mockSvc) SearchSecurityIAMPolicies(_ context.Context, _ models.SecurityFactsRequest) (models.SecurityIAMPolicyFacts, error) {
+	return models.SecurityIAMPolicyFacts{}, nil
+}
+func (m *mockSvc) ListServiceAccountSecurityFacts(_ context.Context, _ models.SecurityFactsRequest) (models.ServiceAccountSecurityFacts, error) {
+	return models.ServiceAccountSecurityFacts{}, nil
+}
+func (m *mockSvc) ListSecretSecurityFacts(_ context.Context, _ models.SecurityFactsRequest) (models.SecretSecurityFacts, error) {
+	return models.SecretSecurityFacts{}, nil
+}
+func (m *mockSvc) ListPublicServiceSecurityFacts(_ context.Context, _ models.SecurityFactsRequest) (models.PublicServiceSecurityFacts, error) {
+	return models.PublicServiceSecurityFacts{}, nil
+}
+func (m *mockSvc) ListFirewallSecurityFacts(_ context.Context, _ models.SecurityFactsRequest) (models.FirewallSecurityFacts, error) {
+	return models.FirewallSecurityFacts{}, nil
+}
+func (m *mockSvc) ListWorkloadIdentitySecurityFacts(_ context.Context, _ models.SecurityFactsRequest) (models.WorkloadIdentitySecurityFacts, error) {
+	return models.WorkloadIdentitySecurityFacts{}, nil
+}
+func (m *mockSvc) ListSecurityRecommendations(_ context.Context, _ models.SecurityFactsRequest) (models.SecurityRecommendationFacts, error) {
+	return models.SecurityRecommendationFacts{}, nil
+}
 func (m *mockSvc) GetServiceTopology(_ context.Context, _ models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
 	return models.ServiceTopologyReport{}, nil
 }
@@ -267,6 +288,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_servicedirectory_list",
 		"gcp_tag_list_resources",
 		"gcp_incident_diagnose",
+		"gcp_project_security_audit",
 	}
 
 	registered := s.ListTools()

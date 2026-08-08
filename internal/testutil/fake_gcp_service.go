@@ -105,6 +105,15 @@ type FakeGCPService struct {
 	GetResourceIAMBindingsFunc func(context.Context, models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error)
 	ListServiceAccountsFunc    func(context.Context, models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error)
 
+	// Security posture
+	SearchSecurityIAMPoliciesFunc         func(context.Context, models.SecurityFactsRequest) (models.SecurityIAMPolicyFacts, error)
+	ListServiceAccountSecurityFactsFunc   func(context.Context, models.SecurityFactsRequest) (models.ServiceAccountSecurityFacts, error)
+	ListSecretSecurityFactsFunc           func(context.Context, models.SecurityFactsRequest) (models.SecretSecurityFacts, error)
+	ListPublicServiceSecurityFactsFunc    func(context.Context, models.SecurityFactsRequest) (models.PublicServiceSecurityFacts, error)
+	ListFirewallSecurityFactsFunc         func(context.Context, models.SecurityFactsRequest) (models.FirewallSecurityFacts, error)
+	ListWorkloadIdentitySecurityFactsFunc func(context.Context, models.SecurityFactsRequest) (models.WorkloadIdentitySecurityFacts, error)
+	ListSecurityRecommendationsFunc       func(context.Context, models.SecurityFactsRequest) (models.SecurityRecommendationFacts, error)
+
 	// Topology
 	GetServiceTopologyFunc func(context.Context, models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error)
 
@@ -455,6 +464,48 @@ func (f *FakeGCPService) ListServiceAccounts(ctx context.Context, req models.Lis
 		return f.ListServiceAccountsFunc(ctx, req)
 	}
 	return models.ListServiceAccountsResponse{}, nil
+}
+func (f *FakeGCPService) SearchSecurityIAMPolicies(ctx context.Context, req models.SecurityFactsRequest) (models.SecurityIAMPolicyFacts, error) {
+	if f.SearchSecurityIAMPoliciesFunc != nil {
+		return f.SearchSecurityIAMPoliciesFunc(ctx, req)
+	}
+	return models.SecurityIAMPolicyFacts{}, nil
+}
+func (f *FakeGCPService) ListServiceAccountSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.ServiceAccountSecurityFacts, error) {
+	if f.ListServiceAccountSecurityFactsFunc != nil {
+		return f.ListServiceAccountSecurityFactsFunc(ctx, req)
+	}
+	return models.ServiceAccountSecurityFacts{}, nil
+}
+func (f *FakeGCPService) ListSecretSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.SecretSecurityFacts, error) {
+	if f.ListSecretSecurityFactsFunc != nil {
+		return f.ListSecretSecurityFactsFunc(ctx, req)
+	}
+	return models.SecretSecurityFacts{}, nil
+}
+func (f *FakeGCPService) ListPublicServiceSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.PublicServiceSecurityFacts, error) {
+	if f.ListPublicServiceSecurityFactsFunc != nil {
+		return f.ListPublicServiceSecurityFactsFunc(ctx, req)
+	}
+	return models.PublicServiceSecurityFacts{}, nil
+}
+func (f *FakeGCPService) ListFirewallSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.FirewallSecurityFacts, error) {
+	if f.ListFirewallSecurityFactsFunc != nil {
+		return f.ListFirewallSecurityFactsFunc(ctx, req)
+	}
+	return models.FirewallSecurityFacts{}, nil
+}
+func (f *FakeGCPService) ListWorkloadIdentitySecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.WorkloadIdentitySecurityFacts, error) {
+	if f.ListWorkloadIdentitySecurityFactsFunc != nil {
+		return f.ListWorkloadIdentitySecurityFactsFunc(ctx, req)
+	}
+	return models.WorkloadIdentitySecurityFacts{}, nil
+}
+func (f *FakeGCPService) ListSecurityRecommendations(ctx context.Context, req models.SecurityFactsRequest) (models.SecurityRecommendationFacts, error) {
+	if f.ListSecurityRecommendationsFunc != nil {
+		return f.ListSecurityRecommendationsFunc(ctx, req)
+	}
+	return models.SecurityRecommendationFacts{}, nil
 }
 func (f *FakeGCPService) GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
 	if f.GetServiceTopologyFunc != nil {

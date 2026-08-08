@@ -36,7 +36,7 @@ internal/mcp/  NEVER imports internal/gcp/
 
 `go build ./internal/mcp/...` compiles zero GCP SDK code.
 
-Application-layer engines live between MCP and the port: `internal/diagnostics` for incidents, `internal/costreasoning` for cost explanations, and `internal/diagram` for architecture scoping and deterministic rendering. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
+Application-layer engines live between MCP and the port: `internal/diagnostics` for incidents, `internal/costreasoning` for cost explanations, `internal/securityaudit` for deterministic security posture findings and scoring, and `internal/diagram` for architecture scoping and deterministic rendering. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
 
 ## Environment Variables
 
@@ -80,13 +80,26 @@ cost_reasoning:
   timezone: UTC
   history_days: 90
   max_bytes_billed: 5368709120
+
+security_audit:
+  kubernetes_access: auto
+  fleet_project_id: platform-fleet
+  cluster_concurrency: 4
+  per_cluster_timeout_seconds: 20
+  max_resources_per_kind: 2000
+  suppressions:
+    - rule_id: PUB-001
+      resource: "//run.googleapis.com/projects/my-gcp-project-id/locations/*/services/public-api"
+      reason: "Approved public API"
+      owner: "platform-security@example.com"
+      expires_at: "2026-12-01T00:00:00Z"
 ```
 
 ## CLI Flags
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Correlation/reasoning: `incident`, `cost`; `cost` also requires `COST_REASONING_ENABLED=true`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
+| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Correlation/reasoning: `incident`, `security`, `cost`; `cost` also requires `COST_REASONING_ENABLED=true`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
 | `--version` | — | Print version and exit. |
 
 ## README Hygiene

@@ -44,12 +44,13 @@ type k8sPodTemplate struct {
 }
 
 type k8sPodSpec struct {
-	ServiceAccountName string            `json:"serviceAccountName"`
-	Containers         []k8sContainer    `json:"containers"`
-	InitContainers     []k8sContainer    `json:"initContainers"`
-	Volumes            []k8sVolume       `json:"volumes"`
-	NodeSelector       map[string]string `json:"nodeSelector"`
-	Tolerations        []k8sToleration   `json:"tolerations"`
+	ServiceAccountName           string            `json:"serviceAccountName"`
+	AutomountServiceAccountToken *bool             `json:"automountServiceAccountToken"`
+	Containers                   []k8sContainer    `json:"containers"`
+	InitContainers               []k8sContainer    `json:"initContainers"`
+	Volumes                      []k8sVolume       `json:"volumes"`
+	NodeSelector                 map[string]string `json:"nodeSelector"`
+	Tolerations                  []k8sToleration   `json:"tolerations"`
 }
 
 type k8sContainer struct {
@@ -121,16 +122,31 @@ type k8sServiceList struct {
 }
 
 type k8sService struct {
-	Metadata k8sMeta        `json:"metadata"`
-	Spec     k8sServiceSpec `json:"spec"`
+	Metadata k8sMeta          `json:"metadata"`
+	Spec     k8sServiceSpec   `json:"spec"`
+	Status   k8sServiceStatus `json:"status"`
 }
 
 type k8sServiceSpec struct {
-	Type        string            `json:"type"`
-	ClusterIP   string            `json:"clusterIP"`
-	ExternalIPs []string          `json:"externalIPs"`
-	Selector    map[string]string `json:"selector"`
-	Ports       []k8sServicePort  `json:"ports"`
+	Type                     string            `json:"type"`
+	ClusterIP                string            `json:"clusterIP"`
+	ExternalIPs              []string          `json:"externalIPs"`
+	Selector                 map[string]string `json:"selector"`
+	Ports                    []k8sServicePort  `json:"ports"`
+	LoadBalancerSourceRanges []string          `json:"loadBalancerSourceRanges"`
+	LoadBalancerClass        string            `json:"loadBalancerClass"`
+	ExternalTrafficPolicy    string            `json:"externalTrafficPolicy"`
+}
+
+type k8sLoadBalancerIngress struct {
+	IP       string `json:"ip"`
+	Hostname string `json:"hostname"`
+}
+
+type k8sServiceStatus struct {
+	LoadBalancer struct {
+		Ingress []k8sLoadBalancerIngress `json:"ingress"`
+	} `json:"loadBalancer"`
 }
 
 type k8sServicePort struct {
@@ -148,13 +164,22 @@ type k8sIngressList struct {
 }
 
 type k8sIngress struct {
-	Metadata k8sMeta        `json:"metadata"`
-	Spec     k8sIngressSpec `json:"spec"`
+	Metadata k8sMeta          `json:"metadata"`
+	Spec     k8sIngressSpec   `json:"spec"`
+	Status   k8sIngressStatus `json:"status"`
 }
 
 type k8sIngressSpec struct {
-	Rules []k8sIngressRule `json:"rules"`
-	TLS   []k8sIngressTLS  `json:"tls"`
+	Rules            []k8sIngressRule   `json:"rules"`
+	TLS              []k8sIngressTLS    `json:"tls"`
+	IngressClassName string             `json:"ingressClassName"`
+	DefaultBackend   *k8sIngressBackend `json:"defaultBackend"`
+}
+
+type k8sIngressStatus struct {
+	LoadBalancer struct {
+		Ingress []k8sLoadBalancerIngress `json:"ingress"`
+	} `json:"loadBalancer"`
 }
 
 type k8sIngressRule struct {
@@ -222,6 +247,54 @@ type k8sHTTPBackendRef struct {
 	Name      string `json:"name"`
 	Namespace string `json:"namespace"`
 	Port      int32  `json:"port"`
+}
+
+// --- Gateway API ---
+
+type k8sGatewayList struct {
+	Items []k8sGateway `json:"items"`
+}
+
+type k8sGateway struct {
+	Metadata k8sMeta          `json:"metadata"`
+	Spec     k8sGatewaySpec   `json:"spec"`
+	Status   k8sGatewayStatus `json:"status"`
+}
+
+type k8sGatewaySpec struct {
+	GatewayClassName string               `json:"gatewayClassName"`
+	Addresses        []k8sGatewayAddress  `json:"addresses"`
+	Listeners        []k8sGatewayListener `json:"listeners"`
+}
+
+type k8sGatewayAddress struct {
+	Type  string `json:"type"`
+	Value string `json:"value"`
+}
+
+type k8sGatewayListener struct {
+	Name     string `json:"name"`
+	Hostname string `json:"hostname"`
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol"`
+	TLS      *struct {
+		Mode string `json:"mode"`
+	} `json:"tls"`
+}
+
+type k8sGatewayStatus struct {
+	Addresses []k8sGatewayAddress `json:"addresses"`
+}
+
+// --- Kubernetes ServiceAccounts ---
+
+type k8sServiceAccountList struct {
+	Items []k8sServiceAccount `json:"items"`
+}
+
+type k8sServiceAccount struct {
+	Metadata                     k8sMeta `json:"metadata"`
+	AutomountServiceAccountToken *bool   `json:"automountServiceAccountToken"`
 }
 
 // --- NetworkPolicies ---

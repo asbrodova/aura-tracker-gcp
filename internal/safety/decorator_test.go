@@ -15,6 +15,7 @@ import (
 // Only the two mutation methods have meaningful implementations; all
 // read methods return zero values.
 type stubService struct {
+	ports.GCPService
 	scaleResp   models.ScaleDeploymentResponse
 	scaleErr    error
 	trafficResp models.UpdateTrafficResponse

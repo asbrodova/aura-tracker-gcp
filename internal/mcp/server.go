@@ -19,6 +19,7 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/resources"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/tools"
+	"github.com/asbrodova/aura-tracker-gcp/internal/securityaudit"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
@@ -35,6 +36,7 @@ type serverOptions struct {
 	enableRecommenderExport bool
 	enableCostReasoning     bool
 	costReasoningConfig     costreasoning.Config
+	securityAuditConfig     securityaudit.Config
 }
 
 // WithAnonymizer attaches an Anonymizer to every registered tool handler.
@@ -76,6 +78,11 @@ func WithCostReasoning(cfg costreasoning.Config) Option {
 		o.enableCostReasoning = true
 		o.costReasoningConfig = cfg
 	}
+}
+
+// WithSecurityAuditConfig supplies explicit, time-bounded accepted-risk suppressions.
+func WithSecurityAuditConfig(cfg securityaudit.Config) Option {
+	return func(o *serverOptions) { o.securityAuditConfig = cfg }
 }
 
 // New creates and configures the MCP server, registering all tools, resources, and prompts.
@@ -161,6 +168,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewArchGraphTools(svc, diagram.New(svc, log), log),
 		tools.NewTaggingTools(svc, log),
 		tools.NewIncidentTools(diagnostics.New(svc, log), log),
+		tools.NewSecurityTools(securityaudit.New(svc, log, securityaudit.WithConfig(o.securityAuditConfig)), log),
 	}
 	if o.enableRecommenderExport {
 		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log))
@@ -197,9 +205,9 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 
 	// --- Prompts ---
 	prm := prompts.NewGCPPrompts(svc, log)
-	promptList := []server.ServerPrompt{
-		prm.AuditSecurityPosture(),
-		prm.OptimizeBigQueryCosts(),
+	promptList := []server.ServerPrompt{prm.OptimizeBigQueryCosts()}
+	if o.enabledModules == nil || o.enabledModules[ModuleSecurity] {
+		promptList = append(promptList, prm.AuditSecurityPosture())
 	}
 	if o.enabledModules == nil || o.enabledModules[ModuleIncident] {
 		promptList = append(promptList, prm.IncidentResponseHelper())

@@ -133,6 +133,18 @@ type IAMService interface {
 	ListServiceAccounts(ctx context.Context, req models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error)
 }
 
+// SecurityDataService exposes normalized, read-only facts used by the security
+// posture application layer. It never returns secret payloads or private keys.
+type SecurityDataService interface {
+	SearchSecurityIAMPolicies(ctx context.Context, req models.SecurityFactsRequest) (models.SecurityIAMPolicyFacts, error)
+	ListServiceAccountSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.ServiceAccountSecurityFacts, error)
+	ListSecretSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.SecretSecurityFacts, error)
+	ListPublicServiceSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.PublicServiceSecurityFacts, error)
+	ListFirewallSecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.FirewallSecurityFacts, error)
+	ListWorkloadIdentitySecurityFacts(ctx context.Context, req models.SecurityFactsRequest) (models.WorkloadIdentitySecurityFacts, error)
+	ListSecurityRecommendations(ctx context.Context, req models.SecurityFactsRequest) (models.SecurityRecommendationFacts, error)
+}
+
 // TopologyService covers cross-service dependency topology.
 type TopologyService interface {
 	GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error)
@@ -237,6 +249,7 @@ type GCPService interface {
 	LoggingService
 	MonitoringService
 	IAMService
+	SecurityDataService
 	TopologyService
 	AuraService
 	BigQueryService

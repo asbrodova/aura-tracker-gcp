@@ -24,6 +24,7 @@ import (
 	gcpadapter "github.com/asbrodova/aura-tracker-gcp/internal/gcp"
 	mcpserver "github.com/asbrodova/aura-tracker-gcp/internal/mcp"
 	"github.com/asbrodova/aura-tracker-gcp/internal/safety"
+	"github.com/asbrodova/aura-tracker-gcp/internal/securityaudit"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
@@ -67,6 +68,11 @@ func main() {
 	}
 
 	ctx := context.Background()
+	securityCfg := securityAuditConfig(userCfg.SecurityAudit)
+	if err := securityaudit.ValidateConfig(securityCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: security audit config: %v\n", err)
+		os.Exit(1)
+	}
 
 	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
@@ -84,6 +90,12 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		gcpadapter.WithCallTimeout(30 * time.Second),
 		gcpadapter.WithLogger(log),
 		gcpadapter.WithModules(enabledModules),
+		gcpadapter.WithSecurityAudit(gcpadapter.SecurityAdapterConfig{
+			KubernetesAccess: securityCfg.KubernetesAccess, FleetProjectID: securityCfg.FleetProjectID,
+			ClusterConcurrency:  securityCfg.ClusterConcurrency,
+			PerClusterTimeout:   time.Duration(securityCfg.PerClusterTimeoutSeconds) * time.Second,
+			MaxResourcesPerKind: securityCfg.MaxResourcesPerKind,
+		}),
 	}
 	if os.Getenv("RECOMMENDER_ENABLED") != "false" {
 		adapterOpts = append(adapterOpts, gcpadapter.WithRecommender())
@@ -190,6 +202,7 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 			Timezone: userCfg.CostReasoning.Timezone, HistoryDays: userCfg.CostReasoning.HistoryDays,
 		}))
 	}
+	mcpOpts = append(mcpOpts, mcpserver.WithSecurityAuditConfig(securityCfg))
 	s := mcpserver.New(gcpSvc, log, version, mcpOpts...)
 
 	switch os.Getenv("MCP_TRANSPORT") {
@@ -234,6 +247,22 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 			os.Exit(1)
 		}
 	}
+}
+
+func securityAuditConfig(cfg config.SecurityAuditConfig) securityaudit.Config {
+	out := securityaudit.Config{
+		KubernetesAccess: cfg.KubernetesAccess, FleetProjectID: cfg.FleetProjectID,
+		ClusterConcurrency: cfg.ClusterConcurrency, PerClusterTimeoutSeconds: cfg.PerClusterTimeoutSeconds,
+		MaxResourcesPerKind: cfg.MaxResourcesPerKind,
+		Suppressions:        make([]securityaudit.Suppression, 0, len(cfg.Suppressions)),
+	}
+	for _, suppression := range cfg.Suppressions {
+		out.Suppressions = append(out.Suppressions, securityaudit.Suppression{
+			RuleID: suppression.RuleID, Resource: suppression.Resource, Reason: suppression.Reason,
+			Owner: suppression.Owner, ExpiresAt: suppression.ExpiresAt,
+		})
+	}
+	return out
 }
 
 func applyCostReasoningEnv(cfg *config.CostReasoningConfig) error {
