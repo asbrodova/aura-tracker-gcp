@@ -207,9 +207,10 @@ func findIdleResources(facts []models.CostFact, recommendations []models.CostRec
 				bestMatch, currentCost = match, fact.Current.NetCost
 			}
 		}
-		if bestMatch == 2 {
+		switch bestMatch {
+		case 2:
 			confidence = "high"
-		} else if bestMatch == 1 {
+		case 1:
 			confidence = "medium"
 		}
 		result = append(result, models.IdleCostResource{
