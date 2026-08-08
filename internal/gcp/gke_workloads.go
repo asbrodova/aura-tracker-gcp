@@ -19,7 +19,7 @@ func (a *gcpAdapter) dialSecurityK8s(ctx context.Context, projectID, location, c
 		mode = "auto"
 	}
 	if mode == "disabled" {
-		return nil, "disabled", fmt.Errorf("Kubernetes security enrichment is disabled")
+		return nil, "disabled", fmt.Errorf("kubernetes security enrichment is disabled")
 	}
 	if mode == "auto" || mode == "direct" {
 		client, err := a.dialK8s(ctx, projectID, location, clusterName)

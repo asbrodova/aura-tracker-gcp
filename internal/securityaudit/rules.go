@@ -533,20 +533,6 @@ func isProjectResource(resource string) bool {
 	return strings.Contains(resource, "cloudresourcemanager.googleapis.com/projects/") && !strings.Contains(strings.TrimPrefix(resource, "//cloudresourcemanager.googleapis.com/projects/"), "/")
 }
 
-func publicRolesByResource(facts models.SecurityIAMPolicyFacts) map[string][]string {
-	out := make(map[string][]string)
-	for _, policy := range facts.Policies {
-		for _, binding := range policy.Bindings {
-			for _, member := range binding.Members {
-				if isPublicMember(member) {
-					out[policy.Resource] = append(out[policy.Resource], binding.Role)
-				}
-			}
-		}
-	}
-	return out
-}
-
 func publicRolesForResource(facts models.SecurityIAMPolicyFacts, resource string) []string {
 	roles := []string{}
 	for _, policy := range facts.Policies {

@@ -181,9 +181,10 @@ func policyFirewallFact(projectID, network, region, policyID, shortName, policyT
 		fact.DestinationRanges = append([]string(nil), rule.Match.DestIpRanges...)
 		for _, layer4 := range rule.Match.Layer4Configs {
 			protocol := models.FirewallProtocolFact{Protocol: layer4.IpProtocol, Ports: append([]string(nil), layer4.Ports...)}
-			if fact.Action == "allow" {
+			switch fact.Action {
+			case "allow":
 				fact.Allowed = append(fact.Allowed, protocol)
-			} else if fact.Action == "deny" {
+			case "deny":
 				fact.Denied = append(fact.Denied, protocol)
 			}
 		}
