@@ -53,13 +53,18 @@ func TestWrapHandlerLocalScrubber(t *testing.T) {
 	}
 }
 
-// Go-level errors must propagate unchanged; scrubber must NOT be called.
-func TestWrapHandlerPropagatesGoError(t *testing.T) {
-	sentinel := errors.New("rpc error")
-	wrapped := WrapHandler(toolReturning(nil, sentinel), NoopAnonymizer{})
-	_, err := callTool(t, wrapped)
-	if !errors.Is(err, sentinel) {
-		t.Errorf("expected sentinel error, got %v", err)
+func TestWrapHandlerScrubsGoErrorAsToolResult(t *testing.T) {
+	scrubber, err := NewLocalScrubber(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrapped := WrapHandler(toolReturning(nil, errors.New("rpc error from 10.0.0.1")), scrubber)
+	got, err := callTool(t, wrapped)
+	if err != nil || got == nil || !got.IsError {
+		t.Fatalf("got result=%+v err=%v", got, err)
+	}
+	if strings.Contains(resultText(got), "10.0.0.1") {
+		t.Fatalf("Go error bypassed scrubber: %q", resultText(got))
 	}
 }
 

@@ -42,6 +42,7 @@ func (t *ServerlessGraphTools) ExportServerlessGraph() server.ServerTool {
 		mcp.WithNumber("max_nodes",
 			mcp.Description("Hard cap on returned nodes. Truncation is noted in errors[]. Default: no limit."),
 			mcp.Min(1),
+			mcp.Max(10000),
 		),
 		mcp.WithBoolean("include_references",
 			mcp.Description("When true, scans Cloud Run service specs for Secret Manager references and adds reads_secret edges. Default: false."),

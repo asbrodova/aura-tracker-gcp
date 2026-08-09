@@ -16,27 +16,32 @@ func (a *gcpAdapter) ListSQLInstances(ctx context.Context, req models.ListSQLIns
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	resp, err := a.sqlAdmin.Instances.List(req.ProjectID).Context(ctx).Do()
-	if err != nil {
-		return models.ListSQLInstancesResponse{}, wrapGCPError("cloudsql.ListSQLInstances", err)
-	}
-
-	instances := make([]models.SQLInstanceSummary, 0, len(resp.Items))
-	for _, inst := range resp.Items {
-		tier := ""
-		var labels map[string]string
-		if inst.Settings != nil {
-			tier = inst.Settings.Tier
-			labels = inst.Settings.UserLabels
+	instances := []models.SQLInstanceSummary{}
+	for pageToken := ""; ; {
+		call := a.sqlAdmin.Instances.List(req.ProjectID).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
 		}
-		instances = append(instances, models.SQLInstanceSummary{
-			Name:            inst.Name,
-			DatabaseVersion: inst.DatabaseVersion,
-			Region:          inst.Region,
-			State:           inst.State,
-			Tier:            tier,
-			Labels:          labels,
-		})
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListSQLInstancesResponse{}, wrapGCPError("cloudsql.ListSQLInstances", err)
+		}
+		for _, inst := range resp.Items {
+			tier := ""
+			var labels map[string]string
+			if inst.Settings != nil {
+				tier = inst.Settings.Tier
+				labels = inst.Settings.UserLabels
+			}
+			instances = append(instances, models.SQLInstanceSummary{
+				Name: inst.Name, DatabaseVersion: inst.DatabaseVersion, Region: inst.Region,
+				State: inst.State, Tier: tier, Labels: labels,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListSQLInstancesResponse{Instances: instances}, nil
 }

@@ -91,6 +91,7 @@ type ScaleDeploymentRequest struct {
 	NodeCount     int32  `json:"node_count"`
 	DryRun        bool   `json:"dry_run"`
 	ConfirmPlanID string `json:"confirm_plan_id,omitempty"`
+	ExpectedCount *int32 `json:"-"`
 }
 
 type ScaleDeploymentResponse struct {
@@ -102,4 +103,5 @@ type ScaleDeploymentResponse struct {
 	Description    string `json:"description"`
 	PlanID         string `json:"plan_id,omitempty"`
 	ExpiresIn      string `json:"expires_in,omitempty"`
+	OperationName  string `json:"operation_name,omitempty"`
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"cloud.google.com/go/storage"
 	workflows "cloud.google.com/go/workflows/apiv1"
 	workflowexecutions "cloud.google.com/go/workflows/executions/apiv1"
+	"golang.org/x/sync/singleflight"
 	"golang.org/x/time/rate"
 	"google.golang.org/api/alloydb/v1"
 	"google.golang.org/api/apigateway/v1beta"
@@ -199,6 +201,9 @@ type gcpAdapter struct {
 	graphCache                *ttlCache[models.ServerlessGraph]
 	recommenderCache          *ttlCache[[]recommenderInsight]
 	costRecommendationCache   *ttlCache[models.ListCostRecommendationsResponse]
+	graphFlight               singleflight.Group
+	closeOnce                 sync.Once
+	closeErr                  error
 	recommenderQuotaExhausted atomic.Bool
 	// --- time.Duration (8 bytes each) ---
 	callTimeout  time.Duration
@@ -223,7 +228,7 @@ var _ ports.GCPService = (*gcpAdapter)(nil)
 // When WithModules is provided, only the clients needed by those modules are opened.
 //
 // Call Close() when done to release gRPC connections.
-func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, error) {
+func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, retErr error) {
 	a := &gcpAdapter{
 		limiter:      rate.NewLimiter(10, 20),
 		callTimeout:  30 * time.Second,
@@ -234,8 +239,19 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 		regionsCache: newTTLCache[[]string](10 * time.Minute),
 		graphCache:   newTTLCache[models.ServerlessGraph](archGraphCacheTTL),
 	}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		if closeErr := a.Close(); closeErr != nil {
+			retErr = fmt.Errorf("%w (cleanup: %v)", retErr, closeErr)
+		}
+	}()
 	for _, o := range opts {
 		o(a)
+	}
+	if err := validateAdapterSettings(a, projectID); err != nil {
+		return nil, fmt.Errorf("gcp: configuration: %w", err)
 	}
 	a.costConfig = normalizeCostAdapterConfig(a.costConfig, projectID)
 	if a.enableCostReasoning {
@@ -530,8 +546,40 @@ func New(ctx context.Context, projectID string, opts ...Option) (*gcpAdapter, er
 	return a, nil
 }
 
+func validateAdapterSettings(a *gcpAdapter, projectID string) error {
+	if !costProjectIDRE.MatchString(projectID) {
+		return fmt.Errorf("invalid project ID %q", projectID)
+	}
+	if a.limiter == nil || a.limiter.Limit() <= 0 || a.limiter.Burst() <= 0 {
+		return fmt.Errorf("rate limit and burst must be positive")
+	}
+	if a.callTimeout <= 0 {
+		return fmt.Errorf("call timeout must be positive")
+	}
+	if a.graphTimeout <= 0 {
+		return fmt.Errorf("graph timeout must be positive")
+	}
+	if a.traceBackend != "trace" && a.traceBackend != "monitoring" {
+		return fmt.Errorf("trace backend must be %q or %q", "trace", "monitoring")
+	}
+	if a.log == nil {
+		return fmt.Errorf("logger must not be nil")
+	}
+	for module := range a.enabledModules {
+		if _, ok := moduleClientDeps[module]; !ok || module == "_resources" {
+			return fmt.Errorf("unknown module %q", module)
+		}
+	}
+	return nil
+}
+
 // Close releases all underlying connections. Nil-safe: only closes clients that were initialized.
 func (a *gcpAdapter) Close() error {
+	a.closeOnce.Do(func() { a.closeErr = a.closeClients() })
+	return a.closeErr
+}
+
+func (a *gcpAdapter) closeClients() error {
 	var errs []error
 	if a.clusterMgr != nil {
 		if err := a.clusterMgr.Close(); err != nil {

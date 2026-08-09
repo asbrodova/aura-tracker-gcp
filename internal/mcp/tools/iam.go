@@ -36,6 +36,12 @@ func (t *IAMTools) TestPermissions() server.ServerTool {
 	tool := mcp.NewTool("gcp_iam_test_permissions",
 		mcp.WithDescription("Test which IAM permissions the service account holds on the project. Call before mutations to pre-check access."),
 		mcp.WithString("project_id", mcp.Description("GCP project ID to test permissions against. Omit to use the server default.")),
+		mcp.WithArray("permissions",
+			mcp.Description("Permissions to test. Omit to check the server's standard read and mutation permission set."),
+			mcp.WithStringItems(),
+			mcp.UniqueItems(true),
+			mcp.MaxItems(100),
+		),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Test IAM Permissions",
 			ReadOnlyHint:    boolPtr(true),
@@ -77,6 +83,7 @@ func (t *IAMTools) GetResourceIAMBindings() server.ServerTool {
 				"URN format: urn:gcp:{kind}:{region}:{project_id}:{resource-name}. "+
 				"Returns the list of role→members bindings on that resource.",
 		),
+		mcp.WithString("project_id", mcp.Description("Configured GCP project that must own the URN resource. Omit to use the server default.")),
 		mcp.WithString("urn", mcp.Required(), mcp.Description("Resource URN, e.g. urn:gcp:storage_bucket:-:my-project:my-bucket")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Get Resource IAM Bindings",
@@ -89,13 +96,18 @@ func (t *IAMTools) GetResourceIAMBindings() server.ServerTool {
 	return server.ServerTool{
 		Tool: tool,
 		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args struct {
-			URN string `json:"urn"`
+			ProjectID string `json:"project_id"`
+			URN       string `json:"urn"`
 		}) (*mcp.CallToolResult, error) {
-			resp, err := t.svc.GetResourceIAMBindings(ctx, models.GetResourceIAMBindingsRequest{URN: args.URN})
+			resp, err := t.svc.GetResourceIAMBindings(ctx, models.GetResourceIAMBindingsRequest{ProjectID: args.ProjectID, URN: args.URN})
 			if err != nil {
 				return handleServiceError("gcp_iam_get_resource_bindings", err)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_iam_get_resource_bindings: marshal: %w", err)
+			}
+			return result, nil
 		}),
 	}
 }
@@ -125,7 +137,11 @@ func (t *IAMTools) ListServiceAccounts() server.ServerTool {
 			if err != nil {
 				return handleServiceError("gcp_iam_list_service_accounts", err)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_iam_list_service_accounts: marshal: %w", err)
+			}
+			return result, nil
 		}),
 	}
 }

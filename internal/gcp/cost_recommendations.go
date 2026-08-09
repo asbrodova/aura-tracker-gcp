@@ -44,14 +44,6 @@ func (a *gcpAdapter) ListCostRecommendations(ctx context.Context, req models.Lis
 	if a.recommenderQuotaExhausted.Load() {
 		return models.ListCostRecommendationsResponse{}, &ports.RecommenderQuotaExhaustedError{Op: op}
 	}
-	if a.costRecommendationCache != nil {
-		if cached, ok := a.costRecommendationCache.get(req.ProjectID); ok {
-			return cached, nil
-		}
-	}
-	if err := a.rateWait(ctx, op); err != nil {
-		return models.ListCostRecommendationsResponse{}, err
-	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 100
@@ -59,7 +51,15 @@ func (a *gcpAdapter) ListCostRecommendations(ctx context.Context, req models.Lis
 	if limit > 500 {
 		limit = 500
 	}
-
+	cacheKey := fmt.Sprintf("%s|limit=%d", req.ProjectID, limit)
+	if a.costRecommendationCache != nil {
+		if cached, ok := a.costRecommendationCache.get(cacheKey); ok {
+			return cached, nil
+		}
+	}
+	if err := a.rateWait(ctx, op); err != nil {
+		return models.ListCostRecommendationsResponse{}, err
+	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 	result := models.ListCostRecommendationsResponse{Available: true, Complete: true, Recommendations: []models.CostRecommendation{}, Warnings: []string{}}
@@ -112,8 +112,8 @@ func (a *gcpAdapter) ListCostRecommendations(ctx context.Context, req models.Lis
 	if !result.Complete && failed == 0 {
 		result.Warnings = append(result.Warnings, "Cost recommendation result limit reached; additional idle resources may exist.")
 	}
-	if a.costRecommendationCache != nil {
-		a.costRecommendationCache.set(req.ProjectID, result)
+	if a.costRecommendationCache != nil && failed == 0 {
+		a.costRecommendationCache.set(cacheKey, result)
 	}
 	return result, nil
 }

@@ -32,16 +32,17 @@ const serverName = "aura-tracker-gcp"
 type Option func(*serverOptions)
 
 type serverOptions struct {
-	anonymizer              anonymize.Anonymizer
-	enabledModules          map[string]bool // nil = all modules
-	environments            *environments.Registry
-	projectIDReplacements   map[string]string
-	projectIDPlaceholder    string
-	defaultProjectID        string
-	enableRecommenderExport bool
-	enableCostReasoning     bool
-	costReasoningConfig     costreasoning.Config
-	securityAuditConfig     securityaudit.Config
+	anonymizer               anonymize.Anonymizer
+	enabledModules           map[string]bool // nil = all modules
+	environments             *environments.Registry
+	projectIDReplacements    map[string]string
+	projectIDPlaceholder     string
+	defaultProjectID         string
+	enableRecommenderExport  bool
+	recommenderExportDataset string
+	enableCostReasoning      bool
+	costReasoningConfig      costreasoning.Config
+	securityAuditConfig      securityaudit.Config
 }
 
 // WithEnvironments configures the allowed project selectors, default project,
@@ -69,7 +70,7 @@ func WithAnonymizer(a anonymize.Anonymizer) Option {
 }
 
 // WithModules restricts which tool modules are registered.
-// A nil or empty map registers all modules (default behavior).
+// A nil map registers all modules; an empty map registers none.
 func WithModules(modules map[string]bool) Option {
 	return func(o *serverOptions) { o.enabledModules = modules }
 }
@@ -83,8 +84,13 @@ func WithDefaultProjectID(id string) Option {
 
 // WithRecommenderExport registers the gcp_export_recommendations_to_bq tool.
 // Off by default; enable via RECOMMENDER_BQ_EXPORT_ENABLED=true.
-func WithRecommenderExport() Option {
-	return func(o *serverOptions) { o.enableRecommenderExport = true }
+func WithRecommenderExport(defaultDataset ...string) Option {
+	return func(o *serverOptions) {
+		o.enableRecommenderExport = true
+		if len(defaultDataset) > 0 {
+			o.recommenderExportDataset = strings.TrimSpace(defaultDataset[0])
+		}
+	}
 }
 
 // WithCostReasoning registers the opt-in, read-only billing explanation tool.
@@ -156,6 +162,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		}
 		orig := t.Handler
 		t.Handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			var resolvedProject string
 			if o.environments != nil && len(projectKeys) > 0 {
 				args, _ := req.Params.Arguments.(map[string]any)
 				if args == nil {
@@ -178,6 +185,14 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 						return mcp.NewToolResultError(environmentSelectionError(o.environments)), nil
 					}
 					args[key] = environment.ProjectID
+					if resolvedProject == "" {
+						resolvedProject = environment.ProjectID
+					} else if resolvedProject != environment.ProjectID {
+						return mcp.NewToolResultError("all project selectors in one request must resolve to the same configured environment"), nil
+					}
+				}
+				if err := validateScopedArguments(args, resolvedProject); err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
 				}
 				req.Params.Arguments = args
 			}
@@ -198,13 +213,13 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		resource.Handler = func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			contents, err := original(ctx, req)
 			if err != nil {
-				return nil, errors.New(privacyMasker.ReplaceString(err.Error()))
+				return nil, anonymize.ScrubError(ctx, o.anonymizer, errors.New(privacyMasker.ReplaceString(err.Error())))
 			}
 			scrubbed, err := privacyMasker.ScrubResourceContents(contents)
 			if err != nil {
 				return nil, errors.New("project identifier privacy filter failed; resource withheld")
 			}
-			return scrubbed, nil
+			return anonymize.ScrubResourceContents(ctx, o.anonymizer, scrubbed)
 		}
 		return resource
 	}
@@ -213,13 +228,13 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		resource.Handler = func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			contents, err := original(ctx, req)
 			if err != nil {
-				return nil, errors.New(privacyMasker.ReplaceString(err.Error()))
+				return nil, anonymize.ScrubError(ctx, o.anonymizer, errors.New(privacyMasker.ReplaceString(err.Error())))
 			}
 			scrubbed, err := privacyMasker.ScrubResourceContents(contents)
 			if err != nil {
 				return nil, errors.New("project identifier privacy filter failed; resource withheld")
 			}
-			return scrubbed, nil
+			return anonymize.ScrubResourceContents(ctx, o.anonymizer, scrubbed)
 		}
 		return resource
 	}
@@ -228,13 +243,13 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		prompt.Handler = func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 			result, err := original(ctx, req)
 			if err != nil {
-				return nil, errors.New(privacyMasker.ReplaceString(err.Error()))
+				return nil, anonymize.ScrubError(ctx, o.anonymizer, errors.New(privacyMasker.ReplaceString(err.Error())))
 			}
 			scrubbed, err := privacyMasker.ScrubPromptResult(result)
 			if err != nil {
 				return nil, errors.New("project identifier privacy filter failed; prompt withheld")
 			}
-			return scrubbed, nil
+			return anonymize.ScrubPromptResult(ctx, o.anonymizer, scrubbed)
 		}
 		return prompt
 	}
@@ -271,7 +286,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewSecurityTools(securityaudit.New(svc, log, securityaudit.WithConfig(o.securityAuditConfig)), log),
 	}
 	if o.enableRecommenderExport {
-		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log))
+		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log, o.recommenderExportDataset))
 	}
 	if o.enableCostReasoning {
 		allModules = append(allModules, tools.NewCostTools(costreasoning.New(svc, log, o.costReasoningConfig), log))
@@ -332,6 +347,83 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	s.AddPrompts(promptList...)
 
 	return s
+}
+
+func validateScopedArguments(args map[string]any, projectID string) error {
+	if err := validateArgumentStrings(args, "arguments"); err != nil {
+		return err
+	}
+	segmentKeys := map[string]bool{
+		"bucket_name": true, "cluster_name": true, "dataset": true,
+		"function_name": true, "job_name": true, "location": true,
+		"name": true, "namespace": true, "node_pool_name": true,
+		"region": true, "repository": true, "service_name": true,
+		"table": true, "topic_name": true, "trigger_name": true,
+		"workflow_name": true,
+	}
+	for key := range segmentKeys {
+		if raw, ok := args[key]; ok {
+			if value, ok := raw.(string); ok && (strings.ContainsAny(value, `/\\`) || value == "." || value == "..") {
+				return fmt.Errorf("%s must be a resource name segment, not a path", key)
+			}
+		}
+	}
+	if rawRegions, ok := args["regions"].([]any); ok {
+		for _, rawRegion := range rawRegions {
+			if region, ok := rawRegion.(string); ok && strings.ContainsAny(region, `/\\`) {
+				return errors.New("regions entries must be region names, not paths")
+			}
+		}
+	}
+	raw, exists := args["urn"]
+	if !exists || raw == nil {
+		return nil
+	}
+	urn, ok := raw.(string)
+	if !ok {
+		return errors.New("resource URN must be a string")
+	}
+	parts := strings.SplitN(urn, ":", 6)
+	if len(parts) != 6 || parts[0] != "urn" || parts[1] != "gcp" || parts[4] == "" {
+		return errors.New("resource URN must use urn:gcp:{kind}:{region}:{project_id}:{resource-name}")
+	}
+	if parts[4] != projectID {
+		return errors.New("resource URN is outside the selected configured environment")
+	}
+	if parts[2] == "project" && parts[5] != projectID {
+		return errors.New("project URN resource must match its project_id segment")
+	}
+	return nil
+}
+
+func validateArgumentStrings(value any, path string) error {
+	switch typed := value.(type) {
+	case string:
+		if len(typed) > 4096 {
+			return fmt.Errorf("%s exceeds 4096 bytes", path)
+		}
+		for _, char := range typed {
+			if char == 0 || (char < ' ' && char != '\t' && char != '\n' && char != '\r') {
+				return fmt.Errorf("%s contains a control character", path)
+			}
+		}
+	case []any:
+		for i, item := range typed {
+			if err := validateArgumentStrings(item, fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+	case map[string]any:
+		for key, item := range typed {
+			if len(key) > 256 {
+				return fmt.Errorf("%s contains an oversized key", path)
+			}
+			if err := validateArgumentStrings(item, path+"."+key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func environmentSelectionError(registry *environments.Registry) string {

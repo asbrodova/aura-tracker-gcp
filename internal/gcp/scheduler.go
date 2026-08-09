@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -27,6 +28,7 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var jobs []models.SchedulerJobSummary
 	var errs []models.ToolError
@@ -54,12 +56,22 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 	if jobs == nil {
 		jobs = []models.SchedulerJobSummary{}
 	}
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].Region != jobs[j].Region {
+			return jobs[i].Region < jobs[j].Region
+		}
+		return jobs[i].Name < jobs[j].Name
+	})
+	sortToolErrors(errs)
 	return models.ListSchedulerJobsResponse{Jobs: jobs, Errors: errs}, nil
 }
 
 func (a *gcpAdapter) listSchedulerJobsForRegion(ctx context.Context, projectID, region string) ([]models.SchedulerJobSummary, error) {
 	if a.schedulerClient == nil {
 		return nil, nil
+	}
+	if err := a.rateWait(ctx, "scheduler.listJobsForRegion"); err != nil {
+		return nil, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()

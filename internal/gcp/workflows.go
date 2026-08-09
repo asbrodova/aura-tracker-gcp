@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -27,6 +28,7 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var workflows []models.WorkflowSummary
 	var errs []models.ToolError
@@ -53,12 +55,22 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 	if workflows == nil {
 		workflows = []models.WorkflowSummary{}
 	}
+	sort.Slice(workflows, func(i, j int) bool {
+		if workflows[i].Region != workflows[j].Region {
+			return workflows[i].Region < workflows[j].Region
+		}
+		return workflows[i].Name < workflows[j].Name
+	})
+	sortToolErrors(errs)
 	return models.ListWorkflowsResponse{Workflows: workflows, Errors: errs}, nil
 }
 
 func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, region string) ([]models.WorkflowSummary, error) {
 	if a.workflowsClient == nil {
 		return nil, nil
+	}
+	if err := a.rateWait(ctx, "workflows.listForRegion"); err != nil {
+		return nil, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()

@@ -11,14 +11,14 @@ import (
 // after the original handler returns. Both success and IsError=true results
 // are scrubbed — error messages can contain IPs, project IDs, or emails.
 //
-// Go-level errors (JSON-RPC -32603) bypass the scrubber and propagate unchanged
-// because they carry no tool content for the LLM to read.
+// Go-level errors are converted to tool errors before scrubbing so protocol
+// error strings cannot bypass privacy enforcement.
 func WrapHandler(tool server.ServerTool, a Anonymizer) server.ServerTool {
 	orig := tool.Handler
 	tool.Handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		result, err := orig(ctx, req)
 		if err != nil {
-			return nil, err
+			result = mcp.NewToolResultError(err.Error())
 		}
 		scrubbed, scrubErr := a.Scrub(ctx, result)
 		if scrubErr != nil {

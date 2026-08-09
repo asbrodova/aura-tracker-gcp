@@ -25,7 +25,7 @@ func findEdge(edges []models.GraphEdge, src, tgt, edgeType string) *models.Graph
 
 // ─── Pass 1 ───────────────────────────────────────────────────────────────────
 
-func TestPass1_SecretRef(t *testing.T) {
+func TestPass1_KubernetesSecretRefDoesNotImplySecretManagerAccess(t *testing.T) {
 	depNode := node("urn:gcp:gke:-:proj:gke_deployment/myapp", models.KindGKEDeployment, "myapp", "proj")
 	secretNode := node("urn:gcp:secretmanager:-:proj:secret/db-password", models.KindSecret, "db-password", "proj")
 
@@ -41,21 +41,16 @@ func TestPass1_SecretRef(t *testing.T) {
 		},
 	})
 
-	e := findEdge(out.Edges, depNode.ID, secretNode.ID, models.EdgeReadsSecret)
-	if e == nil {
-		t.Fatalf("expected reads_secret edge, got %v", out.Edges)
-	}
-	if e.Evidence != models.EvidenceK8sSpec {
-		t.Errorf("expected evidence %q, got %q", models.EvidenceK8sSpec, e.Evidence)
-	}
-	if e.Confidence < 0.9 {
-		t.Errorf("expected confidence ≥ 0.9, got %f", e.Confidence)
+	if e := findEdge(out.Edges, depNode.ID, secretNode.ID, models.EdgeReadsSecret); e != nil {
+		t.Fatalf("Kubernetes Secret name must not be joined to Secret Manager: %+v", e)
 	}
 }
 
 func TestPass1_K8sServiceSelector(t *testing.T) {
 	svcNode := node("urn:gcp:k8s:-:proj:gke_service/web-svc", models.KindGKEService, "web-svc", "proj")
 	depNode := node("urn:gcp:k8s:-:proj:gke_deployment/web", models.KindGKEDeployment, "web", "proj")
+	svcNode.Namespace = "default"
+	depNode.Namespace = "default"
 
 	out := resolution.Resolve(models.ResolutionInput{
 		Nodes: []models.GraphNode{svcNode, depNode},
@@ -82,9 +77,34 @@ func TestPass1_K8sServiceSelector(t *testing.T) {
 	}
 }
 
+func TestPass1_K8sServiceSelectorIsClusterScoped(t *testing.T) {
+	serviceA := models.GraphNode{ID: "service-a", Kind: models.KindGKEService, Name: "web", Namespace: "prod", ClusterName: "cluster", Region: "us-central1"}
+	serviceB := models.GraphNode{ID: "service-b", Kind: models.KindGKEService, Name: "web", Namespace: "prod", ClusterName: "cluster", Region: "europe-west1"}
+	workloadA := models.GraphNode{ID: "workload-a", Kind: models.KindGKEDeployment, Name: "api", Namespace: "prod", ClusterName: "cluster", Region: "us-central1"}
+	workloadB := models.GraphNode{ID: "workload-b", Kind: models.KindGKEDeployment, Name: "api", Namespace: "prod", ClusterName: "cluster", Region: "europe-west1"}
+	out := resolution.Resolve(models.ResolutionInput{
+		Nodes: []models.GraphNode{serviceA, serviceB, workloadA, workloadB},
+		K8sServices: []models.GKEServiceSummary{{
+			GraphNodeID: "service-a", Name: "web", Namespace: "prod", ClusterName: "cluster", ClusterLocation: "us-central1",
+			Selector: map[string]string{"app": "api"},
+		}},
+		Workloads: []models.GKEWorkloadSummary{
+			{GraphNodeID: "workload-a", Name: "api", Namespace: "prod", ClusterName: "cluster", ClusterLocation: "us-central1", Kind: models.KindGKEDeployment, Labels: map[string]string{"app": "api"}},
+			{GraphNodeID: "workload-b", Name: "api", Namespace: "prod", ClusterName: "cluster", ClusterLocation: "europe-west1", Kind: models.KindGKEDeployment, Labels: map[string]string{"app": "api"}},
+		},
+	})
+	if findEdge(out.Edges, "service-a", "workload-a", models.EdgeExposes) == nil {
+		t.Fatalf("missing scoped selector edge: %+v", out.Edges)
+	}
+	if findEdge(out.Edges, "service-a", "workload-b", models.EdgeExposes) != nil {
+		t.Fatalf("selector crossed cluster location: %+v", out.Edges)
+	}
+}
+
 func TestPass1_NEGAnnotation(t *testing.T) {
 	svcNode := node("svc-id", models.KindGKEService, "api-svc", "proj")
 	negNode := node("neg-id", models.KindComputeNEG, "api-neg", "proj")
+	svcNode.Namespace = "default"
 
 	out := resolution.Resolve(models.ResolutionInput{
 		Nodes: []models.GraphNode{svcNode, negNode},
@@ -200,6 +220,8 @@ func TestPass2_IAMSpannerBinding(t *testing.T) {
 func TestPass3_MeshEdge(t *testing.T) {
 	callerNode := node("caller-id", models.KindGKEDeployment, "frontend", "proj")
 	calleeNode := node("callee-id", models.KindGKEDeployment, "backend", "proj")
+	callerNode.Namespace = "prod"
+	calleeNode.Namespace = "prod"
 
 	out := resolution.Resolve(models.ResolutionInput{
 		Nodes: []models.GraphNode{callerNode, calleeNode},
@@ -214,6 +236,25 @@ func TestPass3_MeshEdge(t *testing.T) {
 	}
 	if e.Confidence != 0.85 {
 		t.Errorf("expected confidence 0.85, got %f", e.Confidence)
+	}
+}
+
+func TestPass3_MeshEdgeIsClusterScoped(t *testing.T) {
+	nodes := []models.GraphNode{
+		{ID: "caller-a", Kind: models.KindGKEDeployment, Name: "frontend", Namespace: "prod", ClusterName: "cluster", Region: "us-central1"},
+		{ID: "callee-a", Kind: models.KindGKEDeployment, Name: "backend", Namespace: "prod", ClusterName: "cluster", Region: "us-central1"},
+		{ID: "caller-b", Kind: models.KindGKEDeployment, Name: "frontend", Namespace: "prod", ClusterName: "cluster", Region: "europe-west1"},
+		{ID: "callee-b", Kind: models.KindGKEDeployment, Name: "backend", Namespace: "prod", ClusterName: "cluster", Region: "europe-west1"},
+	}
+	out := resolution.Resolve(models.ResolutionInput{
+		Nodes: nodes,
+		MeshEdges: []models.GKEMeshEdge{{
+			Caller: "frontend", CallerNamespace: "prod", Callee: "backend", CalleeNamespace: "prod",
+			ClusterName: "cluster", ClusterLocation: "europe-west1",
+		}},
+	})
+	if findEdge(out.Edges, "caller-b", "callee-b", models.EdgeMeshCalls) == nil || len(out.Edges) != 1 {
+		t.Fatalf("mesh edge was not scoped to its source cluster: %+v", out.Edges)
 	}
 }
 
@@ -257,6 +298,20 @@ func TestPass4_TraceEdge_LowSample(t *testing.T) {
 	// 0.90 * 5/10 = 0.45
 	if e.Confidence < 0.44 || e.Confidence > 0.46 {
 		t.Errorf("expected confidence ~0.45 for 5 samples, got %f", e.Confidence)
+	}
+}
+
+func TestPass4_AmbiguousTraceNamesAreSkipped(t *testing.T) {
+	out := resolution.Resolve(models.ResolutionInput{
+		Nodes: []models.GraphNode{
+			node("caller-a", models.KindCloudRunService, "api", "proj"),
+			node("caller-b", models.KindGKEDeployment, "api", "proj"),
+			node("callee", models.KindCloudRunService, "backend", "proj"),
+		},
+		TraceEdges: []models.TraceDependencyEdge{{Caller: "api", Callee: "backend", SampleCount: 10}},
+	})
+	if len(out.Edges) != 0 {
+		t.Fatalf("ambiguous trace name produced a false edge: %+v", out.Edges)
 	}
 }
 

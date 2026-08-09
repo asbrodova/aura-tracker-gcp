@@ -38,7 +38,7 @@ Cost-bearing integrations and sensitive-data features have explicit controls:
 | PII / credential scrubbing | `ANONYMIZE_ENABLED` | off |
 | HITL mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
 
-Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. Cost reasoning is off by default because it runs chargeable BigQuery queries. Two tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); the default 69 others—and the optional cost tool—are strictly read-only calls. Mutation tools require explicit opt-in at every call through a mandatory two-step flow.
+Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. Cost reasoning is off by default because it runs chargeable BigQuery queries. Two base tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); the optional BigQuery recommendation export is also a mutation. All mutations require explicit opt-in at every call through a mandatory two-step flow.
 
 ### Human-in-the-Loop for Every Mutation
 
@@ -49,7 +49,7 @@ No GCP resource can be modified without first generating a preview plan, then ex
 
 Calling a mutation tool without a plan returns a `confirmation required` error with step-by-step instructions. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`). This protocol is enforced in `internal/safety/` at the port boundary — it cannot be bypassed by the LLM.
 
-> **Development override:** Set `SAFETY_ENABLED=false` to skip the plan/confirm flow. Never use this in production.
+> **Local development override:** Set `SAFETY_ENABLED=false` to skip the plan/confirm flow over stdio. The server refuses this override with the SSE transport.
 
 ### Token Efficiency: Load Only What You Need
 
@@ -817,13 +817,16 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `COST_REASONING_TIMEZONE` | No | IANA timezone used for complete calendar-day windows. Default: `UTC`. |
 | `COST_REASONING_HISTORY_DAYS` | No | History queried for freshness, trends, and first-seen classification; `14`–`366`. Default: `90`. |
 | `COST_QUERY_MAX_BYTES` | No | Positive per-statement BigQuery maximum bytes billed. Default: `5368709120` (5 GiB). |
-| `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for mutation tools. **Development/testing only** — safety is on by default. |
+| `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for local stdio development. Rejected when `MCP_TRANSPORT=sse`. Safety is on by default. |
 | `TRACE_BACKEND` | No | Backend for `gcp_trace_list_services`: `trace` (Cloud Trace v1 REST, default) or `monitoring` (Monitoring metric proxy). Use `monitoring` if Cloud Trace API is disabled but OpenCensus/OpenTelemetry metrics exist. |
 | `GRAPH_TIMEOUT_SECONDS` | No | Outer context timeout in seconds for graph exports and diagram discovery. Default: `120`. Individual sub-calls still use `callTimeout` (30 s). |
 | `GRAPHVIZ_DOT_PATH` | No | Path to Graphviz `dot` for SVG diagram generation. Auto-discovered on `PATH`; set to `/usr/bin/dot` in the official container. Mermaid and Graphviz DOT source do not require it. |
 | `MCP_TRANSPORT` | No | Transport mode: `stdio` (default, for Claude Desktop) or `sse` (for Cloud Run / web-based MCP clients) |
 | `PORT` | No | HTTP port when `MCP_TRANSPORT=sse`. Cloud Run sets this automatically. Defaults to `8080`. |
-| `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Required for correct SSE endpoint URLs when deployed to Cloud Run. Defaults to `http://localhost:PORT` for local testing. |
+| `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Non-loopback URLs must use HTTPS. Defaults to `http://localhost:PORT` for local testing. |
+| `MCP_AUTH_MODE` | No | SSE authentication mode: `required` (default) or `disabled`. Disabled mode is accepted only for a loopback base URL and binds the listener to loopback. |
+| `MCP_AUTH_AUDIENCE` | No | Expected Google ID-token audience. Defaults to `MCP_BASE_URL` without a trailing slash. |
+| `MCP_AUTH_ALLOWED_EMAILS` | No | Optional comma-separated allowlist of verified email claims. When omitted, any valid Google identity token with the configured audience is accepted. |
 
 ## User Config File
 
@@ -1158,7 +1161,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 
 **Dependency rule:** `internal/mcp` never imports `internal/gcp`. Ordinary tool modules depend on `ports/`; incident diagnosis and cost reasoning delegate to deterministic application-layer engines whose narrow `DataSource` interfaces are satisfied by the same `GCPService`. `internal/safety` sits at the port boundary—it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
 
-Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. The MCP protocol layer is identical in both modes.
+Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. SSE requires a Google-signed ID token in `Authorization: Bearer <token>` by default; validation covers signature, expiry, audience, subject, and the optional verified-email allowlist. Public base URLs must use HTTPS. The MCP protocol layer is otherwise identical in both modes.
 
 → Architectural decisions, hexagonal boundary rules, SSE deployment, and contributor guide: [Architecture & Contributing](https://github.com/asbrodova/aura-tracker-gcp/wiki/Architecture-and-Contributing)
 

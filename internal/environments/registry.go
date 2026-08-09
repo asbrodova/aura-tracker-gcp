@@ -12,6 +12,7 @@ import (
 
 var (
 	aliasPattern          = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	projectIDPattern      = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
 	ErrUnknownEnvironment = errors.New("unknown environment")
 )
 
@@ -58,6 +59,9 @@ func NewRegistry(input []Environment) (*Registry, error) {
 		candidate.Alias = strings.TrimSpace(candidate.Alias)
 		if candidate.ProjectID == "" {
 			return nil, fmt.Errorf("environment %d: project_id is required", i+1)
+		}
+		if !projectIDPattern.MatchString(candidate.ProjectID) {
+			return nil, fmt.Errorf("environment %d: invalid GCP project_id %q", i+1, candidate.ProjectID)
 		}
 		if _, exists := r.byProjectID[candidate.ProjectID]; exists {
 			return nil, fmt.Errorf("environment %d: duplicate project_id", i+1)

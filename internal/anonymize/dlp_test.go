@@ -212,11 +212,8 @@ func TestDLPAnonymizer_OversizedContent(t *testing.T) {
 	d := newDLP(svc, false)
 	big := strings.Repeat("x", maxDLPBytes+1)
 	out, err := d.Scrub(context.Background(), dlpTextResult(big))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if dlpGetText(out) != big {
-		t.Error("oversized content should be returned unmodified")
+	if err == nil || out != nil {
+		t.Fatalf("oversized content must fail closed, got result=%v err=%v", out, err)
 	}
 }
 

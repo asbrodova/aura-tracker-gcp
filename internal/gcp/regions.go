@@ -2,11 +2,14 @@ package gcp
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	containerpb "google.golang.org/genproto/googleapis/container/v1"
 )
+
+const regionalFanoutConcurrency = 8
 
 // defaultGCPRegions is the fallback list used when neither Cloud Run nor GKE
 // surfaces any active regions for a project.
@@ -46,6 +49,9 @@ func (a *gcpAdapter) regionsFromCloudRun(ctx context.Context, projectID string) 
 	if a.runSvc == nil {
 		return nil
 	}
+	if err := a.rateWait(ctx, "regions.cloudrun"); err != nil {
+		return nil
+	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
@@ -67,6 +73,9 @@ func (a *gcpAdapter) regionsFromCloudRun(ctx context.Context, projectID string) 
 
 func (a *gcpAdapter) regionsFromGKE(ctx context.Context, projectID string) []string {
 	if a.clusterMgr == nil {
+		return nil
+	}
+	if err := a.rateWait(ctx, "regions.gke"); err != nil {
 		return nil
 	}
 	ctx, cancel := a.withTimeout(ctx)
@@ -114,5 +123,6 @@ func mapKeys(m map[string]bool) []string {
 	for k := range m {
 		out = append(out, k)
 	}
+	sort.Strings(out)
 	return out
 }

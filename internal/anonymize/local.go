@@ -17,7 +17,8 @@ type compiledPattern struct {
 	label string // upper-case prefix for the indexed token, e.g. "EMAIL" → [EMAIL_1]
 	// staticRepl, when non-empty, replaces every match with this fixed string
 	// instead of an indexed token. Used for secrets that need no context.
-	staticRepl string
+	staticRepl      string
+	indexedTemplate string
 }
 
 // builtinPatterns are always applied, in order, before any custom patterns.
@@ -66,16 +67,20 @@ func newTokenRegistry() *tokenRegistry {
 }
 
 func (r *tokenRegistry) tokenFor(label, rawValue string) string {
+	return fmt.Sprintf("[%s_%d]", label, r.indexFor(label, rawValue))
+}
+
+func (r *tokenRegistry) indexFor(label, rawValue string) int {
 	if r.indexes[label] == nil {
 		r.indexes[label] = make(map[string]int)
 	}
 	if idx, ok := r.indexes[label][rawValue]; ok {
-		return fmt.Sprintf("[%s_%d]", label, idx)
+		return idx
 	}
 	r.next[label]++
 	idx := r.next[label]
 	r.indexes[label][rawValue] = idx
-	return fmt.Sprintf("[%s_%d]", label, idx)
+	return idx
 }
 
 // LocalScrubber is a fast, regex-based Anonymizer. All methods are goroutine-safe
@@ -98,8 +103,12 @@ func NewLocalScrubber(cfg Config) (*LocalScrubber, error) {
 		}
 		label := strings.ToUpper(strings.ReplaceAll(pc.Name, " ", "_"))
 		cp := compiledPattern{name: pc.Name, re: re, label: label}
-		if tmpl := pc.ReplacementTemplate; tmpl != "" && !strings.Contains(tmpl, "${INDEX}") {
-			cp.staticRepl = tmpl
+		if tmpl := pc.ReplacementTemplate; tmpl != "" {
+			if strings.Contains(tmpl, "${INDEX}") {
+				cp.indexedTemplate = tmpl
+			} else {
+				cp.staticRepl = tmpl
+			}
 		}
 		patterns = append(patterns, cp)
 	}
@@ -118,9 +127,23 @@ func NewLocalScrubber(cfg Config) (*LocalScrubber, error) {
 
 // Scrub applies all patterns to the result's text content and structured content.
 // If AuditOnly is true, the result content is replaced with an AuditReport.
-func (s *LocalScrubber) Scrub(_ context.Context, result *mcp.CallToolResult) (*mcp.CallToolResult, error) {
-	if result == nil {
+func (s *LocalScrubber) Scrub(ctx context.Context, result *mcp.CallToolResult) (*mcp.CallToolResult, error) {
+	out, findings, err := s.scrub(ctx, result)
+	if err != nil {
+		return nil, err
+	}
+	if out == nil {
 		return nil, nil
+	}
+	if s.auditOnly {
+		return buildAuditResult(findings)
+	}
+	return out, nil
+}
+
+func (s *LocalScrubber) scrub(_ context.Context, result *mcp.CallToolResult) (*mcp.CallToolResult, []Finding, error) {
+	if result == nil {
+		return nil, nil, nil
 	}
 
 	reg := newTokenRegistry()
@@ -158,20 +181,18 @@ func (s *LocalScrubber) Scrub(_ context.Context, result *mcp.CallToolResult) (*m
 	// StructuredContent is any — marshal → walk → unmarshal.
 	if out.StructuredContent != nil {
 		b, err := json.Marshal(out.StructuredContent)
-		if err == nil {
-			scrubbedJSON, scFindings := s.scrubJSON(string(b), reg, -1)
-			allFindings = append(allFindings, scFindings...)
-			var sc any
-			if err := json.Unmarshal([]byte(scrubbedJSON), &sc); err == nil {
-				out.StructuredContent = sc
-			}
+		if err != nil {
+			return nil, nil, fmt.Errorf("anonymize: marshal structured content: %w", err)
 		}
+		scrubbedJSON, scFindings := s.scrubJSON(string(b), reg, -1)
+		allFindings = append(allFindings, scFindings...)
+		var sc any
+		if err := json.Unmarshal([]byte(scrubbedJSON), &sc); err != nil {
+			return nil, nil, fmt.Errorf("anonymize: unmarshal scrubbed structured content: %w", err)
+		}
+		out.StructuredContent = sc
 	}
-
-	if s.auditOnly {
-		return buildAuditResult(allFindings)
-	}
-	return &out, nil
+	return &out, allFindings, nil
 }
 
 // scrubJSON parses jsonStr, walks the tree, masks strings, and re-serialises.
@@ -230,6 +251,9 @@ func (s *LocalScrubber) scrubText(text string, reg *tokenRegistry, contentIdx in
 			count++
 			if p.staticRepl != "" {
 				return p.staticRepl
+			}
+			if p.indexedTemplate != "" {
+				return strings.ReplaceAll(p.indexedTemplate, "${INDEX}", fmt.Sprintf("%d", reg.indexFor(p.label, match)))
 			}
 			return reg.tokenFor(p.label, match)
 		})

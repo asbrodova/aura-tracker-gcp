@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	runpb "cloud.google.com/go/run/apiv2/runpb"
+	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 const tsFormat = "2006-01-02T15:04:05Z"
@@ -528,9 +531,12 @@ func (a *gcpAdapter) UpdateTraffic(ctx context.Context, req models.UpdateTraffic
 	if err := a.rateWait(ctx, "cloudrun.UpdateTraffic"); err != nil {
 		return models.UpdateTrafficResponse{}, err
 	}
+	if err := validateTrafficTargets(req.Traffic); err != nil {
+		return models.UpdateTrafficResponse{}, fmt.Errorf("cloudrun.UpdateTraffic: %w", err)
+	}
 
 	// Always fetch current state for before/after reporting.
-	ctx, cancel := a.withTimeout(ctx)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 
 	name := fmt.Sprintf("projects/%s/locations/%s/services/%s", req.ProjectID, req.Region, req.ServiceName)
@@ -539,22 +545,33 @@ func (a *gcpAdapter) UpdateTraffic(ctx context.Context, req models.UpdateTraffic
 		return models.UpdateTrafficResponse{}, wrapGCPError("cloudrun.UpdateTraffic.get", err)
 	}
 
-	before := make([]models.TrafficTarget, 0, len(current.Traffic))
-	for _, t := range current.Traffic {
-		before = append(before, models.TrafficTarget{
-			Revision: t.Revision,
-			Percent:  int32(t.Percent),
-			Tag:      t.Tag,
-		})
+	if req.ExpectedEtag != "" && current.Etag != req.ExpectedEtag {
+		return models.UpdateTrafficResponse{}, &ports.ConfirmationRequiredError{
+			Op:      "cloudrun.UpdateTraffic",
+			Message: "the Cloud Run service changed after preview; run dry_run=true again before confirming",
+		}
 	}
+	before := modelTrafficTargets(current.Traffic)
+	if err := a.validateTrafficRevisions(ctx, name, req.Traffic); err != nil {
+		return models.UpdateTrafficResponse{}, err
+	}
+	noChange := trafficTargetsEqual(before, req.Traffic)
 
 	if req.DryRun {
 		return models.UpdateTrafficResponse{
-			DryRun:      true,
-			ServiceName: req.ServiceName,
-			Before:      before,
-			After:       req.Traffic,
-			Description: fmt.Sprintf("DRY RUN: would update traffic for service %q", req.ServiceName),
+			DryRun:         true,
+			ServiceName:    req.ServiceName,
+			Before:         before,
+			After:          req.Traffic,
+			NoChangeNeeded: noChange,
+			Description:    fmt.Sprintf("DRY RUN: would update traffic for service %q", req.ServiceName),
+			StateVersion:   current.Etag,
+		}, nil
+	}
+	if noChange {
+		return models.UpdateTrafficResponse{
+			ServiceName: req.ServiceName, Before: before, After: before, NoChangeNeeded: true,
+			Description: fmt.Sprintf("service %q already has the requested traffic split", req.ServiceName),
 		}, nil
 	}
 
@@ -567,23 +584,125 @@ func (a *gcpAdapter) UpdateTraffic(ctx context.Context, req models.UpdateTraffic
 		})
 	}
 
-	op, err := a.runSvc.UpdateService(ctx, &runpb.UpdateServiceRequest{
-		Service: &runpb.Service{
-			Name:    name,
-			Traffic: pbTraffic,
-		},
-	})
+	op, err := a.runSvc.UpdateService(ctx, buildTrafficUpdateRequest(name, current.Etag, pbTraffic))
 	if err != nil {
 		return models.UpdateTrafficResponse{}, wrapGCPError("cloudrun.UpdateTraffic.update", err)
 	}
-	// We don't wait for the LRO to complete — the operation was submitted successfully.
-	_ = op
+	updated, err := op.Wait(ctx)
+	if err != nil {
+		return models.UpdateTrafficResponse{}, wrapGCPError("cloudrun.UpdateTraffic.wait", err)
+	}
+	after := modelTrafficTargets(updated.Traffic)
 
 	return models.UpdateTrafficResponse{
 		DryRun:      false,
 		ServiceName: req.ServiceName,
 		Before:      before,
-		After:       req.Traffic,
-		Description: fmt.Sprintf("traffic update submitted for service %q — operation in progress", req.ServiceName),
+		After:       after,
+		Description: fmt.Sprintf("traffic update completed for service %q", req.ServiceName),
 	}, nil
+}
+
+func buildTrafficUpdateRequest(name, etag string, traffic []*runpb.TrafficTarget) *runpb.UpdateServiceRequest {
+	return &runpb.UpdateServiceRequest{
+		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"traffic"}},
+		Service:    &runpb.Service{Name: name, Traffic: traffic, Etag: etag},
+	}
+}
+
+func validateTrafficTargets(targets []models.TrafficTarget) error {
+	if len(targets) == 0 {
+		return fmt.Errorf("at least one traffic target is required")
+	}
+	seenRevisions := make(map[string]struct{}, len(targets))
+	seenTags := make(map[string]struct{}, len(targets))
+	total := int64(0)
+	for index, target := range targets {
+		if target.Revision == "" || strings.TrimSpace(target.Revision) != target.Revision || strings.Contains(target.Revision, "/") {
+			return fmt.Errorf("traffic[%d].revision must be a non-empty revision name", index)
+		}
+		if target.Percent <= 0 || target.Percent > 100 {
+			return fmt.Errorf("traffic[%d].percent must be between 1 and 100", index)
+		}
+		if _, exists := seenRevisions[target.Revision]; exists {
+			return fmt.Errorf("traffic revision %q is duplicated", target.Revision)
+		}
+		seenRevisions[target.Revision] = struct{}{}
+		if target.Tag != "" {
+			if strings.TrimSpace(target.Tag) != target.Tag {
+				return fmt.Errorf("traffic[%d].tag must not contain surrounding whitespace", index)
+			}
+			if _, exists := seenTags[target.Tag]; exists {
+				return fmt.Errorf("traffic tag %q is duplicated", target.Tag)
+			}
+			seenTags[target.Tag] = struct{}{}
+		}
+		total += int64(target.Percent)
+	}
+	if total != 100 {
+		return fmt.Errorf("traffic percentages must sum to 100; got %d", total)
+	}
+	return nil
+}
+
+func (a *gcpAdapter) validateTrafficRevisions(ctx context.Context, serviceName string, targets []models.TrafficTarget) error {
+	if a.runRevisions == nil {
+		return fmt.Errorf("cloudrun.UpdateTraffic: revisions client is not initialised")
+	}
+	existing := make(map[string]struct{})
+	it := a.runRevisions.ListRevisions(ctx, &runpb.ListRevisionsRequest{Parent: serviceName})
+	for {
+		revision, err := it.Next()
+		if err != nil {
+			if isIteratorDone(err) {
+				break
+			}
+			return wrapGCPError("cloudrun.UpdateTraffic.listRevisions", err)
+		}
+		existing[resourceBaseName(revision.Name)] = struct{}{}
+	}
+	for _, target := range targets {
+		if _, ok := existing[target.Revision]; !ok {
+			return &ports.NotFoundError{Op: "cloudrun.UpdateTraffic", Err: fmt.Errorf("revision %q does not exist in the selected service", target.Revision)}
+		}
+	}
+	return nil
+}
+
+func resourceBaseName(value string) string {
+	if index := strings.LastIndex(value, "/"); index >= 0 {
+		return value[index+1:]
+	}
+	return value
+}
+
+func modelTrafficTargets(targets []*runpb.TrafficTarget) []models.TrafficTarget {
+	out := make([]models.TrafficTarget, 0, len(targets))
+	for _, target := range targets {
+		out = append(out, models.TrafficTarget{Revision: target.Revision, Percent: target.Percent, Tag: target.Tag})
+	}
+	return out
+}
+
+func trafficTargetsEqual(left, right []models.TrafficTarget) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	canonical := func(source []models.TrafficTarget) []models.TrafficTarget {
+		out := append([]models.TrafficTarget(nil), source...)
+		sort.Slice(out, func(i, j int) bool {
+			if out[i].Revision != out[j].Revision {
+				return out[i].Revision < out[j].Revision
+			}
+			return out[i].Tag < out[j].Tag
+		})
+		return out
+	}
+	a, b := canonical(left), canonical(right)
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

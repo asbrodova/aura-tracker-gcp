@@ -20,7 +20,7 @@ func (a *gcpAdapter) GetResourceIAMBindings(ctx context.Context, req models.GetR
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	bindings, err := a.fetchResourceBindings(ctx, req.URN)
+	bindings, err := a.fetchResourceBindings(ctx, req.ProjectID, req.URN)
 	if err != nil {
 		return models.GetResourceIAMBindingsResponse{}, wrapGCPError("iam.GetResourceIAMBindings", err)
 	}
@@ -33,17 +33,23 @@ func (a *gcpAdapter) GetResourceIAMBindings(ctx context.Context, req models.GetR
 // Supported kinds: storage_bucket (GCS IAM), project (CRM project policy).
 // Other resource kinds return an informative error — extend the switch as
 // resource-specific REST clients are added in later PRs.
-func (a *gcpAdapter) fetchResourceBindings(ctx context.Context, urn string) ([]models.IAMBinding, error) {
+func (a *gcpAdapter) fetchResourceBindings(ctx context.Context, selectedProject, urn string) ([]models.IAMBinding, error) {
 	parts := strings.SplitN(urn, ":", 6)
 	if len(parts) < 6 || parts[0] != "urn" || parts[1] != "gcp" {
 		return nil, fmt.Errorf("unrecognised URN format: %q", urn)
 	}
 	kind, _, project, resource := parts[2], parts[3], parts[4], parts[5]
+	if selectedProject == "" || project != selectedProject {
+		return nil, fmt.Errorf("URN project is outside the selected configured environment")
+	}
 
 	switch kind {
 	case "storage_bucket":
 		if a.gcs == nil {
-			return nil, nil
+			return nil, fmt.Errorf("storage client is not initialised")
+		}
+		if _, err := a.checkedBucketAttrs(ctx, selectedProject, resource); err != nil {
+			return nil, err
 		}
 		policy, err := a.gcs.Bucket(resource).IAM().Policy(ctx)
 		if err != nil {
@@ -61,22 +67,10 @@ func (a *gcpAdapter) fetchResourceBindings(ctx context.Context, urn string) ([]m
 
 	case "project":
 		if a.crm == nil {
-			return nil, nil
+			return nil, fmt.Errorf("cloud resource manager client is not initialised")
 		}
-		resp, err := a.crm.Projects.GetIamPolicy(resource, &cloudresourcemanager.GetIamPolicyRequest{}).Context(ctx).Do()
-		if err != nil {
-			return nil, err
-		}
-		out := make([]models.IAMBinding, 0, len(resp.Bindings))
-		for _, b := range resp.Bindings {
-			out = append(out, models.IAMBinding{Role: b.Role, Members: b.Members})
-		}
-		return out, nil
-
-	default:
-		// project-level fallback for any other kind
-		if a.crm == nil {
-			return nil, fmt.Errorf("unsupported URN kind %q; supported: storage_bucket, project", kind)
+		if resource != project {
+			return nil, fmt.Errorf("project URN resource must match its project segment")
 		}
 		resp, err := a.crm.Projects.GetIamPolicy(project, &cloudresourcemanager.GetIamPolicyRequest{}).Context(ctx).Do()
 		if err != nil {
@@ -87,6 +81,9 @@ func (a *gcpAdapter) fetchResourceBindings(ctx context.Context, urn string) ([]m
 			out = append(out, models.IAMBinding{Role: b.Role, Members: b.Members})
 		}
 		return out, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported URN kind %q; supported: storage_bucket, project", kind)
 	}
 }
 
@@ -100,21 +97,26 @@ func (a *gcpAdapter) ListServiceAccounts(ctx context.Context, req models.ListSer
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	resp, err := a.iamAdminSvc.Projects.ServiceAccounts.List("projects/" + req.ProjectID).Context(ctx).Do()
-	if err != nil {
-		return models.ListServiceAccountsResponse{}, wrapGCPError("iam.ListServiceAccounts", err)
-	}
-
-	accounts := make([]models.ServiceAccountSummary, 0, len(resp.Accounts))
-	for _, sa := range resp.Accounts {
-		accounts = append(accounts, models.ServiceAccountSummary{
-			Name:        sa.Name,
-			Email:       sa.Email,
-			DisplayName: sa.DisplayName,
-			Description: sa.Description,
-			Disabled:    sa.Disabled,
-			UniqueID:    sa.UniqueId,
-		})
+	accounts := []models.ServiceAccountSummary{}
+	for pageToken := ""; ; {
+		call := a.iamAdminSvc.Projects.ServiceAccounts.List("projects/" + req.ProjectID).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListServiceAccountsResponse{}, wrapGCPError("iam.ListServiceAccounts", err)
+		}
+		for _, sa := range resp.Accounts {
+			accounts = append(accounts, models.ServiceAccountSummary{
+				Name: sa.Name, Email: sa.Email, DisplayName: sa.DisplayName,
+				Description: sa.Description, Disabled: sa.Disabled, UniqueID: sa.UniqueId,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListServiceAccountsResponse{ServiceAccounts: accounts}, nil
 }

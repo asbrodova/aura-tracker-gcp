@@ -220,13 +220,15 @@ type ExportServerlessGraphRequest struct {
 // ExportArchitectureGraphRequest is the input for gcp_export_architecture_graph.
 // It produces the full project-wide graph fusing Phase 1 + Phase 2 resources.
 type ExportArchitectureGraphRequest struct {
-	ProjectID              string   `json:"project_id"`
-	Regions                []string `json:"regions,omitempty"`                   // empty = all regions
-	IncludeExternal        bool     `json:"include_external,omitempty"`          // include external_endpoint nodes
-	MaxDepth               int      `json:"max_depth,omitempty"`                 // BFS depth cap; 0 = unlimited
-	MaxNodes               int      `json:"max_nodes,omitempty"`                 // hard node cap; 0 = unlimited
-	EnableFlowLogInference bool     `json:"enable_flow_log_inference,omitempty"` // enable Pass 5 VPC Flow Log edges (requires logging.privateLogViewer)
-	LookbackHours          int      `json:"lookback_hours,omitempty"`            // trace/log lookback; default 168
+	ProjectID       string   `json:"project_id"`
+	Regions         []string `json:"regions,omitempty"`          // empty = all regions
+	IncludeExternal bool     `json:"include_external,omitempty"` // include external_endpoint nodes
+	MaxDepth        int      `json:"max_depth,omitempty"`        // BFS depth cap; 0 = unlimited
+	MaxNodes        int      `json:"max_nodes,omitempty"`        // hard node cap; 0 = unlimited
+	// EnableFlowLogInference is retained for source compatibility only. The
+	// adapter rejects true because flow-log evidence is not collected yet.
+	EnableFlowLogInference bool `json:"-"`
+	LookbackHours          int  `json:"lookback_hours,omitempty"` // trace/log lookback; default 168
 }
 
 // PartialResult wraps a list of results alongside any non-fatal errors that

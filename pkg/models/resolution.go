@@ -9,7 +9,7 @@ type ResolutionInput struct {
 	// The engine uses this for ID lookups when wiring edges.
 	Nodes []GraphNode
 
-	// GKE workloads — used by Pass 1 for env-var / secret-ref / SA detection.
+	// GKE workloads — used by Pass 1 for Kubernetes Service selectors.
 	Workloads []GKEWorkloadSummary
 
 	// K8s Services — used by Pass 1 for selector→workload (exposes) and
@@ -46,11 +46,6 @@ type ResolutionInput struct {
 	// IncludeExternal controls whether external_endpoint nodes are minted for
 	// hostnames that resolve outside GCP-managed domains.
 	IncludeExternal bool
-
-	// EnableFlowLogInference enables Pass 5 (VPC Flow Log / log-based inference).
-	// This is off by default because it requires logging.privateLogViewer and
-	// produces low-confidence (0.45–0.55) edges.
-	EnableFlowLogInference bool
 }
 
 // ResolutionOutput is the result of the resolution engine.

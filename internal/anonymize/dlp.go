@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -23,6 +24,9 @@ type DLPAnonymizer struct {
 }
 
 func NewDLPAnonymizer(svc ports.DLPService, cfg Config, projectID string) *DLPAnonymizer {
+	if configured := strings.TrimSpace(cfg.DLP.ProjectID); configured != "" {
+		projectID = configured
+	}
 	return &DLPAnonymizer{
 		svc:       svc,
 		infoTypes: cfg.DLP.InfoTypes,
@@ -32,8 +36,22 @@ func NewDLPAnonymizer(svc ports.DLPService, cfg Config, projectID string) *DLPAn
 }
 
 func (d *DLPAnonymizer) Scrub(ctx context.Context, result *mcp.CallToolResult) (*mcp.CallToolResult, error) {
-	if result == nil {
+	out, findings, err := d.scrub(ctx, result)
+	if err != nil {
+		return nil, err
+	}
+	if out == nil {
 		return nil, nil
+	}
+	if d.auditOnly {
+		return buildAuditResult(findings)
+	}
+	return out, nil
+}
+
+func (d *DLPAnonymizer) scrub(ctx context.Context, result *mcp.CallToolResult) (*mcp.CallToolResult, []Finding, error) {
+	if result == nil {
+		return nil, nil, nil
 	}
 
 	reg := newTokenRegistry()
@@ -48,7 +66,7 @@ func (d *DLPAnonymizer) Scrub(ctx context.Context, result *mcp.CallToolResult) (
 		case mcp.TextContent:
 			masked, findings, err := d.scrubString(ctx, content.Text, reg, i)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			content.Text = masked
 			out.Content[i] = content
@@ -60,7 +78,7 @@ func (d *DLPAnonymizer) Scrub(ctx context.Context, result *mcp.CallToolResult) (
 			}
 			masked, findings, err := d.scrubString(ctx, textResource.Text, reg, i)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			textResource.Text = masked
 			content.Resource = textResource
@@ -71,23 +89,21 @@ func (d *DLPAnonymizer) Scrub(ctx context.Context, result *mcp.CallToolResult) (
 
 	if out.StructuredContent != nil {
 		b, err := json.Marshal(out.StructuredContent)
-		if err == nil {
-			masked, findings, err := d.scrubString(ctx, string(b), reg, -1)
-			if err != nil {
-				return nil, err
-			}
-			allFindings = append(allFindings, findings...)
-			var sc any
-			if json.Unmarshal([]byte(masked), &sc) == nil {
-				out.StructuredContent = sc
-			}
+		if err != nil {
+			return nil, nil, fmt.Errorf("anonymize: marshal structured content: %w", err)
 		}
+		masked, findings, err := d.scrubString(ctx, string(b), reg, -1)
+		if err != nil {
+			return nil, nil, err
+		}
+		allFindings = append(allFindings, findings...)
+		var sc any
+		if err := json.Unmarshal([]byte(masked), &sc); err != nil {
+			return nil, nil, fmt.Errorf("anonymize: unmarshal scrubbed structured content: %w", err)
+		}
+		out.StructuredContent = sc
 	}
-
-	if d.auditOnly {
-		return buildAuditResult(allFindings)
-	}
-	return &out, nil
+	return &out, allFindings, nil
 }
 
 func (d *DLPAnonymizer) scrubString(ctx context.Context, text string, reg *tokenRegistry, contentIdx int) (string, []Finding, error) {
@@ -95,7 +111,7 @@ func (d *DLPAnonymizer) scrubString(ctx context.Context, text string, reg *token
 		return text, nil, nil
 	}
 	if len(text) > maxDLPBytes {
-		return text, nil, nil
+		return "", nil, fmt.Errorf("anonymize: DLP content exceeds %d-byte inspection limit", maxDLPBytes)
 	}
 	resp, err := d.svc.InspectText(ctx, ports.DLPInspectRequest{
 		Content:   text,

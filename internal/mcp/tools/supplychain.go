@@ -65,7 +65,11 @@ func (t *SupplyChainTools) ListArtifactRegistryRepos() server.ServerTool {
 			if err != nil {
 				return handleServiceError("gcp_artifactregistry_list_repos", err)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_artifactregistry_list_repos: marshal: %w", err)
+			}
+			return result, nil
 		}),
 	}
 }
@@ -102,7 +106,11 @@ func (t *SupplyChainTools) ListArtifactRegistryImages() server.ServerTool {
 			if err != nil {
 				return handleServiceError("gcp_artifactregistry_list_images", err)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_artifactregistry_list_images: marshal: %w", err)
+			}
+			return result, nil
 		}),
 	}
 }
@@ -138,7 +146,11 @@ func (t *SupplyChainTools) ListCloudBuildTriggers() server.ServerTool {
 			if err != nil {
 				return handleServiceError("gcp_cloudbuild_list_triggers", err)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_cloudbuild_list_triggers: marshal: %w", err)
+			}
+			return result, nil
 		}),
 	}
 }
@@ -173,7 +185,11 @@ func (t *SupplyChainTools) ListServiceDirectoryNamespaces() server.ServerTool {
 			if err != nil {
 				return handleServiceError("gcp_servicedirectory_list", err)
 			}
-			return mcp.NewToolResultText(fmt.Sprintf("%+v", resp)), nil
+			result, err := mcp.NewToolResultJSON(resp)
+			if err != nil {
+				return nil, fmt.Errorf("gcp_servicedirectory_list: marshal: %w", err)
+			}
+			return result, nil
 		}),
 	}
 }

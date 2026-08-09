@@ -2,7 +2,7 @@
 // architecture graph. It is a pure function package: no GCP API calls,
 // no global state, and fully deterministic given the same input.
 //
-// The engine runs up to five ordered passes over the raw resource inventory
+// The engine runs four ordered passes over the raw resource inventory
 // assembled by the architecture graph fan-out, then deduplicates and sorts the
 // resulting edge set.
 //
@@ -10,7 +10,6 @@
 // Pass 2 — IAM bindings   (confidence 0.65–0.75)
 // Pass 3 — Mesh telemetry (confidence 0.85)
 // Pass 4 — Cloud Trace    (confidence ≤ 0.90)
-// Pass 5 — Log / flow log (confidence 0.45–0.55, opt-in)
 package resolution
 
 import (
@@ -41,10 +40,6 @@ func Resolve(in models.ResolutionInput) models.ResolutionOutput {
 	runPass2(ctx)
 	runPass3(ctx)
 	runPass4(ctx)
-	if in.EnableFlowLogInference {
-		runPass5(ctx)
-	}
-
 	return ctx.collect()
 }
 
@@ -136,24 +131,56 @@ func buildNameIndex(nodes []models.GraphNode) map[string][]string {
 	return m
 }
 
-// lookupByName returns the first node ID whose name matches (case-insensitive)
-// and whose kind is in preferredKinds (or any kind if preferredKinds is empty).
+// lookupByName returns a node only when the name and optional kind constraints
+// identify exactly one candidate. Ambiguity is safer to skip than to turn into
+// a false architecture edge.
 func (c *resolveCtx) lookupByName(name string, preferredKinds ...string) string {
+	return c.lookupScoped(name, "", "", "", preferredKinds...)
+}
+
+// lookupScoped resolves Kubernetes names within namespace, cluster, and
+// location provenance. Empty scope values are treated as unspecified.
+func (c *resolveCtx) lookupScoped(name, namespace, cluster, location string, preferredKinds ...string) string {
 	ids := c.byName[strings.ToLower(name)]
 	if len(ids) == 0 {
 		return ""
-	}
-	if len(preferredKinds) == 0 {
-		return ids[0]
 	}
 	kindSet := make(map[string]bool, len(preferredKinds))
 	for _, k := range preferredKinds {
 		kindSet[k] = true
 	}
+	matches := make([]string, 0, len(ids))
 	for _, id := range ids {
-		if n, ok := c.byID[id]; ok && kindSet[n.Kind] {
-			return id
+		n, ok := c.byID[id]
+		if !ok {
+			continue
 		}
+		if len(kindSet) > 0 && !kindSet[n.Kind] {
+			continue
+		}
+		if namespace != "" && n.Namespace != namespace {
+			continue
+		}
+		if cluster != "" && n.ClusterName != cluster {
+			continue
+		}
+		if location != "" && n.Region != location {
+			continue
+		}
+		matches = append(matches, id)
 	}
-	return ids[0] // fall back to any match
+	if len(matches) != 1 {
+		return ""
+	}
+	return matches[0]
+}
+
+func (c *resolveCtx) summaryNodeID(explicitID, name, namespace, cluster, location string, preferredKinds ...string) string {
+	if explicitID != "" {
+		if _, ok := c.byID[explicitID]; ok {
+			return explicitID
+		}
+		return ""
+	}
+	return c.lookupScoped(name, namespace, cluster, location, preferredKinds...)
 }

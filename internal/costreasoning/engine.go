@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -21,6 +23,7 @@ const (
 	reasoningVersion = "cost-reasoning-v1"
 	defaultTimeout   = 45 * time.Second
 	cacheTTL         = 15 * time.Minute
+	maxCacheEntries  = 256
 )
 
 type DataSource interface {
@@ -50,6 +53,7 @@ type Engine struct {
 	timeout     time.Duration
 	cacheMu     sync.RWMutex
 	cache       map[string]cacheEntry
+	flight      singleflight.Group
 }
 
 type Option func(*Engine)
@@ -102,7 +106,20 @@ func (e *Engine) Explain(ctx context.Context, req models.ExplainCostRequest) (mo
 		cached.Coverage.CacheHit = true
 		return cached, nil
 	}
+	value, err, _ := e.flight.Do(cacheKey, func() (any, error) {
+		if cached, ok := e.getCached(cacheKey, now); ok {
+			cached.Coverage.CacheHit = true
+			return cached, nil
+		}
+		return e.explainUncached(ctx, req, windows, now, cacheKey)
+	})
+	if err != nil {
+		return models.ExplainCostResponse{}, err
+	}
+	return value.(models.ExplainCostResponse), nil
+}
 
+func (e *Engine) explainUncached(ctx context.Context, req models.ExplainCostRequest, windows analysisWindows, now time.Time, cacheKey string) (models.ExplainCostResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	facts, err := e.source.CollectCostFacts(ctx, models.CollectCostFactsRequest{
@@ -269,10 +286,14 @@ func responseCacheKey(req models.ExplainCostRequest, w analysisWindows) string {
 }
 
 func (e *Engine) getCached(key string, now time.Time) (models.ExplainCostResponse, bool) {
-	e.cacheMu.RLock()
+	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
 	entry, ok := e.cache[key]
-	e.cacheMu.RUnlock()
-	if !ok || !now.Before(entry.expiresAt) {
+	if !ok {
+		return models.ExplainCostResponse{}, false
+	}
+	if !now.Before(entry.expiresAt) {
+		delete(e.cache, key)
 		return models.ExplainCostResponse{}, false
 	}
 	return entry.response, true
@@ -280,8 +301,23 @@ func (e *Engine) getCached(key string, now time.Time) (models.ExplainCostRespons
 
 func (e *Engine) setCached(key string, response models.ExplainCostResponse, now time.Time) {
 	e.cacheMu.Lock()
+	defer e.cacheMu.Unlock()
+	for existingKey, entry := range e.cache {
+		if !now.Before(entry.expiresAt) {
+			delete(e.cache, existingKey)
+		}
+	}
+	if _, exists := e.cache[key]; !exists && len(e.cache) >= maxCacheEntries {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for existingKey, entry := range e.cache {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey, oldestExpiry = existingKey, entry.expiresAt
+			}
+		}
+		delete(e.cache, oldestKey)
+	}
 	e.cache[key] = cacheEntry{response: response, expiresAt: now.Add(cacheTTL)}
-	e.cacheMu.Unlock()
 }
 
 func uniqueSorted(values []string) []string {
