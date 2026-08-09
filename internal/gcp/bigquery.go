@@ -21,7 +21,7 @@ func (a *gcpAdapter) ListDatasets(ctx context.Context, req models.ListDatasetsRe
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	it := a.bq.Datasets(ctx)
+	it := a.bq.DatasetsInProject(ctx, req.ProjectID)
 	var datasets []models.DatasetSummary
 	for len(datasets) < maxDatasets {
 		ds, err := it.Next()
@@ -54,7 +54,7 @@ func (a *gcpAdapter) ListTables(ctx context.Context, req models.ListTablesReques
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	it := a.bq.Dataset(req.DatasetID).Tables(ctx)
+	it := a.bq.DatasetInProject(req.ProjectID, req.DatasetID).Tables(ctx)
 	var tables []models.TableSummary
 	for len(tables) < maxTables {
 		t, err := it.Next()
@@ -93,7 +93,7 @@ func (a *gcpAdapter) GetTableSchema(ctx context.Context, req models.GetTableSche
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	meta, err := a.bq.Dataset(req.DatasetID).Table(req.TableID).Metadata(ctx)
+	meta, err := a.bq.DatasetInProject(req.ProjectID, req.DatasetID).Table(req.TableID).Metadata(ctx)
 	if err != nil {
 		return models.TableSchemaResponse{}, wrapGCPError("bigquery.GetTableSchema", err)
 	}

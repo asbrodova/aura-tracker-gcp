@@ -21,6 +21,7 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
 	"github.com/asbrodova/aura-tracker-gcp/internal/config"
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	gcpadapter "github.com/asbrodova/aura-tracker-gcp/internal/gcp"
 	mcpserver "github.com/asbrodova/aura-tracker-gcp/internal/mcp"
 	"github.com/asbrodova/aura-tracker-gcp/internal/safety"
@@ -58,14 +59,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	projectID := os.Getenv("GCP_PROJECT_ID")
-	if projectID == "" {
-		projectID = userCfg.ProjectID
-	}
-	if projectID == "" {
-		fmt.Fprintln(os.Stderr, "aura-tracker-gcp: GCP_PROJECT_ID env var or project_id in ~/.aura-tracker.yaml is required")
+	environmentRegistry, err := loadEnvironmentRegistry(userCfg, os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: environment config: %v\n", err)
 		os.Exit(1)
 	}
+	projectID := environmentRegistry.Default().ProjectID
 
 	ctx := context.Background()
 	securityCfg := securityAuditConfig(userCfg.SecurityAudit)
@@ -170,13 +169,6 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		log.Info("anonymization enabled", "mode", anonCfg.Mode, "audit_only", anonCfg.AuditOnly)
 	}
 
-	// ANONYMIZE_PROJECT_ID is independent of ANONYMIZE_ENABLED: it masks only the
-	// project ID without activating the built-in IP/email scrubbing patterns.
-	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" && projectID != "" {
-		anon = anonymize.ChainAnonymizers(anon, anonymize.NewProjectIDMasker(projectID))
-		log.Info("project ID masking enabled")
-	}
-
 	var gcpSvc ports.GCPService = svc
 	if os.Getenv("SAFETY_ENABLED") != "false" {
 		gcpSvc = safety.NewSafetyDecorator(svc, log)
@@ -188,10 +180,20 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 	mcpOpts := []mcpserver.Option{
 		mcpserver.WithAnonymizer(anon),
 		mcpserver.WithModules(enabledModules),
-		mcpserver.WithDefaultProjectID(projectID),
+		mcpserver.WithEnvironments(environmentRegistry),
 	}
 	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" {
-		mcpOpts = append(mcpOpts, mcpserver.WithProjectIDPlaceholder("your-project"))
+		replacements := make(map[string]string)
+		for _, environment := range environmentRegistry.Environments() {
+			if environment.Alias == "" {
+				replacements[environment.ProjectID] = "[GCP_PROJECT_ID]"
+			}
+		}
+		mcpOpts = append(mcpOpts, mcpserver.WithProjectIDReplacements(replacements))
+		if len(replacements) > 0 {
+			mcpOpts = append(mcpOpts, mcpserver.WithProjectIDPlaceholder("your-project"))
+		}
+		log.Info("project ID masking enabled")
 	}
 	if userCfg.RecommenderExport.Enabled {
 		mcpOpts = append(mcpOpts, mcpserver.WithRecommenderExport())
@@ -263,6 +265,46 @@ func securityAuditConfig(cfg config.SecurityAuditConfig) securityaudit.Config {
 		})
 	}
 	return out
+}
+
+func loadEnvironmentRegistry(userCfg config.Config, getenv func(string) string) (*environments.Registry, error) {
+	legacyEnvProject := strings.TrimSpace(getenv("GCP_PROJECT_ID"))
+	rawEnvironments := strings.TrimSpace(getenv("GCP_ENVIRONMENTS_JSON"))
+
+	var configured []config.EnvironmentConfig
+	switch {
+	case rawEnvironments != "":
+		if legacyEnvProject != "" || userCfg.ProjectID != "" || len(userCfg.Environments) > 0 {
+			return nil, errors.New("GCP_ENVIRONMENTS_JSON cannot be combined with GCP_PROJECT_ID, project_id, or environments in ~/.aura-tracker.yaml")
+		}
+		if err := json.Unmarshal([]byte(rawEnvironments), &configured); err != nil {
+			return nil, fmt.Errorf("parse GCP_ENVIRONMENTS_JSON: %w", err)
+		}
+	case len(userCfg.Environments) > 0:
+		if legacyEnvProject != "" || strings.TrimSpace(userCfg.ProjectID) != "" {
+			return nil, errors.New("environments cannot be combined with GCP_PROJECT_ID or project_id")
+		}
+		configured = userCfg.Environments
+	default:
+		projectID := legacyEnvProject
+		if projectID == "" {
+			projectID = strings.TrimSpace(userCfg.ProjectID)
+		}
+		if projectID == "" {
+			return nil, errors.New("GCP_PROJECT_ID, project_id, environments, or GCP_ENVIRONMENTS_JSON is required")
+		}
+		configured = []config.EnvironmentConfig{{ProjectID: projectID, Default: true}}
+	}
+
+	items := make([]environments.Environment, 0, len(configured))
+	for _, environment := range configured {
+		items = append(items, environments.Environment{
+			ProjectID: environment.ProjectID,
+			Alias:     environment.Alias,
+			Default:   environment.Default,
+		})
+	}
+	return environments.NewRegistry(items)
 }
 
 func applyCostReasoningEnv(cfg *config.CostReasoningConfig) error {

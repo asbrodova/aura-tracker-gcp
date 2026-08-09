@@ -622,9 +622,9 @@ Prompt Templates pre-configure the AI for complex multi-step GCP workflows. Invo
 
 | Prompt | Arguments | What it does |
 |--------|-----------|-------------|
-| `audit-security-posture` | `project_id` (required), `focus` (iam\|network\|all) | Calls `gcp_project_security_audit` once and presents its score, severity-ranked evidence, remediation, and coverage gaps |
-| `optimize-bigquery-costs` | `project_id` (required), `dataset_id` (optional) | Reads schemas + slot usage metrics; recommends partitioning, clustering, expiration, and slot rightsizing |
-| `incident-response-helper` | `project_id` (required); `service_name`, `region`, `environment` (optional) | Calls `gcp_incident_diagnose` once and presents ranked causes, evidence, timeline, investigations, and coverage gaps without executing a mutation |
+| `audit-security-posture` | `project_id` or environment alias (optional; default environment), `focus` (iam\|network\|all) | Calls `gcp_project_security_audit` once and presents its score, severity-ranked evidence, remediation, and coverage gaps |
+| `optimize-bigquery-costs` | `project_id` or environment alias (optional; default environment), `dataset_id` (optional) | Reads schemas + slot usage metrics; recommends partitioning, clustering, expiration, and slot rightsizing |
+| `incident-response-helper` | `project_id` or environment alias (optional; default environment); `service_name`, `region`, `environment` (optional) | Calls `gcp_incident_diagnose` once and presents ranked causes, evidence, timeline, investigations, and coverage gaps without executing a mutation |
 
 ---
 
@@ -800,11 +800,12 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GCP_PROJECT_ID` | Yes* | Default GCP project used when initialising SDK clients. Can be omitted if `project_id` is set in `~/.aura-tracker.yaml`. |
+| `GCP_PROJECT_ID` | Yes* | Legacy single-project configuration. Can be omitted when `project_id`, `environments`, or `GCP_ENVIRONMENTS_JSON` is configured. |
+| `GCP_ENVIRONMENTS_JSON` | No | JSON array of `{project_id, alias, default}` entries for container/Cloud Run multi-environment deployments. Cannot be combined with `GCP_PROJECT_ID` or YAML project settings. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON key (optional if ADC is configured via `gcloud`) |
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
-| `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask the GCP project ID in all tool outputs as `[GCP_PROJECT_ID_1]`. Off by default. Useful for demos. Can be combined with `ANONYMIZE_ENABLED`. |
+| `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask an unaliased project ID as `[GCP_PROJECT_ID]`. Aliased projects are always returned as their aliases regardless of this setting. |
 | `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Aura Scores include idle/over-provisioned signals with estimated monthly USD savings. Results are cached for 12 h; 429 quota errors emit an explicit LLM stop signal instead of retrying. Requires the Recommender Viewer role. |
 | `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to register the `gcp_export_recommendations_to_bq` tool. Off by default. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name used by `gcp_export_recommendations_to_bq`. Overrides `recommender_export.dataset` in `~/.aura-tracker.yaml`. |
@@ -826,7 +827,22 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 
 ## User Config File
 
-Avoid setting `GCP_PROJECT_ID` on every launch by adding a `~/.aura-tracker.yaml`:
+Configure one or more GCP environments in `~/.aura-tracker.yaml`. With multiple environments, every entry needs an alias and exactly one entry must be marked as the default:
+
+```yaml
+environments:
+  - project_id: my-company-123
+    alias: dev
+    default: true
+  - project_id: my-company-345
+    alias: prod
+```
+
+Aliases are matched case-insensitively, so `dev`, `DEV`, and `DeV` select the same project. A configured project ID is also accepted as input. When an alias exists, all MCP-generated output—including tool results, errors, prompts, resources, URIs, and diagrams—uses the alias and never returns that project ID. If the user omits a selector, the default environment is used.
+
+For example, both “check logs on PROD” and “check logs on my-company-345” query the `prod` environment, and the answer refers only to `prod`.
+
+A single project may omit both alias and default, in which case its project ID may be shown:
 
 ```yaml
 project_id: my-gcp-project-id
@@ -856,7 +872,16 @@ security_audit:
       expires_at: "2026-12-01T00:00:00Z"
 ```
 
-The environment variable takes precedence when both are set. Security suppression resources support `*` and `?` wildcards. Matches are excluded from the active score only until expiry and remain visible in the audit report.
+The legacy `GCP_PROJECT_ID` environment variable takes precedence over the legacy YAML `project_id`. The new `environments` list cannot be combined with either legacy setting, so ambiguous configuration fails at startup.
+
+Container deployments can provide the same list as JSON:
+
+```bash
+GCP_ENVIRONMENTS_JSON='[{"project_id":"my-company-123","alias":"dev","default":true},{"project_id":"my-company-345","alias":"prod"}]' \
+  aura-tracker-gcp
+```
+
+Security suppression resources support `*` and `?` wildcards. Matches are excluded from the active score only until expiry and remain visible in the audit report.
 
 ## IAM Setup
 

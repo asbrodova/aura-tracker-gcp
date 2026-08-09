@@ -167,6 +167,7 @@ func (a *gcpAdapter) checkHasLogs(ctx context.Context, projectID, serviceName st
 		projectID, serviceName, serviceName, sinceRFC,
 	)
 	it := a.logAdmin.Entries(ctx,
+		logadmin.ProjectIDs([]string{projectID}),
 		logadmin.Filter(filter),
 		logadmin.NewestFirst(),
 		logadmin.PageSize(1),

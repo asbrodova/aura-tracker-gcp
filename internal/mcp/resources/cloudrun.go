@@ -9,13 +9,14 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
 // ServiceList returns a static resource listing all Cloud Run services in the project.
 // URI: gcp://{project}/cloudrun/services
-func (r *CloudRunResources) ServiceList(project string) server.ServerResource {
-	uri := fmt.Sprintf("gcp://%s/cloudrun/services", project)
+func (r *CloudRunResources) ServiceList(environment environments.Environment) server.ServerResource {
+	uri := fmt.Sprintf("gcp://%s/cloudrun/services", environment.DisplayName())
 	return server.ServerResource{
 		Resource: mcp.NewResource(uri, "Cloud Run Services",
 			mcp.WithResourceDescription("All Cloud Run services across all regions — discover service names before reading details or revisions"),
@@ -24,7 +25,7 @@ func (r *CloudRunResources) ServiceList(project string) server.ServerResource {
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			r.log.InfoContext(ctx, "resource read", "uri", uri)
 			resp, err := r.svc.ListServices(ctx, models.ListServicesRequest{
-				ProjectID: project,
+				ProjectID: environment.ProjectID,
 				Region:    "-",
 			})
 			if err != nil {
@@ -49,13 +50,17 @@ func (r *CloudRunResources) ServiceSnapshotTemplate() server.ServerResourceTempl
 			mcp.WithTemplateMIMEType("application/json"),
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			project, region, service, err := parseCRServiceURI(req.Params.URI)
+			selector, region, service, err := parseCRServiceURI(req.Params.URI)
+			if err != nil {
+				return nil, err
+			}
+			environment, err := resolveEnvironment(r.environments, selector, r.placeholder)
 			if err != nil {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
 			resp, err := r.svc.GetServiceDetails(ctx, models.GetServiceDetailsRequest{
-				ProjectID:   project,
+				ProjectID:   environment.ProjectID,
 				Region:      region,
 				ServiceName: service,
 			})
@@ -82,13 +87,17 @@ func (r *CloudRunResources) RevisionsTemplate() server.ServerResourceTemplate {
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			rawURI := strings.TrimSuffix(req.Params.URI, "/revisions")
-			project, region, service, err := parseCRServiceURI(rawURI)
+			selector, region, service, err := parseCRServiceURI(rawURI)
+			if err != nil {
+				return nil, err
+			}
+			environment, err := resolveEnvironment(r.environments, selector, r.placeholder)
 			if err != nil {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
 			details, err := r.svc.GetServiceDetails(ctx, models.GetServiceDetailsRequest{
-				ProjectID:   project,
+				ProjectID:   environment.ProjectID,
 				Region:      region,
 				ServiceName: service,
 			})
@@ -96,7 +105,7 @@ func (r *CloudRunResources) RevisionsTemplate() server.ServerResourceTemplate {
 				return nil, fmt.Errorf("cloudrun revisions: %w", err)
 			}
 			revisions, err := r.svc.ListRevisions(ctx, models.ListRevisionsRequest{
-				ProjectID:   project,
+				ProjectID:   environment.ProjectID,
 				Region:      region,
 				ServiceName: service,
 				Limit:       20,

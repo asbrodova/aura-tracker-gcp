@@ -9,13 +9,14 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
 // BucketList returns a static resource listing all GCS buckets in the project.
 // URI: gcp://{project}/storage/buckets
-func (r *StorageResources) BucketList(project string) server.ServerResource {
-	uri := fmt.Sprintf("gcp://%s/storage/buckets", project)
+func (r *StorageResources) BucketList(environment environments.Environment) server.ServerResource {
+	uri := fmt.Sprintf("gcp://%s/storage/buckets", environment.DisplayName())
 	return server.ServerResource{
 		Resource: mcp.NewResource(uri, "Cloud Storage Buckets",
 			mcp.WithResourceDescription("All GCS buckets in the project — discover bucket names before reading metadata"),
@@ -23,7 +24,7 @@ func (r *StorageResources) BucketList(project string) server.ServerResource {
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			r.log.InfoContext(ctx, "resource read", "uri", uri)
-			resp, err := r.svc.ListBuckets(ctx, models.ListBucketsRequest{ProjectID: project})
+			resp, err := r.svc.ListBuckets(ctx, models.ListBucketsRequest{ProjectID: environment.ProjectID})
 			if err != nil {
 				return nil, fmt.Errorf("storage buckets: %w", err)
 			}
@@ -46,13 +47,17 @@ func (r *StorageResources) BucketMetadataTemplate() server.ServerResourceTemplat
 			mcp.WithTemplateMIMEType("application/json"),
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			project, bucket, err := parseStorageBucketURI(req.Params.URI)
+			selector, bucket, err := parseStorageBucketURI(req.Params.URI)
+			if err != nil {
+				return nil, err
+			}
+			environment, err := resolveEnvironment(r.environments, selector, r.placeholder)
 			if err != nil {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
 			resp, err := r.svc.GetBucketMetadata(ctx, models.GetBucketMetadataRequest{
-				ProjectID:  project,
+				ProjectID:  environment.ProjectID,
 				BucketName: bucket,
 			})
 			if err != nil {
@@ -79,13 +84,17 @@ func (r *StorageResources) ObjectListTemplate() server.ServerResourceTemplate {
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			rawURI := strings.TrimSuffix(req.Params.URI, "/objects")
-			project, bucket, err := parseStorageBucketURI(rawURI)
+			selector, bucket, err := parseStorageBucketURI(rawURI)
+			if err != nil {
+				return nil, err
+			}
+			environment, err := resolveEnvironment(r.environments, selector, r.placeholder)
 			if err != nil {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
 			resp, err := r.svc.GetBucketMetadata(ctx, models.GetBucketMetadataRequest{
-				ProjectID:  project,
+				ProjectID:  environment.ProjectID,
 				BucketName: bucket,
 			})
 			if err != nil {
@@ -93,7 +102,7 @@ func (r *StorageResources) ObjectListTemplate() server.ServerResourceTemplate {
 			}
 			result := map[string]any{
 				"bucket":             bucket,
-				"project":            project,
+				"project":            environment.ProjectID,
 				"versioning_enabled": resp.VersioningEnabled,
 				"lifecycle_rules":    resp.LifecycleRuleCount,
 				"note":               "Per-object listing is not available via MCP resources. Use gsutil ls gs://" + bucket + " or the Cloud Storage API directly.",

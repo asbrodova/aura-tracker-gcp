@@ -47,9 +47,19 @@ type SecurityAuditConfig struct {
 	Suppressions             []SecurityAuditSuppressionConfig `yaml:"suppressions"`
 }
 
+// EnvironmentConfig maps a GCP project to an optional chat-safe alias.
+// Default is implicit for a single environment and required on exactly one
+// entry when multiple environments are configured.
+type EnvironmentConfig struct {
+	ProjectID string `yaml:"project_id" json:"project_id"`
+	Alias     string `yaml:"alias" json:"alias"`
+	Default   bool   `yaml:"default" json:"default"`
+}
+
 // Config holds user-level defaults read from ~/.aura-tracker.yaml.
 type Config struct {
 	ProjectID         string                    `yaml:"project_id"`
+	Environments      []EnvironmentConfig       `yaml:"environments"`
 	RecommenderExport RecommenderBQExportConfig `yaml:"recommender_export"`
 	CostReasoning     CostReasoningConfig       `yaml:"cost_reasoning"`
 	SecurityAudit     SecurityAuditConfig       `yaml:"security_audit"`

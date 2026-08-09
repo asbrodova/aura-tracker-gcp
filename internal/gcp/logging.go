@@ -67,6 +67,7 @@ func (a *gcpAdapter) QueryRecentLogs(ctx context.Context, req models.QueryRecent
 	}
 
 	it := a.logAdmin.Entries(ctx,
+		logadmin.ProjectIDs([]string{req.ProjectID}),
 		logadmin.Filter(filter),
 		logadmin.NewestFirst(),
 		logadmin.PageSize(int32(req.MaxEntries+1)), // fetch one extra to detect truncation

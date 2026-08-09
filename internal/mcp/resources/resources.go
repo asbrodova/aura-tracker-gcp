@@ -3,47 +3,75 @@
 package resources
 
 import (
+	"fmt"
 	"log/slog"
+	"strings"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 // BigQueryResources serves resources under gcp://{project}/bigquery/...
 type BigQueryResources struct {
-	svc ports.BigQueryService
-	log *slog.Logger
+	svc          ports.BigQueryService
+	log          *slog.Logger
+	environments *environments.Registry
+	placeholder  string
 }
 
-func NewBigQueryResources(svc ports.BigQueryService, log *slog.Logger) *BigQueryResources {
-	return &BigQueryResources{svc: svc, log: log}
+func NewBigQueryResources(svc ports.BigQueryService, log *slog.Logger, registry *environments.Registry, placeholder string) *BigQueryResources {
+	return &BigQueryResources{svc: svc, log: log, environments: registry, placeholder: placeholder}
 }
 
 // CloudRunResources serves resources under gcp://{project}/cloudrun/...
 type CloudRunResources struct {
-	svc ports.CloudRunService
-	log *slog.Logger
+	svc          ports.CloudRunService
+	log          *slog.Logger
+	environments *environments.Registry
+	placeholder  string
 }
 
-func NewCloudRunResources(svc ports.CloudRunService, log *slog.Logger) *CloudRunResources {
-	return &CloudRunResources{svc: svc, log: log}
+func NewCloudRunResources(svc ports.CloudRunService, log *slog.Logger, registry *environments.Registry, placeholder string) *CloudRunResources {
+	return &CloudRunResources{svc: svc, log: log, environments: registry, placeholder: placeholder}
 }
 
 // StorageResources serves resources under gcp://{project}/storage/...
 type StorageResources struct {
-	svc ports.StorageService
-	log *slog.Logger
+	svc          ports.StorageService
+	log          *slog.Logger
+	environments *environments.Registry
+	placeholder  string
 }
 
-func NewStorageResources(svc ports.StorageService, log *slog.Logger) *StorageResources {
-	return &StorageResources{svc: svc, log: log}
+func NewStorageResources(svc ports.StorageService, log *slog.Logger, registry *environments.Registry, placeholder string) *StorageResources {
+	return &StorageResources{svc: svc, log: log, environments: registry, placeholder: placeholder}
 }
 
 // IAMResources serves resources under gcp://{project}/iam/...
 type IAMResources struct {
-	svc ports.IAMService
-	log *slog.Logger
+	svc          ports.IAMService
+	log          *slog.Logger
+	environments *environments.Registry
+	placeholder  string
 }
 
-func NewIAMResources(svc ports.IAMService, log *slog.Logger) *IAMResources {
-	return &IAMResources{svc: svc, log: log}
+func NewIAMResources(svc ports.IAMService, log *slog.Logger, registry *environments.Registry, placeholder string) *IAMResources {
+	return &IAMResources{svc: svc, log: log, environments: registry, placeholder: placeholder}
+}
+
+func resolveEnvironment(registry *environments.Registry, selector, placeholder string) (environments.Environment, error) {
+	if registry == nil {
+		return environments.Environment{ProjectID: selector}, nil
+	}
+	if placeholder != "" && selector == placeholder {
+		return registry.Default(), nil
+	}
+	environment, err := registry.Resolve(selector)
+	if err != nil {
+		return environments.Environment{}, fmt.Errorf(
+			"unknown environment; available environments: %s",
+			strings.Join(registry.DisplayNames(), ", "),
+		)
+	}
+	return environment, nil
 }

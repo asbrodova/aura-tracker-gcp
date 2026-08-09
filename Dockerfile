@@ -26,6 +26,7 @@ COPY --from=builder /out/aura-tracker-gcp /aura-tracker-gcp
 
 # These must be overridden at runtime with -e flags.
 ENV GCP_PROJECT_ID=""
+ENV GCP_ENVIRONMENTS_JSON=""
 ENV GOOGLE_APPLICATION_CREDENTIALS=""
 ENV GRAPHVIZ_DOT_PATH="/usr/bin/dot"
 

@@ -5,8 +5,10 @@ package mcp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
-	"os"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -15,6 +17,7 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	"github.com/asbrodova/aura-tracker-gcp/internal/diagnostics"
 	"github.com/asbrodova/aura-tracker-gcp/internal/diagram"
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/middleware"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/resources"
@@ -31,12 +34,32 @@ type Option func(*serverOptions)
 type serverOptions struct {
 	anonymizer              anonymize.Anonymizer
 	enabledModules          map[string]bool // nil = all modules
-	defaultProjectID        string
+	environments            *environments.Registry
+	projectIDReplacements   map[string]string
 	projectIDPlaceholder    string
+	defaultProjectID        string
 	enableRecommenderExport bool
 	enableCostReasoning     bool
 	costReasoningConfig     costreasoning.Config
 	securityAuditConfig     securityaudit.Config
+}
+
+// WithEnvironments configures the allowed project selectors, default project,
+// and public display aliases used by every MCP surface.
+func WithEnvironments(registry *environments.Registry) Option {
+	return func(o *serverOptions) { o.environments = registry }
+}
+
+// WithProjectIDReplacements adds mandatory output-only replacements, used for
+// the legacy ANONYMIZE_PROJECT_ID placeholder on an unaliased environment.
+func WithProjectIDReplacements(replacements map[string]string) Option {
+	return func(o *serverOptions) { o.projectIDReplacements = replacements }
+}
+
+// WithProjectIDPlaceholder hides an unaliased default project in tool schemas
+// when the legacy ANONYMIZE_PROJECT_ID mode is enabled.
+func WithProjectIDPlaceholder(placeholder string) Option {
+	return func(o *serverOptions) { o.projectIDPlaceholder = placeholder }
 }
 
 // WithAnonymizer attaches an Anonymizer to every registered tool handler.
@@ -56,14 +79,6 @@ func WithModules(modules map[string]bool) Option {
 // project_id without causing an empty-string error in the adapter.
 func WithDefaultProjectID(id string) Option {
 	return func(o *serverOptions) { o.defaultProjectID = id }
-}
-
-// WithProjectIDPlaceholder sets a placeholder string (e.g. "your-project") to
-// display in tool-call permission prompts when project ID masking is active.
-// The tool schema is patched so the LLM passes this value; the server replaces
-// it with the real project ID before the GCP adapter sees it.
-func WithProjectIDPlaceholder(placeholder string) Option {
-	return func(o *serverOptions) { o.projectIDPlaceholder = placeholder }
 }
 
 // WithRecommenderExport registers the gcp_export_recommendations_to_bq tool.
@@ -93,50 +108,135 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		opt(o)
 	}
 
-	s := server.NewMCPServer(
-		serverName,
-		version,
+	if o.environments == nil && o.defaultProjectID != "" {
+		o.environments, _ = environments.NewRegistry([]environments.Environment{{ProjectID: o.defaultProjectID}})
+	}
+	replacements := make(map[string]string)
+	if o.environments != nil {
+		for projectID, replacement := range o.environments.ReplacementMap() {
+			replacements[projectID] = replacement
+		}
+	}
+	for projectID, replacement := range o.projectIDReplacements {
+		if _, aliased := replacements[projectID]; !aliased {
+			replacements[projectID] = replacement
+		}
+	}
+	privacyMasker := anonymize.NewProjectIDReplacer(replacements)
+
+	serverOpts := []server.ServerOption{
 		server.WithToolCapabilities(false),
 		server.WithResourceCapabilities(false, true), // subscribe=false, listChanged=true
 		server.WithPromptCapabilities(true),          // listChanged=true
+	}
+	if instructions := environmentInstructions(o.environments, o.projectIDPlaceholder); instructions != "" {
+		serverOpts = append(serverOpts, server.WithInstructions(instructions))
+	}
+	s := server.NewMCPServer(
+		serverName,
+		version,
+		serverOpts...,
 	)
 
 	wrap := func(t server.ServerTool) server.ServerTool {
-		// When placeholder mode is active, patch the tool's JSON Schema for
-		// project_id / project so the LLM sends the placeholder string rather
-		// than omitting the field, making the permission popup informative.
-		if o.projectIDPlaceholder != "" {
-			for _, key := range []string{"project_id", "project"} {
-				if raw, ok := t.Tool.InputSchema.Properties[key]; ok {
-					if prop, ok := raw.(map[string]any); ok {
-						prop["description"] = "GCP project ID. Pass '" + o.projectIDPlaceholder + "' as a placeholder — the server will use its configured project."
+		projectKeys := make([]string, 0, 1)
+		for _, key := range []string{"project_id", "project"} {
+			if raw, ok := t.Tool.InputSchema.Properties[key]; ok {
+				projectKeys = append(projectKeys, key)
+				if prop, ok := raw.(map[string]any); ok && o.environments != nil {
+					if o.projectIDPlaceholder != "" {
+						prop["description"] = "Configured GCP project. Pass '" + o.projectIDPlaceholder + "' or omit it to use the private server default."
 						prop["default"] = o.projectIDPlaceholder
+					} else {
+						prop["description"] = o.environments.SelectorDescription()
+						prop["default"] = o.environments.Default().DisplayName()
 					}
 				}
 			}
 		}
-
 		orig := t.Handler
 		t.Handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			// Inject default project_id (and "project" for topology) so the LLM can
-			// omit the project argument when a server default is configured.
-			// Also replaces the placeholder value so the real project ID reaches the adapter.
-			if o.defaultProjectID != "" {
+			if o.environments != nil && len(projectKeys) > 0 {
 				args, _ := req.Params.Arguments.(map[string]any)
 				if args == nil {
 					args = make(map[string]any)
 				}
-				for _, key := range []string{"project_id", "project"} {
-					v, ok := args[key]
-					if !ok || v == "" || v == nil || (o.projectIDPlaceholder != "" && v == o.projectIDPlaceholder) {
-						args[key] = o.defaultProjectID
+				for _, key := range projectKeys {
+					selector := ""
+					if value, exists := args[key]; exists && value != nil {
+						var ok bool
+						selector, ok = value.(string)
+						if !ok {
+							return mcp.NewToolResultError(environmentSelectionError(o.environments)), nil
+						}
 					}
+					if o.projectIDPlaceholder != "" && selector == o.projectIDPlaceholder {
+						selector = ""
+					}
+					environment, err := o.environments.Resolve(selector)
+					if err != nil {
+						return mcp.NewToolResultError(environmentSelectionError(o.environments)), nil
+					}
+					args[key] = environment.ProjectID
 				}
 				req.Params.Arguments = args
 			}
-			return orig(middleware.WithCorrelationID(ctx), req)
+			result, err := orig(middleware.WithCorrelationID(ctx), req)
+			if err != nil {
+				return nil, errors.New(privacyMasker.ReplaceString(err.Error()))
+			}
+			scrubbed, err := privacyMasker.Scrub(ctx, result)
+			if err != nil {
+				return mcp.NewToolResultError("project identifier privacy filter failed; result withheld"), nil
+			}
+			return scrubbed, nil
 		}
 		return anonymize.WrapHandler(t, o.anonymizer)
+	}
+	wrapResource := func(resource server.ServerResource) server.ServerResource {
+		original := resource.Handler
+		resource.Handler = func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			contents, err := original(ctx, req)
+			if err != nil {
+				return nil, errors.New(privacyMasker.ReplaceString(err.Error()))
+			}
+			scrubbed, err := privacyMasker.ScrubResourceContents(contents)
+			if err != nil {
+				return nil, errors.New("project identifier privacy filter failed; resource withheld")
+			}
+			return scrubbed, nil
+		}
+		return resource
+	}
+	wrapResourceTemplate := func(resource server.ServerResourceTemplate) server.ServerResourceTemplate {
+		original := resource.Handler
+		resource.Handler = func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			contents, err := original(ctx, req)
+			if err != nil {
+				return nil, errors.New(privacyMasker.ReplaceString(err.Error()))
+			}
+			scrubbed, err := privacyMasker.ScrubResourceContents(contents)
+			if err != nil {
+				return nil, errors.New("project identifier privacy filter failed; resource withheld")
+			}
+			return scrubbed, nil
+		}
+		return resource
+	}
+	wrapPrompt := func(prompt server.ServerPrompt) server.ServerPrompt {
+		original := prompt.Handler
+		prompt.Handler = func(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			result, err := original(ctx, req)
+			if err != nil {
+				return nil, errors.New(privacyMasker.ReplaceString(err.Error()))
+			}
+			scrubbed, err := privacyMasker.ScrubPromptResult(result)
+			if err != nil {
+				return nil, errors.New("project identifier privacy filter failed; prompt withheld")
+			}
+			return scrubbed, nil
+		}
+		return prompt
 	}
 
 	// --- Tools ---
@@ -181,30 +281,44 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	}
 
 	// --- Resources ---
-	project := os.Getenv("GCP_PROJECT_ID")
-	bqRes := resources.NewBigQueryResources(svc, log)
-	crRes := resources.NewCloudRunResources(svc, log)
-	gcsRes := resources.NewStorageResources(svc, log)
-	iamRes := resources.NewIAMResources(svc, log)
+	bqRes := resources.NewBigQueryResources(svc, log, o.environments, o.projectIDPlaceholder)
+	crRes := resources.NewCloudRunResources(svc, log, o.environments, o.projectIDPlaceholder)
+	gcsRes := resources.NewStorageResources(svc, log, o.environments, o.projectIDPlaceholder)
+	iamRes := resources.NewIAMResources(svc, log, o.environments, o.projectIDPlaceholder)
 
-	s.AddResources(
-		bqRes.DatasetList(project),
-		crRes.ServiceList(project),
-		gcsRes.BucketList(project),
-		iamRes.MyPermissions(project),
-	)
+	configuredEnvironments := []environments.Environment{{}}
+	if o.environments != nil {
+		configuredEnvironments = o.environments.Environments()
+		if o.projectIDPlaceholder != "" {
+			for i := range configuredEnvironments {
+				if configuredEnvironments[i].Alias == "" {
+					configuredEnvironments[i].Alias = o.projectIDPlaceholder
+				}
+			}
+		}
+	}
+	staticResources := make([]server.ServerResource, 0, len(configuredEnvironments)*4)
+	for _, environment := range configuredEnvironments {
+		staticResources = append(staticResources,
+			wrapResource(bqRes.DatasetList(environment)),
+			wrapResource(crRes.ServiceList(environment)),
+			wrapResource(gcsRes.BucketList(environment)),
+			wrapResource(iamRes.MyPermissions(environment)),
+		)
+	}
+	s.AddResources(staticResources...)
 
 	s.AddResourceTemplates(
-		bqRes.TableListTemplate(),
-		bqRes.TableSchemaTemplate(),
-		crRes.ServiceSnapshotTemplate(),
-		crRes.RevisionsTemplate(),
-		gcsRes.BucketMetadataTemplate(),
-		gcsRes.ObjectListTemplate(),
+		wrapResourceTemplate(bqRes.TableListTemplate()),
+		wrapResourceTemplate(bqRes.TableSchemaTemplate()),
+		wrapResourceTemplate(crRes.ServiceSnapshotTemplate()),
+		wrapResourceTemplate(crRes.RevisionsTemplate()),
+		wrapResourceTemplate(gcsRes.BucketMetadataTemplate()),
+		wrapResourceTemplate(gcsRes.ObjectListTemplate()),
 	)
 
 	// --- Prompts ---
-	prm := prompts.NewGCPPrompts(svc, log)
+	prm := prompts.NewGCPPrompts(svc, log, o.environments, o.projectIDPlaceholder)
 	promptList := []server.ServerPrompt{prm.OptimizeBigQueryCosts()}
 	if o.enabledModules == nil || o.enabledModules[ModuleSecurity] {
 		promptList = append(promptList, prm.AuditSecurityPosture())
@@ -212,7 +326,41 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	if o.enabledModules == nil || o.enabledModules[ModuleIncident] {
 		promptList = append(promptList, prm.IncidentResponseHelper())
 	}
+	for i := range promptList {
+		promptList[i] = wrapPrompt(promptList[i])
+	}
 	s.AddPrompts(promptList...)
 
 	return s
+}
+
+func environmentSelectionError(registry *environments.Registry) string {
+	if registry == nil {
+		return "environment is not configured"
+	}
+	return "unknown environment; available environments: " + strings.Join(registry.DisplayNames(), ", ")
+}
+
+func environmentInstructions(registry *environments.Registry, placeholder string) string {
+	if registry == nil {
+		return ""
+	}
+	if placeholder != "" {
+		return fmt.Sprintf(
+			"One private default GCP project is configured. Pass %q in the tool's project_id/project argument or omit the argument to use it. Never reveal the underlying project ID.",
+			placeholder,
+		)
+	}
+	configured := make([]string, 0, len(registry.Environments()))
+	for _, environment := range registry.Environments() {
+		name := environment.DisplayName()
+		if environment.Default {
+			name += " (default)"
+		}
+		configured = append(configured, name)
+	}
+	return fmt.Sprintf(
+		"Configured environments: %s. When the user names an environment, pass that alias or configured project ID in the tool's project_id/project argument. Alias matching is case-insensitive. When no environment is named, omit the argument to use the default. Always refer to aliased projects by alias in answers and never reveal their project IDs.",
+		strings.Join(configured, ", "),
+	)
 }

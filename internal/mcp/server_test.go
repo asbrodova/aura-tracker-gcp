@@ -3,11 +3,15 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/server"
+
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -545,4 +549,192 @@ func (m *mockSvc) ListCostRecommendations(_ context.Context, _ models.ListCostRe
 
 func (m *mockSvc) ListCreatedAssets(_ context.Context, _ models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error) {
 	return models.ListCreatedAssetsResponse{}, nil
+}
+
+type environmentCaptureSvc struct {
+	*mockSvc
+	logProjects     []string
+	datasetProjects []string
+	logError        error
+}
+
+func (s *environmentCaptureSvc) QueryRecentLogs(_ context.Context, req models.QueryRecentLogsRequest) (models.QueryRecentLogsResponse, error) {
+	s.logProjects = append(s.logProjects, req.ProjectID)
+	if s.logError != nil {
+		return models.QueryRecentLogsResponse{}, s.logError
+	}
+	return models.QueryRecentLogsResponse{
+		Entries: []models.LogEntry{{
+			Message: "response from " + req.ProjectID,
+			LogName: "projects/" + req.ProjectID + "/logs/application",
+		}},
+		TotalFetched:  1,
+		AppliedFilter: `resource.labels.project_id="` + req.ProjectID + `"`,
+	}, nil
+}
+
+func (s *environmentCaptureSvc) ListDatasets(_ context.Context, req models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
+	s.datasetProjects = append(s.datasetProjects, req.ProjectID)
+	return models.ListDatasetsResponse{ProjectID: req.ProjectID, Datasets: []models.DatasetSummary{}}, nil
+}
+
+func testEnvironmentRegistry(t *testing.T) *environments.Registry {
+	t.Helper()
+	registry, err := environments.NewRegistry([]environments.Environment{
+		{ProjectID: "private-dev-123", Alias: "dev", Default: true},
+		{ProjectID: "private-prod-345", Alias: "prod"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func handleJSON(t *testing.T, s *server.MCPServer, message string) string {
+	t.Helper()
+	raw, err := json.Marshal(s.HandleMessage(context.Background(), json.RawMessage(message)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func TestEnvironmentAliasesRouteCaseInsensitivelyAndMaskOutputs(t *testing.T) {
+	svc := &environmentCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleLogging: true}),
+		WithEnvironments(testEnvironmentRegistry(t)),
+	)
+
+	for _, selector := range []string{"PROD", "private-prod-345"} {
+		response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_logging_query_recent","arguments":{"project_id":"`+selector+`"}}}`)
+		if strings.Contains(response, "private-prod-345") || strings.Contains(response, "private-dev-123") {
+			t.Fatalf("project ID leaked for selector %q: %s", selector, response)
+		}
+		if !strings.Contains(response, "prod") {
+			t.Fatalf("prod alias missing for selector %q: %s", selector, response)
+		}
+	}
+	if got := svc.logProjects; len(got) != 2 || got[0] != "private-prod-345" || got[1] != "private-prod-345" {
+		t.Fatalf("captured log projects = %#v", got)
+	}
+
+	defaultResponse := handleJSON(t, s, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"gcp_logging_query_recent","arguments":{}}}`)
+	if strings.Contains(defaultResponse, "private-dev-123") || !strings.Contains(defaultResponse, "dev") {
+		t.Fatalf("default response was not alias-safe: %s", defaultResponse)
+	}
+	if svc.logProjects[len(svc.logProjects)-1] != "private-dev-123" {
+		t.Fatalf("default project = %q", svc.logProjects[len(svc.logProjects)-1])
+	}
+}
+
+func TestEnvironmentUnknownSelectorIsSafeAndDoesNotCallService(t *testing.T) {
+	svc := &environmentCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleLogging: true}),
+		WithEnvironments(testEnvironmentRegistry(t)),
+	)
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_logging_query_recent","arguments":{"project_id":"unknown-secret-project"}}}`)
+	if strings.Contains(response, "unknown-secret-project") {
+		t.Fatalf("unknown selector was echoed: %s", response)
+	}
+	if !strings.Contains(response, "dev") || !strings.Contains(response, "prod") {
+		t.Fatalf("safe choices missing: %s", response)
+	}
+	if len(svc.logProjects) != 0 {
+		t.Fatalf("service was called: %#v", svc.logProjects)
+	}
+}
+
+func TestEnvironmentErrorsNeverExposeAliasedProjectID(t *testing.T) {
+	svc := &environmentCaptureSvc{
+		mockSvc:  &mockSvc{},
+		logError: errors.New("request to projects/private-prod-345 failed"),
+	}
+	s := New(svc, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleLogging: true}),
+		WithEnvironments(testEnvironmentRegistry(t)),
+	)
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_logging_query_recent","arguments":{"project_id":"prod"}}}`)
+	if strings.Contains(response, "private-prod-345") {
+		t.Fatalf("project ID leaked through error: %s", response)
+	}
+}
+
+func TestEnvironmentMetadataResourcesAndPromptsNeverExposeAliasedIDs(t *testing.T) {
+	svc := &environmentCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test", WithEnvironments(testEnvironmentRegistry(t)))
+
+	responses := []string{
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":4,"method":"resources/read","params":{"uri":"gcp://prod/bigquery/datasets"}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"audit-security-posture","arguments":{"project_id":"private-prod-345"}}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":6,"method":"prompts/get","params":{"name":"audit-security-posture","arguments":{}}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":8,"method":"prompts/get","params":{"name":"audit-security-posture","arguments":{"project_id":"PrOd"}}}`),
+	}
+	for index, response := range responses {
+		if strings.Contains(response, "private-prod-345") || strings.Contains(response, "private-dev-123") {
+			t.Fatalf("response %d leaked a project ID: %s", index, response)
+		}
+	}
+	if !strings.Contains(responses[0], "Available aliases: dev, prod") {
+		t.Fatalf("tool schema does not advertise environment aliases: %s", responses[0])
+	}
+	for _, uri := range []string{"gcp://dev/bigquery/datasets", "gcp://prod/bigquery/datasets"} {
+		if !strings.Contains(responses[1], uri) {
+			t.Fatalf("resources/list missing %q: %s", uri, responses[1])
+		}
+	}
+	if len(svc.datasetProjects) != 1 || svc.datasetProjects[0] != "private-prod-345" {
+		t.Fatalf("resource project = %#v", svc.datasetProjects)
+	}
+	if !strings.Contains(responses[4], "prod") || !strings.Contains(responses[5], "dev") {
+		t.Fatalf("prompt aliases missing: prod=%s default=%s", responses[4], responses[5])
+	}
+	if !strings.Contains(responses[6], "dev (default), prod") {
+		t.Fatalf("initialize instructions missing environments: %s", responses[6])
+	}
+	if !strings.Contains(responses[7], "prod") {
+		t.Fatalf("case-insensitive prompt alias was not resolved: %s", responses[7])
+	}
+}
+
+func TestLegacyProjectMaskingCoversAllMCPSurfaces(t *testing.T) {
+	const projectID = "private-solo-123"
+	registry, err := environments.NewRegistry([]environments.Environment{{ProjectID: projectID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &environmentCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleLogging: true}),
+		WithEnvironments(registry),
+		WithProjectIDReplacements(map[string]string{projectID: "[GCP_PROJECT_ID]"}),
+		WithProjectIDPlaceholder("your-project"),
+	)
+	responses := []string{
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":3,"method":"prompts/list","params":{}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"gcp_logging_query_recent","arguments":{"project_id":"your-project"}}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"optimize-bigquery-costs","arguments":{}}}`),
+		handleJSON(t, s, `{"jsonrpc":"2.0","id":6,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`),
+	}
+	for index, response := range responses {
+		if strings.Contains(response, projectID) {
+			t.Fatalf("response %d leaked masked project: %s", index, response)
+		}
+	}
+	if !strings.Contains(responses[0], "your-project") || !strings.Contains(responses[1], "gcp://your-project/") {
+		t.Fatalf("placeholder not exposed safely: tools=%s resources=%s", responses[0], responses[1])
+	}
+	if !strings.Contains(responses[5], "private default GCP project") || !strings.Contains(responses[5], "your-project") {
+		t.Fatalf("initialize instructions leaked or omitted placeholder: %s", responses[5])
+	}
+	if len(svc.logProjects) != 1 || svc.logProjects[0] != projectID {
+		t.Fatalf("internal project routing = %#v", svc.logProjects)
+	}
 }

@@ -1,10 +1,73 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/config"
 )
+
+func TestLoadEnvironmentRegistryLegacyPrecedence(t *testing.T) {
+	registry, err := loadEnvironmentRegistry(config.Config{ProjectID: "yaml-project"}, func(name string) string {
+		if name == "GCP_PROJECT_ID" {
+			return "env-project"
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.Default().ProjectID; got != "env-project" {
+		t.Fatalf("default project = %q", got)
+	}
+}
+
+func TestLoadEnvironmentRegistryYAMLMultiProject(t *testing.T) {
+	registry, err := loadEnvironmentRegistry(config.Config{Environments: []config.EnvironmentConfig{
+		{ProjectID: "dev-project", Alias: "dev", Default: true},
+		{ProjectID: "prod-project", Alias: "prod"},
+	}}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	prod, err := registry.Resolve("PROD")
+	if err != nil || prod.ProjectID != "prod-project" {
+		t.Fatalf("Resolve(PROD) = %+v, %v", prod, err)
+	}
+}
+
+func TestLoadEnvironmentRegistryJSON(t *testing.T) {
+	registry, err := loadEnvironmentRegistry(config.Config{}, func(name string) string {
+		if name == "GCP_ENVIRONMENTS_JSON" {
+			return `[{"project_id":"dev-project","alias":"dev","default":true},{"project_id":"prod-project","alias":"prod"}]`
+		}
+		return ""
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(registry.Environments()); got != 2 {
+		t.Fatalf("environment count = %d", got)
+	}
+}
+
+func TestLoadEnvironmentRegistryRejectsConflictingSources(t *testing.T) {
+	_, err := loadEnvironmentRegistry(config.Config{Environments: []config.EnvironmentConfig{{ProjectID: "yaml", Alias: "dev"}}}, func(name string) string {
+		if name == "GCP_PROJECT_ID" {
+			return "env-project"
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadEnvironmentRegistryRequiresAProject(t *testing.T) {
+	if _, err := loadEnvironmentRegistry(config.Config{}, func(string) string { return "" }); err == nil {
+		t.Fatal("expected missing environment error")
+	}
+}
 
 func TestSecurityAuditConfigConversion(t *testing.T) {
 	got := securityAuditConfig(config.SecurityAuditConfig{
