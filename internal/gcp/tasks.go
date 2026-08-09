@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -26,6 +27,7 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var queues []models.TaskQueueSummary
 	var errs []models.ToolError
@@ -52,12 +54,22 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 	if queues == nil {
 		queues = []models.TaskQueueSummary{}
 	}
+	sort.Slice(queues, func(i, j int) bool {
+		if queues[i].Region != queues[j].Region {
+			return queues[i].Region < queues[j].Region
+		}
+		return queues[i].Name < queues[j].Name
+	})
+	sortToolErrors(errs)
 	return models.ListTaskQueuesResponse{Queues: queues, Errors: errs}, nil
 }
 
 func (a *gcpAdapter) listTaskQueuesForRegion(ctx context.Context, projectID, region string) ([]models.TaskQueueSummary, error) {
 	if a.tasksClient == nil {
 		return nil, nil
+	}
+	if err := a.rateWait(ctx, "tasks.listQueuesForRegion"); err != nil {
+		return nil, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()

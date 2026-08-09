@@ -7,6 +7,7 @@ import (
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 func (a *gcpAdapter) ListClusters(ctx context.Context, req models.ListClustersRequest) (models.ListClustersResponse, error) {
@@ -88,17 +89,8 @@ func (a *gcpAdapter) ScaleDeployment(ctx context.Context, req models.ScaleDeploy
 	if err := a.rateWait(ctx, "gke.ScaleDeployment"); err != nil {
 		return models.ScaleDeploymentResponse{}, err
 	}
-
-	if req.DryRun {
-		return models.ScaleDeploymentResponse{
-			DryRun:         true,
-			NodePoolName:   req.NodePoolName,
-			RequestedCount: req.NodeCount,
-			Description: fmt.Sprintf(
-				"DRY RUN: would resize node pool %q in cluster %q to %d nodes",
-				req.NodePoolName, req.ClusterName, req.NodeCount,
-			),
-		}, nil
+	if req.NodeCount < 0 {
+		return models.ScaleDeploymentResponse{}, fmt.Errorf("gke.ScaleDeployment: node_count must be non-negative")
 	}
 
 	ctx, cancel := a.withTimeout(ctx)
@@ -115,9 +107,15 @@ func (a *gcpAdapter) ScaleDeployment(ctx context.Context, req models.ScaleDeploy
 	}
 
 	currentCount := np.InitialNodeCount
+	if req.ExpectedCount != nil && currentCount != *req.ExpectedCount {
+		return models.ScaleDeploymentResponse{}, &ports.ConfirmationRequiredError{
+			Op:      "gke.ScaleDeployment",
+			Message: fmt.Sprintf("node pool size changed from %d to %d after preview; run dry_run=true again before confirming", *req.ExpectedCount, currentCount),
+		}
+	}
 	if currentCount == req.NodeCount {
 		return models.ScaleDeploymentResponse{
-			DryRun:         false,
+			DryRun:         req.DryRun,
 			NodePoolName:   req.NodePoolName,
 			PreviousCount:  currentCount,
 			RequestedCount: req.NodeCount,
@@ -125,8 +123,20 @@ func (a *gcpAdapter) ScaleDeployment(ctx context.Context, req models.ScaleDeploy
 			Description:    fmt.Sprintf("node pool %q already has %d nodes — no change needed", req.NodePoolName, req.NodeCount),
 		}, nil
 	}
+	if req.DryRun {
+		return models.ScaleDeploymentResponse{
+			DryRun:         true,
+			NodePoolName:   req.NodePoolName,
+			PreviousCount:  currentCount,
+			RequestedCount: req.NodeCount,
+			Description: fmt.Sprintf(
+				"DRY RUN: would resize node pool %q in cluster %q from %d to %d nodes",
+				req.NodePoolName, req.ClusterName, currentCount, req.NodeCount,
+			),
+		}, nil
+	}
 
-	_, err = a.clusterMgr.SetNodePoolSize(ctx, &containerpb.SetNodePoolSizeRequest{
+	op, err := a.clusterMgr.SetNodePoolSize(ctx, &containerpb.SetNodePoolSizeRequest{
 		Name:      npName,
 		NodeCount: req.NodeCount,
 	})
@@ -140,6 +150,7 @@ func (a *gcpAdapter) ScaleDeployment(ctx context.Context, req models.ScaleDeploy
 		PreviousCount:  currentCount,
 		RequestedCount: req.NodeCount,
 		NoChangeNeeded: false,
+		OperationName:  op.Name,
 		Description: fmt.Sprintf(
 			"resizing node pool %q from %d to %d nodes — operation submitted",
 			req.NodePoolName, currentCount, req.NodeCount,

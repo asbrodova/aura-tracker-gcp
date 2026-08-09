@@ -160,14 +160,17 @@ type UpdateTrafficRequest struct {
 	Traffic       []TrafficTarget `json:"traffic"`
 	DryRun        bool            `json:"dry_run"`
 	ConfirmPlanID string          `json:"confirm_plan_id,omitempty"`
+	ExpectedEtag  string          `json:"-"`
 }
 
 type UpdateTrafficResponse struct {
-	DryRun      bool            `json:"dry_run"`
-	ServiceName string          `json:"service_name"`
-	Before      []TrafficTarget `json:"before"`
-	After       []TrafficTarget `json:"after"`
-	Description string          `json:"description"`
-	PlanID      string          `json:"plan_id,omitempty"`
-	ExpiresIn   string          `json:"expires_in,omitempty"`
+	DryRun         bool            `json:"dry_run"`
+	ServiceName    string          `json:"service_name"`
+	Before         []TrafficTarget `json:"before"`
+	After          []TrafficTarget `json:"after"`
+	NoChangeNeeded bool            `json:"no_change_needed"`
+	Description    string          `json:"description"`
+	PlanID         string          `json:"plan_id,omitempty"`
+	ExpiresIn      string          `json:"expires_in,omitempty"`
+	StateVersion   string          `json:"-"`
 }

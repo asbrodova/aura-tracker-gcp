@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"fmt"
 
 	"cloud.google.com/go/storage"
 
@@ -50,6 +51,9 @@ func (a *gcpAdapter) ListBucketObjects(ctx context.Context, req models.ListBucke
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
+	if _, err := a.checkedBucketAttrs(ctx, req.ProjectID, req.BucketName); err != nil {
+		return models.ListBucketObjectsResponse{}, wrapGCPError("storage.ListBucketObjects.scope", err)
+	}
 
 	limit := req.MaxResults
 	if limit <= 0 || limit > maxBucketObjects {
@@ -101,7 +105,7 @@ func (a *gcpAdapter) GetBucketMetadata(ctx context.Context, req models.GetBucket
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	attrs, err := a.gcs.Bucket(req.BucketName).Attrs(ctx)
+	attrs, err := a.checkedBucketAttrs(ctx, req.ProjectID, req.BucketName)
 	if err != nil {
 		return models.BucketMetadataResponse{}, wrapGCPError("storage.GetBucketMetadata", err)
 	}
@@ -122,4 +126,25 @@ func (a *gcpAdapter) GetBucketMetadata(ctx context.Context, req models.GetBucket
 		PublicAccessPrevention:   pap,
 		LifecycleRuleCount:       len(attrs.Lifecycle.Rules),
 	}, nil
+}
+
+func (a *gcpAdapter) checkedBucketAttrs(ctx context.Context, projectID, bucketName string) (*storage.BucketAttrs, error) {
+	if projectID == "" || bucketName == "" {
+		return nil, fmt.Errorf("project_id and bucket_name are required")
+	}
+	if a.gcs == nil || a.crm == nil {
+		return nil, fmt.Errorf("storage scope validation clients are not initialised")
+	}
+	attrs, err := a.gcs.Bucket(bucketName).Attrs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	project, err := a.crm.Projects.Get(projectID).Fields("projectNumber").Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+	if project.ProjectNumber <= 0 || attrs.ProjectNumber == 0 || uint64(project.ProjectNumber) != attrs.ProjectNumber {
+		return nil, fmt.Errorf("bucket %q does not belong to selected project", bucketName)
+	}
+	return attrs, nil
 }

@@ -54,6 +54,18 @@ func TestArchitectureDiagramToolDefinition(t *testing.T) {
 	}
 }
 
+func TestArchitectureGraphToolDefinitionExposesSupportedViewOptions(t *testing.T) {
+	tool := NewArchGraphTools(fakeArchGraphService{}, &fakeDiagramGenerator{}, slog.Default()).GetTools()[0].Tool
+	for _, property := range []string{"project_id", "regions", "include_external", "max_depth", "max_nodes", "lookback_hours"} {
+		if _, ok := tool.InputSchema.Properties[property]; !ok {
+			t.Errorf("input schema missing %q", property)
+		}
+	}
+	if _, ok := tool.InputSchema.Properties["enable_flow_log_inference"]; ok {
+		t.Fatal("unsupported flow-log inference must not be advertised")
+	}
+}
+
 func TestArchitectureDiagramToolReturnsDisplayAndStructuredContent(t *testing.T) {
 	generator := &fakeDiagramGenerator{response: models.ArchitectureDiagramResponse{
 		Status: models.DiagramStatusComplete,

@@ -126,7 +126,8 @@ Step 2 — Fetch slot usage (7-day window):
   Call tool gcp_monitoring_get_metrics with:
     project_id=%q
     metric_type=bigquery.googleapis.com/slots/allocated_for_project
-    hours=168
+    start_time=<RFC3339 UTC timestamp exactly 7 days before now>
+    end_time=<current RFC3339 UTC timestamp>
 
 Step 3 — Analyse and recommend for each table:
   a) Partitioning: if schema contains DATE or TIMESTAMP fields, recommend partitioning on that column

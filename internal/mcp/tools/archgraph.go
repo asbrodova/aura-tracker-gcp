@@ -49,7 +49,7 @@ func (t *ArchGraphTools) GenerateArchitectureDiagram() server.ServerTool {
 		mcp.WithString("environment", mcp.Description("Environment to diagram (default: production)."), mcp.DefaultString("production")),
 		mcp.WithBoolean("whole_project", mcp.Description("Include every environment instead of selecting an environment (default: false).")),
 		mcp.WithString("format", mcp.Description("Output format (default: mermaid). Graphviz returns DOT source."), mcp.Enum("mermaid", "graphviz", "svg"), mcp.DefaultString("mermaid")),
-		mcp.WithArray("regions", mcp.Description("Optional GCP regions to include."), mcp.WithStringItems(), mcp.UniqueItems(true)),
+		mcp.WithArray("regions", mcp.Description("Optional GCP regions to include."), mcp.WithStringItems(), mcp.UniqueItems(true), mcp.MaxItems(100)),
 		mcp.WithString("direction", mcp.Description("Diagram direction (default: LR)."), mcp.Enum("LR", "TB"), mcp.DefaultString("LR")),
 		mcp.WithString("group_by", mcp.Description("Grouping strategy (default: auto)."), mcp.Enum("auto", "region", "cluster", "namespace", "none"), mcp.DefaultString("auto")),
 		mcp.WithNumber("max_depth", mcp.Description("Relationship traversal depth from environment seeds (default: 2)."), mcp.Min(1), mcp.Max(10)),
@@ -125,17 +125,25 @@ func (t *ArchGraphTools) ExportArchitectureGraph() server.ServerTool {
 	tool := mcp.NewTool("gcp_export_architecture_graph",
 		mcp.WithDescription(
 			"Export a full project-wide architecture graph fusing Phase 1 (serverless/event-driven) "+
-				"and Phase 2 (GKE workloads, networking, data stores, supply chain, IAM, observability) resources. "+
+				"and Phase 2 (GKE workloads, networking, data stores, supply chain, and observability) resources. "+
 				"Runs a 3-batch parallel fan-out across all GCP listers, infers service-to-service edges via "+
-				"the resolution engine (K8s spec, IAM bindings, mesh telemetry, Cloud Trace spans), "+
+				"the resolution engine (K8s selectors, mesh telemetry, and Cloud Trace spans), "+
 				"and returns a single diagram-ready JSON with nodes, edges, and groups. "+
 				"Results are cached for 5 minutes per project+region combination. "+
 				"WARNING: full scans of large projects (5+ clusters, 50+ services) may take 40–60 seconds.",
 		),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
+		mcp.WithArray("regions", mcp.Description("Optional GCP regions to include."), mcp.WithStringItems(), mcp.UniqueItems(true)),
+		mcp.WithBoolean("include_external", mcp.Description("Include inferred external endpoints (default: false).")),
+		mcp.WithNumber("max_depth",
+			mcp.Description("Maximum relationship depth from each component entrypoint (0 = unlimited)."),
+			mcp.Min(0),
+			mcp.Max(100),
+		),
 		mcp.WithNumber("max_nodes",
 			mcp.Description("Hard cap on the number of nodes returned (0 = unlimited)."),
 			mcp.Min(0),
+			mcp.Max(10000),
 		),
 		mcp.WithNumber("lookback_hours",
 			mcp.Description("Trace and mesh telemetry lookback window in hours (1–720, default 168)."),
@@ -155,6 +163,8 @@ func (t *ArchGraphTools) ExportArchitectureGraph() server.ServerTool {
 		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args models.ExportArchitectureGraphRequest) (*mcp.CallToolResult, error) {
 			t.log.InfoContext(ctx, "gcp_export_architecture_graph",
 				"project", args.ProjectID,
+				"region_count", len(args.Regions),
+				"max_depth", args.MaxDepth,
 				"max_nodes", args.MaxNodes,
 				"lookback_hours", args.LookbackHours,
 			)

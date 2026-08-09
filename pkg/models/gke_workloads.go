@@ -31,6 +31,12 @@ type GKEContainerSummary struct {
 // GKEWorkloadSummary is the list-level view of a GKE workload (Deployment,
 // StatefulSet, DaemonSet, CronJob, or Job).
 type GKEWorkloadSummary struct {
+	// GraphNodeID and cluster provenance are populated only while assembling an
+	// architecture graph. They prevent same-named Kubernetes resources in
+	// different clusters from being joined accidentally by the resolver.
+	GraphNodeID                  string            `json:"-"`
+	ClusterName                  string            `json:"-"`
+	ClusterLocation              string            `json:"-"`
 	Name                         string            `json:"name"`
 	Namespace                    string            `json:"namespace"`
 	Kind                         string            `json:"kind"` // one of the KindGKE* constants
@@ -96,6 +102,9 @@ type GKEServicePort struct {
 // NEGAnnotation is non-empty when the cloud.google.com/neg annotation is
 // present, indicating this service has a linked Network Endpoint Group.
 type GKEServiceSummary struct {
+	GraphNodeID              string            `json:"-"`
+	ClusterName              string            `json:"-"`
+	ClusterLocation          string            `json:"-"`
 	Name                     string            `json:"name"`
 	Namespace                string            `json:"namespace"`
 	Type                     string            `json:"type"` // ClusterIP, NodePort, LoadBalancer, ExternalName
@@ -146,6 +155,9 @@ type GKEIngressRule struct {
 // HTTPRoute resources. GCPLBName is non-empty when GKE has linked this
 // ingress to a Compute load balancer (from annotations or status).
 type GKEIngressSummary struct {
+	GraphNodeID      string            `json:"-"`
+	ClusterName      string            `json:"-"`
+	ClusterLocation  string            `json:"-"`
 	Name             string            `json:"name"`
 	Namespace        string            `json:"namespace"`
 	Kind             string            `json:"kind"` // "Ingress" or "HTTPRoute"
@@ -209,6 +221,8 @@ type ListGKENetworkPoliciesResponse struct {
 
 // GKEMeshEdge is a single caller→callee edge from service mesh telemetry.
 type GKEMeshEdge struct {
+	ClusterName       string  `json:"-"`
+	ClusterLocation   string  `json:"-"`
 	Caller            string  `json:"caller"` // workload name
 	CallerNamespace   string  `json:"caller_namespace"`
 	Callee            string  `json:"callee"` // workload name

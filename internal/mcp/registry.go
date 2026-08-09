@@ -65,9 +65,16 @@ type ToolModule interface {
 // An empty (non-nil) map registers zero tools (--modules=none).
 func FilteredRegistry(modules []ToolModule, enabled map[string]bool) []server.ServerTool {
 	var out []server.ServerTool
+	seen := make(map[string]bool)
 	for _, m := range modules {
 		if enabled == nil || enabled[m.Name()] {
-			out = append(out, m.GetTools()...)
+			for _, tool := range m.GetTools() {
+				if seen[tool.Tool.Name] {
+					continue
+				}
+				seen[tool.Tool.Name] = true
+				out = append(out, tool)
+			}
 		}
 	}
 	return out

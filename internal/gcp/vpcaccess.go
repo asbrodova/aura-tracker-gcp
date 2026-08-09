@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -28,6 +29,7 @@ func (a *gcpAdapter) ListVPCConnectors(ctx context.Context, req models.ListVPCCo
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var connectors []models.VPCConnectorSummary
 	var errs []models.ToolError
@@ -54,28 +56,44 @@ func (a *gcpAdapter) ListVPCConnectors(ctx context.Context, req models.ListVPCCo
 	if connectors == nil {
 		connectors = []models.VPCConnectorSummary{}
 	}
+	sort.Slice(connectors, func(i, j int) bool {
+		if connectors[i].Region != connectors[j].Region {
+			return connectors[i].Region < connectors[j].Region
+		}
+		return connectors[i].Name < connectors[j].Name
+	})
+	sortToolErrors(errs)
 	return models.ListVPCConnectorsResponse{Connectors: connectors, Errors: errs}, nil
 }
 
 func (a *gcpAdapter) listVPCConnectorsForRegion(ctx context.Context, projectID, region string) ([]models.VPCConnectorSummary, error) {
+	if err := a.rateWait(ctx, "vpcaccess.listConnectorsForRegion"); err != nil {
+		return nil, err
+	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, region)
-	resp, err := a.vpcAccess.Projects.Locations.Connectors.List(parent).Context(ctx).Do()
-	if err != nil {
-		return nil, wrapGCPError("vpcaccess.listConnectorsForRegion", err)
-	}
-
-	var connectors []models.VPCConnectorSummary
-	for _, c := range resp.Connectors {
-		_, name := parseVPCConnectorResourceName(c.Name)
-		connectors = append(connectors, models.VPCConnectorSummary{
-			Name:    name,
-			Region:  region,
-			Network: c.Network,
-			State:   c.State,
-		})
+	connectors := []models.VPCConnectorSummary{}
+	for pageToken := ""; ; {
+		call := a.vpcAccess.Projects.Locations.Connectors.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return nil, wrapGCPError("vpcaccess.listConnectorsForRegion", err)
+		}
+		for _, c := range resp.Connectors {
+			_, name := parseVPCConnectorResourceName(c.Name)
+			connectors = append(connectors, models.VPCConnectorSummary{
+				Name: name, Region: region, Network: c.Network, State: c.State,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return connectors, nil
 }

@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -27,6 +28,7 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var triggers []models.TriggerSummary
 	var errs []models.ToolError
@@ -54,12 +56,22 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 	if triggers == nil {
 		triggers = []models.TriggerSummary{}
 	}
+	sort.Slice(triggers, func(i, j int) bool {
+		if triggers[i].Region != triggers[j].Region {
+			return triggers[i].Region < triggers[j].Region
+		}
+		return triggers[i].Name < triggers[j].Name
+	})
+	sortToolErrors(errs)
 	return models.ListTriggersResponse{Triggers: triggers, Errors: errs}, nil
 }
 
 func (a *gcpAdapter) listTriggersForRegion(ctx context.Context, projectID, region string) ([]models.TriggerSummary, error) {
 	if a.eventarcClient == nil {
 		return nil, nil
+	}
+	if err := a.rateWait(ctx, "eventarc.listTriggersForRegion"); err != nil {
+		return nil, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()

@@ -19,7 +19,8 @@ type TestPermissionsResponse struct {
 // --- Resource IAM Bindings ---
 
 type GetResourceIAMBindingsRequest struct {
-	URN string `json:"urn"`
+	ProjectID string `json:"project_id"`
+	URN       string `json:"urn"`
 }
 
 type IAMBinding struct {

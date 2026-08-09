@@ -5,10 +5,13 @@ import (
 	"time"
 )
 
+const defaultCacheMaxEntries = 1024
+
 type ttlCache[V any] struct {
 	mu      sync.RWMutex
 	entries map[string]ttlEntry[V]
 	ttl     time.Duration
+	max     int
 }
 
 type ttlEntry[V any] struct {
@@ -20,14 +23,20 @@ func newTTLCache[V any](ttl time.Duration) *ttlCache[V] {
 	return &ttlCache[V]{
 		entries: make(map[string]ttlEntry[V]),
 		ttl:     ttl,
+		max:     defaultCacheMaxEntries,
 	}
 }
 
 func (c *ttlCache[V]) get(key string) (V, bool) {
-	c.mu.RLock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	e, ok := c.entries[key]
-	c.mu.RUnlock()
-	if !ok || time.Now().After(e.expiresAt) {
+	if !ok {
+		var zero V
+		return zero, false
+	}
+	if time.Now().After(e.expiresAt) {
+		delete(c.entries, key)
 		var zero V
 		return zero, false
 	}
@@ -36,6 +45,23 @@ func (c *ttlCache[V]) get(key string) (V, bool) {
 
 func (c *ttlCache[V]) set(key string, v V) {
 	c.mu.Lock()
-	c.entries[key] = ttlEntry[V]{value: v, expiresAt: time.Now().Add(c.ttl)}
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	for existingKey, entry := range c.entries {
+		if now.After(entry.expiresAt) {
+			delete(c.entries, existingKey)
+		}
+	}
+	if _, exists := c.entries[key]; !exists && len(c.entries) >= c.max {
+		var oldestKey string
+		var oldestExpiry time.Time
+		for existingKey, entry := range c.entries {
+			if oldestKey == "" || entry.expiresAt.Before(oldestExpiry) {
+				oldestKey = existingKey
+				oldestExpiry = entry.expiresAt
+			}
+		}
+		delete(c.entries, oldestKey)
+	}
+	c.entries[key] = ttlEntry[V]{value: v, expiresAt: now.Add(c.ttl)}
 }

@@ -13,7 +13,9 @@ import (
 )
 
 const (
-	svgRenderTimeout = 5 * time.Second
+	// Graphviz is normally sub-second, but cold containers and race-instrumented
+	// test runs can spend several seconds just starting the subprocess.
+	svgRenderTimeout = 15 * time.Second
 	maxSVGBytes      = 2 << 20
 )
 

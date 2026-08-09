@@ -14,13 +14,20 @@ import (
 
 func (a *gcpAdapter) collectEffectiveFirewallSecurityFacts(ctx context.Context, projectID string) (models.FirewallSecurityFacts, error) {
 	result := models.FirewallSecurityFacts{Firewalls: []models.FirewallSecurityFact{}, Coverage: []models.SecurityCoverageUnit{}}
-	networks, err := a.computeSvc.Networks.List(projectID).Context(ctx).Do()
+	networks := []*compute.Network{}
+	if err := a.rateWait(ctx, "security.ListFirewallNetworks"); err != nil {
+		return result, err
+	}
+	err := a.computeSvc.Networks.List(projectID).Context(ctx).Pages(ctx, func(page *compute.NetworkList) error {
+		networks = append(networks, page.Items...)
+		return nil
+	})
 	if err != nil {
 		return result, wrapGCPError("security.ListFirewallSecurityFacts.Networks", err)
 	}
-	result.Coverage = append(result.Coverage, securityCoverageUnit("firewall_networks", "project", "projects/"+projectID, "complete", len(networks.Items), ""))
+	result.Coverage = append(result.Coverage, securityCoverageUnit("firewall_networks", "project", "projects/"+projectID, "complete", len(networks), ""))
 	seen := make(map[string]bool)
-	for _, network := range networks.Items {
+	for _, network := range networks {
 		if err := a.rateWait(ctx, "security.GetEffectiveFirewalls"); err != nil {
 			return result, err
 		}
@@ -50,12 +57,19 @@ func (a *gcpAdapter) collectEffectiveFirewallSecurityFacts(ctx context.Context, 
 	// Regional network firewall policies are not included in the global network
 	// effective-firewall response. Discover the regions with configured policies,
 	// then query only their associated networks.
-	regions, err := a.computeSvc.Regions.List(projectID).Context(ctx).Do()
+	regions := []*compute.Region{}
+	if err := a.rateWait(ctx, "security.ListFirewallRegions"); err != nil {
+		return result, err
+	}
+	err = a.computeSvc.Regions.List(projectID).Context(ctx).Pages(ctx, func(page *compute.RegionList) error {
+		regions = append(regions, page.Items...)
+		return nil
+	})
 	if err != nil {
 		result.Coverage = append(result.Coverage, securityCoverageUnit("firewall_regions", "project", "projects/"+projectID, "error", 0, err.Error()))
 	} else {
-		result.Coverage = append(result.Coverage, securityCoverageUnit("firewall_regions", "project", "projects/"+projectID, "complete", len(regions.Items), ""))
-		for _, region := range regions.Items {
+		result.Coverage = append(result.Coverage, securityCoverageUnit("firewall_regions", "project", "projects/"+projectID, "complete", len(regions), ""))
+		for _, region := range regions {
 			if err := a.collectRegionalEffectiveFirewalls(ctx, projectID, region.Name, &result, seen); err != nil {
 				result.Coverage = append(result.Coverage, securityCoverageUnit("firewall_regional", "region", region.Name, "error", 0, err.Error()))
 			}
@@ -98,12 +112,16 @@ func (a *gcpAdapter) collectRegionalEffectiveFirewalls(ctx context.Context, proj
 	if err := a.rateWait(ctx, "security.ListRegionalFirewallPolicies"); err != nil {
 		return err
 	}
-	policies, err := a.computeSvc.RegionNetworkFirewallPolicies.List(projectID, region).Context(ctx).Do()
+	policies := []*compute.FirewallPolicy{}
+	err := a.computeSvc.RegionNetworkFirewallPolicies.List(projectID, region).Context(ctx).Pages(ctx, func(page *compute.FirewallPolicyList) error {
+		policies = append(policies, page.Items...)
+		return nil
+	})
 	if err != nil {
 		return err
 	}
 	requested := make(map[string]bool)
-	for _, policy := range policies.Items {
+	for _, policy := range policies {
 		for _, association := range policy.Associations {
 			network := path.Base(association.AttachmentTarget)
 			if network == "" || requested[network] {

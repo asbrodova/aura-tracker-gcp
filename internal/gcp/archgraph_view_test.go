@@ -75,13 +75,80 @@ func TestArchGraphCacheKeyIncludesCollectionOptionsOnly(t *testing.T) {
 
 	withFlowLogs := base
 	withFlowLogs.EnableFlowLogInference = true
-	if archGraphCacheKey(withFlowLogs) == archGraphCacheKey(base) {
-		t.Fatal("flow-log inference must change cache key")
+	if got, want := archGraphCacheKey(withFlowLogs), archGraphCacheKey(base); got != want {
+		t.Fatalf("unsupported flow-log flag changed cache key: got %q want %q", got, want)
 	}
 
 	withLookback := base
 	withLookback.LookbackHours = 48
 	if archGraphCacheKey(withLookback) == archGraphCacheKey(base) {
 		t.Fatal("lookback must change cache key")
+	}
+}
+
+func TestApplyArchitectureGraphViewDepthDoesNotRerootTruncatedTail(t *testing.T) {
+	graph := models.ServerlessGraph{
+		ProjectID: "project",
+		Nodes:     []models.GraphNode{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "cycle-a"}, {ID: "cycle-b"}},
+		Edges: []models.GraphEdge{
+			{Source: "a", Target: "b"}, {Source: "b", Target: "c"},
+			{Source: "cycle-a", Target: "cycle-b"}, {Source: "cycle-b", Target: "cycle-a"},
+		},
+	}
+	got := applyArchitectureGraphView(graph, models.ExportArchitectureGraphRequest{ProjectID: "project", MaxDepth: 1})
+	ids := nodeIDSet(got.Nodes)
+	if !ids["a"] || !ids["b"] || ids["c"] {
+		t.Fatalf("depth-limited chain = %#v, want a/b but not c", ids)
+	}
+	if !ids["cycle-a"] || !ids["cycle-b"] {
+		t.Fatalf("cyclic component was erased: %#v", ids)
+	}
+}
+
+func TestBuildArchGroupsScopesSameNamedClustersByLocation(t *testing.T) {
+	groups := buildArchGroups("project", []models.GraphNode{
+		{ID: "a", Region: "us-central1", ClusterName: "primary", Namespace: "prod"},
+		{ID: "b", Region: "europe-west1", ClusterName: "primary", Namespace: "prod"},
+	})
+	clusterGroups := 0
+	namespaceGroups := 0
+	for _, group := range groups {
+		switch group.Kind {
+		case models.GroupKindCluster:
+			clusterGroups++
+		case models.GroupKindNamespace:
+			namespaceGroups++
+		}
+	}
+	if clusterGroups != 2 || namespaceGroups != 2 {
+		t.Fatalf("same-named regional clusters were merged: %+v", groups)
+	}
+}
+
+func TestArchitectureIngressKindNormalizesKubernetesKinds(t *testing.T) {
+	if got := architectureIngressKind("Ingress"); got != models.KindGKEIngress {
+		t.Fatalf("Ingress kind = %q", got)
+	}
+	if got := architectureIngressKind("HTTPRoute"); got != models.KindGKEGateway {
+		t.Fatalf("HTTPRoute kind = %q", got)
+	}
+}
+
+func TestValidateArchitectureGraphRequestBoundsInputs(t *testing.T) {
+	valid := models.ExportArchitectureGraphRequest{ProjectID: "valid-project", Regions: []string{"us-central1"}, MaxDepth: 2, MaxNodes: 100, LookbackHours: 24}
+	if err := validateArchitectureGraphRequest(valid); err != nil {
+		t.Fatalf("valid request rejected: %v", err)
+	}
+	invalid := []models.ExportArchitectureGraphRequest{
+		{ProjectID: "bad"},
+		{ProjectID: "valid-project", Regions: []string{"../other"}},
+		{ProjectID: "valid-project", MaxDepth: 101},
+		{ProjectID: "valid-project", MaxNodes: 10001},
+		{ProjectID: "valid-project", LookbackHours: 721},
+	}
+	for _, request := range invalid {
+		if err := validateArchitectureGraphRequest(request); err == nil {
+			t.Fatalf("invalid request accepted: %+v", request)
+		}
 	}
 }

@@ -23,21 +23,30 @@ func (a *gcpAdapter) ListArtifactRegistryRepos(ctx context.Context, req models.L
 	}
 	parent := "projects/" + req.ProjectID + "/locations/" + loc
 
-	resp, err := a.artifactRegistrySvc.Projects.Locations.Repositories.List(parent).Context(ctx).Do()
-	if err != nil {
-		return models.ListArtifactRegistryReposResponse{}, wrapGCPError("artifactregistry.ListRepos", err)
-	}
-
-	repos := make([]models.ArtifactRegistryRepoSummary, 0, len(resp.Repositories))
-	for _, r := range resp.Repositories {
-		repos = append(repos, models.ArtifactRegistryRepoSummary{
-			Name:        r.Name,
-			Format:      r.Format,
-			Location:    locationFromName(r.Name),
-			Description: r.Description,
-			CreateTime:  r.CreateTime,
-			SizeBytes:   r.SizeBytes,
-		})
+	repos := []models.ArtifactRegistryRepoSummary{}
+	for pageToken := ""; ; {
+		call := a.artifactRegistrySvc.Projects.Locations.Repositories.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListArtifactRegistryReposResponse{}, wrapGCPError("artifactregistry.ListRepos", err)
+		}
+		for _, r := range resp.Repositories {
+			repos = append(repos, models.ArtifactRegistryRepoSummary{
+				Name:        r.Name,
+				Format:      r.Format,
+				Location:    locationFromName(r.Name),
+				Description: r.Description,
+				CreateTime:  r.CreateTime,
+				SizeBytes:   r.SizeBytes,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListArtifactRegistryReposResponse{Repositories: repos}, nil
 }
@@ -54,21 +63,30 @@ func (a *gcpAdapter) ListArtifactRegistryImages(ctx context.Context, req models.
 
 	parent := "projects/" + req.ProjectID + "/locations/" + req.Location + "/repositories/" + req.Repository
 
-	resp, err := a.artifactRegistrySvc.Projects.Locations.Repositories.DockerImages.List(parent).Context(ctx).Do()
-	if err != nil {
-		return models.ListArtifactRegistryImagesResponse{}, wrapGCPError("artifactregistry.ListImages", err)
-	}
-
-	images := make([]models.ArtifactRegistryImageSummary, 0, len(resp.DockerImages))
-	for _, img := range resp.DockerImages {
-		images = append(images, models.ArtifactRegistryImageSummary{
-			Name:       img.Name,
-			URI:        img.Uri,
-			Tags:       img.Tags,
-			BuildTime:  img.BuildTime,
-			UploadTime: img.UploadTime,
-			SizeBytes:  img.ImageSizeBytes,
-		})
+	images := []models.ArtifactRegistryImageSummary{}
+	for pageToken := ""; ; {
+		call := a.artifactRegistrySvc.Projects.Locations.Repositories.DockerImages.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListArtifactRegistryImagesResponse{}, wrapGCPError("artifactregistry.ListImages", err)
+		}
+		for _, img := range resp.DockerImages {
+			images = append(images, models.ArtifactRegistryImageSummary{
+				Name:       img.Name,
+				URI:        img.Uri,
+				Tags:       img.Tags,
+				BuildTime:  img.BuildTime,
+				UploadTime: img.UploadTime,
+				SizeBytes:  img.ImageSizeBytes,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListArtifactRegistryImagesResponse{Images: images}, nil
 }
@@ -89,34 +107,43 @@ func (a *gcpAdapter) ListCloudBuildTriggers(ctx context.Context, req models.List
 	}
 	parent := "projects/" + req.ProjectID + "/locations/" + region
 
-	resp, err := a.cloudBuildSvc.Projects.Locations.Triggers.List(parent).Context(ctx).Do()
-	if err != nil {
-		return models.ListCloudBuildTriggersResponse{}, wrapGCPError("cloudbuild.ListTriggers", err)
-	}
-
-	triggers := make([]models.CloudBuildTriggerSummary, 0, len(resp.Triggers))
-	for _, t := range resp.Triggers {
-		eventType := ""
-		switch {
-		case t.Github != nil:
-			eventType = "github"
-		case t.PubsubConfig != nil:
-			eventType = "pubsub"
-		case t.WebhookConfig != nil:
-			eventType = "webhook"
-		case t.SourceToBuild != nil:
-			eventType = "manual"
+	triggers := []models.CloudBuildTriggerSummary{}
+	for pageToken := ""; ; {
+		call := a.cloudBuildSvc.Projects.Locations.Triggers.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
 		}
-		triggers = append(triggers, models.CloudBuildTriggerSummary{
-			ID:          t.Id,
-			Name:        t.Name,
-			Description: t.Description,
-			EventType:   eventType,
-			Disabled:    t.Disabled,
-			Tags:        t.Tags,
-			CreateTime:  t.CreateTime,
-			Filename:    t.Filename,
-		})
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListCloudBuildTriggersResponse{}, wrapGCPError("cloudbuild.ListTriggers", err)
+		}
+		for _, t := range resp.Triggers {
+			eventType := ""
+			switch {
+			case t.Github != nil:
+				eventType = "github"
+			case t.PubsubConfig != nil:
+				eventType = "pubsub"
+			case t.WebhookConfig != nil:
+				eventType = "webhook"
+			case t.SourceToBuild != nil:
+				eventType = "manual"
+			}
+			triggers = append(triggers, models.CloudBuildTriggerSummary{
+				ID:          t.Id,
+				Name:        t.Name,
+				Description: t.Description,
+				EventType:   eventType,
+				Disabled:    t.Disabled,
+				Tags:        t.Tags,
+				CreateTime:  t.CreateTime,
+				Filename:    t.Filename,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListCloudBuildTriggersResponse{Triggers: triggers}, nil
 }
@@ -137,32 +164,53 @@ func (a *gcpAdapter) ListServiceDirectoryNamespaces(ctx context.Context, req mod
 	}
 	parent := "projects/" + req.ProjectID + "/locations/" + loc
 
-	resp, err := a.serviceDirectorySvc.Projects.Locations.Namespaces.List(parent).Context(ctx).Do()
-	if err != nil {
-		return models.ListServiceDirectoryNamespacesResponse{}, wrapGCPError("servicedirectory.ListNamespaces", err)
-	}
-
-	namespaces := make([]models.ServiceDirectoryNamespaceSummary, 0, len(resp.Namespaces))
-	for _, ns := range resp.Namespaces {
-		svcResp, err := a.serviceDirectorySvc.Projects.Locations.Namespaces.Services.List(ns.Name).Context(ctx).Do()
+	namespaces := []models.ServiceDirectoryNamespaceSummary{}
+	for pageToken := ""; ; {
+		call := a.serviceDirectorySvc.Projects.Locations.Namespaces.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
 		if err != nil {
+			return models.ListServiceDirectoryNamespacesResponse{}, wrapGCPError("servicedirectory.ListNamespaces", err)
+		}
+		for _, ns := range resp.Namespaces {
+			svcs, err := a.listServiceDirectoryServices(ctx, ns.Name)
+			if err != nil {
+				namespaces = append(namespaces, models.ServiceDirectoryNamespaceSummary{Name: ns.Name, Location: locationFromName(ns.Name)})
+				continue
+			}
 			namespaces = append(namespaces, models.ServiceDirectoryNamespaceSummary{
-				Name:     ns.Name,
-				Location: locationFromName(ns.Name),
+				Name: ns.Name, Location: locationFromName(ns.Name), Services: svcs,
 			})
-			continue
 		}
-		svcs := make([]models.ServiceDirectoryService, 0, len(svcResp.Services))
-		for _, s := range svcResp.Services {
-			svcs = append(svcs, models.ServiceDirectoryService{Name: s.Name})
+		if resp.NextPageToken == "" {
+			break
 		}
-		namespaces = append(namespaces, models.ServiceDirectoryNamespaceSummary{
-			Name:     ns.Name,
-			Location: locationFromName(ns.Name),
-			Services: svcs,
-		})
+		pageToken = resp.NextPageToken
 	}
 	return models.ListServiceDirectoryNamespacesResponse{Namespaces: namespaces}, nil
+}
+
+func (a *gcpAdapter) listServiceDirectoryServices(ctx context.Context, namespace string) ([]models.ServiceDirectoryService, error) {
+	services := []models.ServiceDirectoryService{}
+	for pageToken := ""; ; {
+		call := a.serviceDirectorySvc.Projects.Locations.Namespaces.Services.List(namespace).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return nil, err
+		}
+		for _, service := range resp.Services {
+			services = append(services, models.ServiceDirectoryService{Name: service.Name})
+		}
+		if resp.NextPageToken == "" {
+			return services, nil
+		}
+		pageToken = resp.NextPageToken
+	}
 }
 
 // locationFromName extracts the location segment from a resource name of the form

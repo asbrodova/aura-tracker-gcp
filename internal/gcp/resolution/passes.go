@@ -10,7 +10,6 @@ import (
 // ─── Pass 1: Direct config ────────────────────────────────────────────────────
 
 func runPass1(c *resolveCtx) {
-	pass1Workloads(c)
 	pass1K8sServices(c)
 	pass1Ingresses(c)
 	pass1Eventarc(c)
@@ -85,39 +84,12 @@ func pass1PubSubTopics(c *resolveCtx) {
 	}
 }
 
-// pass1Workloads processes GKE workload summaries:
-//   - secret refs → reads_secret edges
-//   - env var patterns → reads_from_db edges
-func pass1Workloads(c *resolveCtx) {
-	for _, w := range c.in.Workloads {
-		srcID := c.lookupByName(w.Name, w.Kind)
-		if srcID == "" {
-			continue
-		}
-
-		// Secret refs → reads_secret.
-		for _, secretName := range w.SecretRefs {
-			tgtID := c.lookupByName(secretName, models.KindSecret)
-			if tgtID == "" {
-				continue
-			}
-			c.emit(models.GraphEdge{
-				Source:     srcID,
-				Target:     tgtID,
-				Type:       models.EdgeReadsSecret,
-				Evidence:   models.EvidenceK8sSpec,
-				Confidence: 0.95,
-			})
-		}
-	}
-}
-
 // pass1K8sServices processes K8s Service summaries:
 //   - NEG annotation → load_balanced_by edge to a compute_neg node
 //   - selector match against workload labels → exposes edge
 func pass1K8sServices(c *resolveCtx) {
 	for _, svc := range c.in.K8sServices {
-		svcID := c.lookupByName(svc.Name, models.KindGKEService)
+		svcID := c.summaryNodeID(svc.GraphNodeID, svc.Name, svc.Namespace, svc.ClusterName, svc.ClusterLocation, models.KindGKEService)
 		if svcID == "" {
 			continue
 		}
@@ -142,11 +114,13 @@ func pass1K8sServices(c *resolveCtx) {
 		// Selector matching: find workloads whose labels are a superset of the selector.
 		if len(svc.Selector) > 0 {
 			for _, w := range c.in.Workloads {
-				if w.Namespace != svc.Namespace {
+				if w.Namespace != svc.Namespace ||
+					(svc.ClusterName != "" && w.ClusterName != svc.ClusterName) ||
+					(svc.ClusterLocation != "" && w.ClusterLocation != svc.ClusterLocation) {
 					continue
 				}
 				if labelsMatch(svc.Selector, w.Labels) {
-					wID := c.lookupByName(w.Name, w.Kind)
+					wID := c.summaryNodeID(w.GraphNodeID, w.Name, w.Namespace, w.ClusterName, w.ClusterLocation, w.Kind)
 					if wID != "" {
 						c.emit(models.GraphEdge{
 							Source:     svcID,
@@ -166,7 +140,7 @@ func pass1K8sServices(c *resolveCtx) {
 //   - GCPLBName → routes_to edge from ingress node to compute_lb node
 func pass1Ingresses(c *resolveCtx) {
 	for _, ing := range c.in.Ingresses {
-		ingID := c.lookupByName(ing.Name, models.KindGKEIngress, models.KindGKEGateway)
+		ingID := c.summaryNodeID(ing.GraphNodeID, ing.Name, ing.Namespace, ing.ClusterName, ing.ClusterLocation, models.KindGKEIngress, models.KindGKEGateway)
 		if ingID == "" || ing.GCPLBName == "" {
 			continue
 		}
@@ -340,8 +314,8 @@ func iamEdgeType(role, targetKind string) (string, float64) {
 
 func runPass3(c *resolveCtx) {
 	for _, me := range c.in.MeshEdges {
-		callerID := c.lookupByName(me.Caller)
-		calleeID := c.lookupByName(me.Callee)
+		callerID := c.lookupScoped(me.Caller, me.CallerNamespace, me.ClusterName, me.ClusterLocation, gkeCallableKinds...)
+		calleeID := c.lookupScoped(me.Callee, me.CalleeNamespace, me.ClusterName, me.ClusterLocation, gkeCallableKinds...)
 		if callerID == "" || calleeID == "" {
 			continue
 		}
@@ -389,15 +363,18 @@ func runPass4(c *resolveCtx) {
 
 // ─── Pass 5: Log / VPC flow log (opt-in, low confidence) ─────────────────────
 
-func runPass5(_ *resolveCtx) {
-	// Stub: VPC Flow Log and structured HTTP log inference require log entries
-	// not currently collected in ResolutionInput. Populated in a future PR when
-	// log-based inference is added to the architecture graph fan-out.
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // labelsMatch returns true if all selector key/value pairs are present in labels.
+var gkeCallableKinds = []string{
+	models.KindGKEDeployment,
+	models.KindGKEStatefulSet,
+	models.KindGKEDaemonSet,
+	models.KindGKECronJob,
+	models.KindGKEJob,
+	models.KindGKEService,
+}
+
 func labelsMatch(selector, labels map[string]string) bool {
 	for k, v := range selector {
 		if labels[k] != v {

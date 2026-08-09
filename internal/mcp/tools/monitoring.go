@@ -53,10 +53,12 @@ func (t *MonitoringTools) GetMetrics() server.ServerTool {
 			mcp.MaxProperties(20),
 		),
 		mcp.WithNumber("lookback_minutes",
-			mcp.Description("Time window in minutes (1–1440). Default: 60."),
+			mcp.Description("Relative time window in minutes (1–1440). Default: 60. Do not combine with start_time/end_time."),
 			mcp.Min(1),
 			mcp.Max(1440),
 		),
+		mcp.WithString("start_time", mcp.Description("Explicit RFC3339 interval start. Must be provided with end_time; overrides lookback_minutes.")),
+		mcp.WithString("end_time", mcp.Description("Explicit RFC3339 interval end. Must be provided with start_time; overrides lookback_minutes.")),
 		mcp.WithNumber("alignment_period_seconds",
 			mcp.Description("Aggregation alignment period in seconds. Default: 60."),
 			mcp.Min(10),
@@ -99,6 +101,8 @@ func (t *MonitoringTools) getMetricsHandler(ctx context.Context, _ mcp.CallToolR
 		"project", args.ProjectID,
 		"metric_type", args.MetricType,
 		"lookback_minutes", args.LookbackMinutes,
+		"start_time", args.StartTime,
+		"end_time", args.EndTime,
 	)
 	resp, err := t.svc.GetMetrics(ctx, args)
 	if err != nil {

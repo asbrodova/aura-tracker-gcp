@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/requestmeta"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
@@ -20,9 +21,15 @@ type stubService struct {
 	scaleErr    error
 	trafficResp models.UpdateTrafficResponse
 	trafficErr  error
+	exportResp  models.ExportRecommendationsToBQResponse
+	exportErr   error
+	lastScale   models.ScaleDeploymentRequest
+	lastTraffic models.UpdateTrafficRequest
+	lastExport  models.ExportRecommendationsToBQRequest
 }
 
 func (s *stubService) ScaleDeployment(_ context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
+	s.lastScale = req
 	if s.scaleErr != nil {
 		return models.ScaleDeploymentResponse{}, s.scaleErr
 	}
@@ -38,15 +45,17 @@ func (s *stubService) ScaleDeployment(_ context.Context, req models.ScaleDeploym
 }
 
 func (s *stubService) UpdateTraffic(_ context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
+	s.lastTraffic = req
 	if s.trafficErr != nil {
 		return models.UpdateTrafficResponse{}, s.trafficErr
 	}
 	if req.DryRun {
 		return models.UpdateTrafficResponse{
-			DryRun:      true,
-			ServiceName: req.ServiceName,
-			Before:      []models.TrafficTarget{{Revision: "v1", Percent: 100}},
-			After:       req.Traffic,
+			DryRun:       true,
+			ServiceName:  req.ServiceName,
+			Before:       []models.TrafficTarget{{Revision: "v1", Percent: 100}},
+			After:        req.Traffic,
+			StateVersion: "etag-1",
 		}, nil
 	}
 	return s.trafficResp, nil
@@ -277,6 +286,9 @@ func TestScaleDeployment_Confirm_ExecutesAndClearsPlan(t *testing.T) {
 	if resp.NodePoolName != "pool-1" {
 		t.Errorf("unexpected node pool in response: %q", resp.NodePoolName)
 	}
+	if inner.lastScale.ExpectedCount == nil || *inner.lastScale.ExpectedCount != 3 {
+		t.Fatalf("expected count guard = %v", inner.lastScale.ExpectedCount)
+	}
 
 	// Plan must be gone — single-use.
 	_, stillThere := d.store.take(dryResp.PlanID)
@@ -390,6 +402,59 @@ func TestUpdateTraffic_Confirm_ExecutesAndClearsPlan(t *testing.T) {
 	if resp.ServiceName != "svc-a" {
 		t.Errorf("unexpected service name: %q", resp.ServiceName)
 	}
+	if inner.lastTraffic.ExpectedEtag != "etag-1" {
+		t.Fatalf("expected etag = %q", inner.lastTraffic.ExpectedEtag)
+	}
+}
+
+func TestMutationPlanIsBoundToCallerAndSession(t *testing.T) {
+	inner := &stubService{scaleResp: models.ScaleDeploymentResponse{NodePoolName: "pool-1"}}
+	d := newTestDecorator(inner)
+	ownerContext := requestmeta.WithSessionID(requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Email: "owner@example.com"}), "session-a")
+	otherContext := requestmeta.WithSessionID(requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Email: "other@example.com"}), "session-a")
+	preview, err := d.ScaleDeployment(ownerContext, models.ScaleDeploymentRequest{NodePoolName: "pool-1", NodeCount: 5, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.ScaleDeployment(otherContext, models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err == nil {
+		t.Fatal("another caller confirmed the plan")
+	}
+	if _, err := d.ScaleDeployment(ownerContext, models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err != nil {
+		t.Fatalf("owner could not confirm plan: %v", err)
+	}
+}
+
+func TestFailedMutationReleasesPlanForRetry(t *testing.T) {
+	inner := &stubService{scaleResp: models.ScaleDeploymentResponse{NodePoolName: "pool-1"}}
+	d := newTestDecorator(inner)
+	preview, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{NodePoolName: "pool-1", NodeCount: 5, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner.scaleErr = errors.New("temporary failure")
+	if _, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err == nil {
+		t.Fatal("expected execution failure")
+	}
+	inner.scaleErr = nil
+	if _, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err != nil {
+		t.Fatalf("released plan could not be retried: %v", err)
+	}
+}
+
+func TestExportRecommendationsRequiresTwoStepConfirmation(t *testing.T) {
+	inner := &stubService{exportResp: models.ExportRecommendationsToBQResponse{Table: "p.d.t", RowsInserted: 4}}
+	d := newTestDecorator(inner)
+	if _, err := d.ExportRecommendationsToBQ(context.Background(), models.ExportRecommendationsToBQRequest{ProjectID: "p", Dataset: "d"}); err == nil {
+		t.Fatal("export without confirmation was allowed")
+	}
+	preview, err := d.ExportRecommendationsToBQ(context.Background(), models.ExportRecommendationsToBQRequest{ProjectID: "p", Dataset: "d", DryRun: true})
+	if err != nil || preview.PlanID == "" || preview.RowsPlanned != 4 {
+		t.Fatalf("preview=%+v err=%v", preview, err)
+	}
+	result, err := d.ExportRecommendationsToBQ(context.Background(), models.ExportRecommendationsToBQRequest{ConfirmPlanID: preview.PlanID})
+	if err != nil || result.RowsInserted != 4 || inner.lastExport.ExecutionID != preview.PlanID {
+		t.Fatalf("result=%+v request=%+v err=%v", result, inner.lastExport, err)
+	}
 }
 
 func TestUpdateTraffic_NoFlags_Blocked(t *testing.T) {
@@ -475,8 +540,15 @@ func (s *stubService) ExportArchitectureGraph(_ context.Context, _ models.Export
 func (s *stubService) ListTaggedResources(_ context.Context, _ models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
 	return models.ListTaggedResourcesResponse{}, nil
 }
-func (s *stubService) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
-	return models.ExportRecommendationsToBQResponse{}, nil
+func (s *stubService) ExportRecommendationsToBQ(_ context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	s.lastExport = req
+	if s.exportErr != nil {
+		return models.ExportRecommendationsToBQResponse{}, s.exportErr
+	}
+	if req.DryRun {
+		return models.ExportRecommendationsToBQResponse{DryRun: true, Table: "p.d.t", RowsPlanned: 4}, nil
+	}
+	return s.exportResp, nil
 }
 func (s *stubService) CollectCostFacts(_ context.Context, _ models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
 	return models.BillingCostFacts{}, nil

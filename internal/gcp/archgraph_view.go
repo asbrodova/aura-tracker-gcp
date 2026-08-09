@@ -96,65 +96,82 @@ func filterGraphEdges(edges []models.GraphEdge, allowed map[string]bool) []model
 	return filtered
 }
 
-// nodesWithinDepth treats nodes without incoming edges as entrypoints and keeps
-// nodes reachable within maxDepth. Strongly connected components with no such
-// entrypoint are retained as roots so a cyclic topology is never erased.
+// nodesWithinDepth applies the depth cap independently to each weakly connected
+// component. Nodes without incoming edges are entrypoints; a component made
+// entirely of cycles gets one deterministic synthetic root. Nodes beyond the
+// cap are not promoted to new roots.
 func nodesWithinDepth(nodes []models.GraphNode, edges []models.GraphEdge, maxDepth int) map[string]bool {
 	incoming := make(map[string]int, len(nodes))
 	adj := make(map[string][]string, len(nodes))
+	undirected := make(map[string][]string, len(nodes))
+	ids := make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		incoming[node.ID] = 0
+		ids = append(ids, node.ID)
 	}
 	for _, edge := range edges {
 		incoming[edge.Target]++
 		adj[edge.Source] = append(adj[edge.Source], edge.Target)
+		undirected[edge.Source] = append(undirected[edge.Source], edge.Target)
+		undirected[edge.Target] = append(undirected[edge.Target], edge.Source)
 	}
+	sort.Strings(ids)
 	for source := range adj {
 		sort.Strings(adj[source])
+	}
+	for nodeID := range undirected {
+		sort.Strings(undirected[nodeID])
 	}
 
 	type visit struct {
 		id    string
 		depth int
 	}
-	queue := make([]visit, 0, len(nodes))
-	for _, node := range nodes {
-		if incoming[node.ID] == 0 {
-			queue = append(queue, visit{id: node.ID})
+	allowed := make(map[string]bool, len(nodes))
+	componentSeen := make(map[string]bool, len(nodes))
+	for _, seed := range ids {
+		if componentSeen[seed] {
+			continue
 		}
-	}
-	if len(queue) == 0 {
-		for _, node := range nodes {
-			queue = append(queue, visit{id: node.ID})
+		component := []string{seed}
+		componentSeen[seed] = true
+		for i := 0; i < len(component); i++ {
+			for _, neighbor := range undirected[component[i]] {
+				if !componentSeen[neighbor] {
+					componentSeen[neighbor] = true
+					component = append(component, neighbor)
+				}
+			}
 		}
-	}
-	seen := make(map[string]bool, len(nodes))
-	for {
+		sort.Strings(component)
+
+		queue := make([]visit, 0, len(component))
+		distance := make(map[string]int, len(component))
+		for _, nodeID := range component {
+			if incoming[nodeID] == 0 {
+				queue = append(queue, visit{id: nodeID})
+				distance[nodeID] = 0
+			}
+		}
+		if len(queue) == 0 {
+			queue = append(queue, visit{id: component[0]})
+			distance[component[0]] = 0
+		}
 		for len(queue) > 0 {
 			current := queue[0]
 			queue = queue[1:]
-			if seen[current.id] {
-				continue
-			}
-			seen[current.id] = true
+			allowed[current.id] = true
 			if current.depth >= maxDepth {
 				continue
 			}
 			for _, target := range adj[current.id] {
+				if _, seen := distance[target]; seen {
+					continue
+				}
+				distance[target] = current.depth + 1
 				queue = append(queue, visit{id: target, depth: current.depth + 1})
 			}
 		}
-		var disconnectedRoot string
-		for _, node := range nodes {
-			if !seen[node.ID] {
-				disconnectedRoot = node.ID
-				break
-			}
-		}
-		if disconnectedRoot == "" {
-			break
-		}
-		queue = append(queue, visit{id: disconnectedRoot})
 	}
-	return seen
+	return allowed
 }

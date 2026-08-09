@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/requestmeta"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
@@ -24,6 +25,11 @@ type scaleDeploymentPlan struct {
 type updateTrafficPlan struct {
 	OriginalRequest models.UpdateTrafficRequest
 	DryRunResponse  models.UpdateTrafficResponse
+}
+
+type exportRecommendationsPlan struct {
+	OriginalRequest models.ExportRecommendationsToBQRequest
+	DryRunResponse  models.ExportRecommendationsToBQResponse
 }
 
 // SafetyDecorator wraps a ports.GCPService and enforces a two-step dry-run →
@@ -55,7 +61,9 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 			return preview, err
 		}
 		planID := uuid.New().String()
-		d.store.put(planID, scaleDeploymentPlan{OriginalRequest: req, DryRunResponse: preview})
+		if err := d.store.putScoped(planID, mutationOwner(ctx), scaleTarget(req), scaleDeploymentPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
+			return models.ScaleDeploymentResponse{}, fmt.Errorf("%s: %w", op, err)
+		}
 		ttl := d.store.expiresIn(planID)
 		preview.PlanID = planID
 		preview.ExpiresIn = ttl.String()
@@ -64,20 +72,20 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 				"Confirm with confirm_plan_id=%q within %s.",
 			req.NodePoolName, preview.PreviousCount, req.NodeCount, planID, ttl,
 		)
-		d.log.InfoContext(ctx, "safety: plan created",
+		d.log.InfoContext(ctx, "safety: plan created", auditArgs(ctx,
 			"op", "ScaleDeployment",
 			"plan_id", planID,
 			"node_pool", req.NodePoolName,
 			"from", preview.PreviousCount,
 			"to", req.NodeCount,
 			"expires_in", ttl,
-		)
+		)...)
 		return preview, nil
 	}
 
 	// Path 2: confirm — consume the stored plan and execute with original params.
 	if req.ConfirmPlanID != "" {
-		raw, ok := d.store.take(req.ConfirmPlanID)
+		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx))
 		if !ok {
 			return models.ScaleDeploymentResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
@@ -89,16 +97,21 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 		}
 		plan, ok := raw.(scaleDeploymentPlan)
 		if !ok {
+			d.store.finish(req.ConfirmPlanID, true)
 			return models.ScaleDeploymentResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
 		}
 		execReq := plan.OriginalRequest
 		execReq.DryRun = false
 		execReq.ConfirmPlanID = ""
+		expectedCount := plan.DryRunResponse.PreviousCount
+		execReq.ExpectedCount = &expectedCount
 		resp, err := d.inner.ScaleDeployment(ctx, execReq)
 		if err != nil {
+			d.store.finish(req.ConfirmPlanID, false)
 			return models.ScaleDeploymentResponse{}, err
 		}
-		d.log.WarnContext(ctx, "safety: mutation confirmed",
+		d.store.finish(req.ConfirmPlanID, true)
+		d.log.WarnContext(ctx, "safety: mutation confirmed", auditArgs(ctx,
 			"op", "ScaleDeployment",
 			"plan_id", req.ConfirmPlanID,
 			"project_id", execReq.ProjectID,
@@ -107,7 +120,7 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 			"node_pool", execReq.NodePoolName,
 			"previous_count", resp.PreviousCount,
 			"requested_count", resp.RequestedCount,
-		)
+		)...)
 		return resp, nil
 	}
 
@@ -128,11 +141,13 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 
 	if req.DryRun {
 		preview, err := d.inner.UpdateTraffic(ctx, req)
-		if err != nil {
+		if err != nil || preview.NoChangeNeeded {
 			return preview, err
 		}
 		planID := uuid.New().String()
-		d.store.put(planID, updateTrafficPlan{OriginalRequest: req, DryRunResponse: preview})
+		if err := d.store.putScoped(planID, mutationOwner(ctx), trafficTarget(req), updateTrafficPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
+			return models.UpdateTrafficResponse{}, fmt.Errorf("%s: %w", op, err)
+		}
 		ttl := d.store.expiresIn(planID)
 		preview.PlanID = planID
 		preview.ExpiresIn = ttl.String()
@@ -141,19 +156,19 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 				"Confirm with confirm_plan_id=%q within %s.",
 			req.ServiceName, planID, ttl,
 		)
-		d.log.InfoContext(ctx, "safety: plan created",
+		d.log.InfoContext(ctx, "safety: plan created", auditArgs(ctx,
 			"op", "UpdateTraffic",
 			"plan_id", planID,
 			"service", req.ServiceName,
 			"before", preview.Before,
 			"after", preview.After,
 			"expires_in", ttl,
-		)
+		)...)
 		return preview, nil
 	}
 
 	if req.ConfirmPlanID != "" {
-		raw, ok := d.store.take(req.ConfirmPlanID)
+		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx))
 		if !ok {
 			return models.UpdateTrafficResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
@@ -165,16 +180,20 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 		}
 		plan, ok := raw.(updateTrafficPlan)
 		if !ok {
+			d.store.finish(req.ConfirmPlanID, true)
 			return models.UpdateTrafficResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
 		}
 		execReq := plan.OriginalRequest
 		execReq.DryRun = false
 		execReq.ConfirmPlanID = ""
+		execReq.ExpectedEtag = plan.DryRunResponse.StateVersion
 		resp, err := d.inner.UpdateTraffic(ctx, execReq)
 		if err != nil {
+			d.store.finish(req.ConfirmPlanID, false)
 			return models.UpdateTrafficResponse{}, err
 		}
-		d.log.WarnContext(ctx, "safety: mutation confirmed",
+		d.store.finish(req.ConfirmPlanID, true)
+		d.log.WarnContext(ctx, "safety: mutation confirmed", auditArgs(ctx,
 			"op", "UpdateTraffic",
 			"plan_id", req.ConfirmPlanID,
 			"project_id", execReq.ProjectID,
@@ -182,7 +201,7 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 			"service_name", execReq.ServiceName,
 			"traffic_before", resp.Before,
 			"traffic_after", resp.After,
-		)
+		)...)
 		return resp, nil
 	}
 
@@ -195,6 +214,85 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 			PlanTTL,
 		),
 	}
+}
+
+func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	const op = "safety.ExportRecommendationsToBQ"
+	if req.DryRun {
+		preview, err := d.inner.ExportRecommendationsToBQ(ctx, req)
+		if err != nil {
+			return preview, err
+		}
+		planID := uuid.New().String()
+		if err := d.store.putScoped(planID, mutationOwner(ctx), recommendationExportTarget(req), exportRecommendationsPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
+			return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("%s: %w", op, err)
+		}
+		ttl := d.store.expiresIn(planID)
+		preview.PlanID = planID
+		preview.ExpiresIn = ttl.String()
+		preview.Description = fmt.Sprintf("DRY RUN: would export %d active recommendations to %q. Confirm with confirm_plan_id=%q within %s.", preview.RowsPlanned, preview.Table, planID, ttl)
+		d.log.InfoContext(ctx, "safety: plan created", auditArgs(ctx,
+			"op", "ExportRecommendationsToBQ", "plan_id", planID, "target", preview.Table,
+			"rows_planned", preview.RowsPlanned, "expires_in", ttl,
+		)...)
+		return preview, nil
+	}
+	if req.ConfirmPlanID != "" {
+		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx))
+		if !ok {
+			return models.ExportRecommendationsToBQResponse{}, &ports.ConfirmationRequiredError{Op: op, Message: fmt.Sprintf("plan_id %q not found, expired, in use, or owned by another caller. Run with dry_run=true first.", req.ConfirmPlanID)}
+		}
+		plan, ok := raw.(exportRecommendationsPlan)
+		if !ok {
+			d.store.finish(req.ConfirmPlanID, true)
+			return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
+		}
+		execReq := plan.OriginalRequest
+		execReq.DryRun = false
+		execReq.ConfirmPlanID = ""
+		execReq.ExecutionID = req.ConfirmPlanID
+		resp, err := d.inner.ExportRecommendationsToBQ(ctx, execReq)
+		if err != nil {
+			d.store.finish(req.ConfirmPlanID, false)
+			return models.ExportRecommendationsToBQResponse{}, err
+		}
+		d.store.finish(req.ConfirmPlanID, true)
+		d.log.WarnContext(ctx, "safety: mutation confirmed", auditArgs(ctx,
+			"op", "ExportRecommendationsToBQ", "plan_id", req.ConfirmPlanID,
+			"project_id", execReq.ProjectID, "table", resp.Table, "rows_inserted", resp.RowsInserted,
+		)...)
+		return resp, nil
+	}
+	return models.ExportRecommendationsToBQResponse{}, &ports.ConfirmationRequiredError{
+		Op:      op,
+		Message: fmt.Sprintf("mutations require two-step confirmation. Step 1: call gcp_export_recommendations_to_bq with dry_run=true. Step 2: call again with confirm_plan_id=<plan_id> within %s.", PlanTTL),
+	}
+}
+
+func auditArgs(ctx context.Context, args ...any) []any {
+	principal, _ := requestmeta.PrincipalFromContext(ctx)
+	base := []any{
+		"actor", principal.Actor(),
+		"correlation_id", requestmeta.CorrelationID(ctx),
+	}
+	return append(base, args...)
+}
+
+func mutationOwner(ctx context.Context) string {
+	principal, _ := requestmeta.PrincipalFromContext(ctx)
+	return principal.Actor() + "\x00" + requestmeta.SessionID(ctx)
+}
+
+func scaleTarget(req models.ScaleDeploymentRequest) string {
+	return fmt.Sprintf("gke://%s/%s/%s/nodePools/%s", req.ProjectID, req.Location, req.ClusterName, req.NodePoolName)
+}
+
+func trafficTarget(req models.UpdateTrafficRequest) string {
+	return fmt.Sprintf("run://%s/%s/%s", req.ProjectID, req.Region, req.ServiceName)
+}
+
+func recommendationExportTarget(req models.ExportRecommendationsToBQRequest) string {
+	return fmt.Sprintf("bigquery://%s/%s/%s", req.ProjectID, req.Dataset, req.Table)
 }
 
 // --- Read-only pass-throughs ---
@@ -509,10 +607,6 @@ func (d *SafetyDecorator) ExportArchitectureGraph(ctx context.Context, req model
 
 func (d *SafetyDecorator) ListTaggedResources(ctx context.Context, req models.ListTaggedResourcesRequest) (models.ListTaggedResourcesResponse, error) {
 	return d.inner.ListTaggedResources(ctx, req)
-}
-
-func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
-	return d.inner.ExportRecommendationsToBQ(ctx, req)
 }
 
 func (d *SafetyDecorator) CollectCostFacts(ctx context.Context, req models.CollectCostFactsRequest) (models.BillingCostFacts, error) {

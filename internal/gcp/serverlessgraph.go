@@ -3,6 +3,7 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -12,6 +13,15 @@ import (
 )
 
 func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.ExportServerlessGraphRequest) (models.ServerlessGraph, error) {
+	if !costProjectIDRE.MatchString(req.ProjectID) {
+		return models.ServerlessGraph{}, fmt.Errorf("serverlessgraph: invalid project ID")
+	}
+	if strings.ContainsAny(req.Region, `/\\`) || len(req.Region) > 63 {
+		return models.ServerlessGraph{}, fmt.Errorf("serverlessgraph: invalid region %q", req.Region)
+	}
+	if req.MaxNodes < 0 || req.MaxNodes > 10000 {
+		return models.ServerlessGraph{}, fmt.Errorf("serverlessgraph: max_nodes must be between 0 and 10000")
+	}
 	outerCtx, cancel := context.WithTimeout(ctx, a.graphTimeout)
 	defer cancel()
 
@@ -46,6 +56,14 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 			Message:    err.Error(),
 			Retriable:  false,
 		})
+		mu.Unlock()
+	}
+	collectToolErrors := func(toolErrors []models.ToolError) {
+		if len(toolErrors) == 0 {
+			return
+		}
+		mu.Lock()
+		collectedErrors = append(collectedErrors, toolErrors...)
 		mu.Unlock()
 	}
 
@@ -91,6 +109,7 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 			collectErr("eventarc.triggers.list", err)
 			return nil
 		}
+		collectToolErrors(r.Errors)
 		mu.Lock()
 		res.triggers = r.Triggers
 		mu.Unlock()
@@ -102,6 +121,7 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 			collectErr("cloudscheduler.jobs.list", err)
 			return nil
 		}
+		collectToolErrors(r.Errors)
 		mu.Lock()
 		res.schedulerJobs = r.Jobs
 		mu.Unlock()
@@ -113,6 +133,7 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 			collectErr("workflows.list", err)
 			return nil
 		}
+		collectToolErrors(r.Errors)
 		mu.Lock()
 		res.workflows = r.Workflows
 		mu.Unlock()
@@ -124,6 +145,7 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 			collectErr("cloudtasks.queues.list", err)
 			return nil
 		}
+		collectToolErrors(r.Errors)
 		mu.Lock()
 		res.queues = r.Queues
 		mu.Unlock()
@@ -157,6 +179,7 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 			collectErr("vpcaccess.connectors.list", err)
 			return nil
 		}
+		collectToolErrors(r.Errors)
 		mu.Lock()
 		res.connectors = r.Connectors
 		mu.Unlock()
@@ -493,33 +516,6 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 		}
 	}
 
-	// --- Build groups ---
-
-	regionMembers := map[string][]string{}
-	for urn, node := range nodeByURN {
-		r := node.Region
-		if r == "" {
-			r = "-"
-		}
-		regionMembers[r] = append(regionMembers[r], urn)
-	}
-
-	var groups []models.GraphGroup
-	groups = append(groups, models.GraphGroup{
-		ID:      fmt.Sprintf("project:%s", req.ProjectID),
-		Kind:    "project",
-		Label:   req.ProjectID,
-		Members: allURNs(nodeByURN),
-	})
-	for region, members := range regionMembers {
-		groups = append(groups, models.GraphGroup{
-			ID:      fmt.Sprintf("region:%s/%s", req.ProjectID, region),
-			Kind:    "region",
-			Label:   region,
-			Members: members,
-		})
-	}
-
 	// --- Collect nodes, apply region filter and max_nodes cap ---
 
 	nodes := make([]models.GraphNode, 0, len(nodeByURN))
@@ -529,6 +525,7 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 		}
 		nodes = append(nodes, n)
 	}
+	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
 
 	if req.MaxNodes > 0 && len(nodes) > req.MaxNodes {
 		nodes = nodes[:req.MaxNodes]
@@ -538,6 +535,15 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 			Retriable:  false,
 		})
 	}
+	allowed := nodeIDSet(nodes)
+	edges = filterGraphEdges(edges, allowed)
+	groups := buildServerlessGroups(req.ProjectID, nodes)
+	sort.Slice(collectedErrors, func(i, j int) bool {
+		if collectedErrors[i].FailingAPI != collectedErrors[j].FailingAPI {
+			return collectedErrors[i].FailingAPI < collectedErrors[j].FailingAPI
+		}
+		return collectedErrors[i].Message < collectedErrors[j].Message
+	})
 
 	return models.ServerlessGraph{
 		Nodes:  nodes,
@@ -545,6 +551,31 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 		Groups: groups,
 		Errors: collectedErrors,
 	}, nil
+}
+
+func buildServerlessGroups(projectID string, nodes []models.GraphNode) []models.GraphGroup {
+	projectMembers := make([]string, 0, len(nodes))
+	regionMembers := map[string][]string{}
+	for _, node := range nodes {
+		projectMembers = append(projectMembers, node.ID)
+		region := node.Region
+		if region == "" {
+			region = "-"
+		}
+		regionMembers[region] = append(regionMembers[region], node.ID)
+	}
+	groups := []models.GraphGroup{{
+		ID: "project:" + projectID, Kind: models.GroupKindProject,
+		Label: projectID, Members: projectMembers,
+	}}
+	for region, members := range regionMembers {
+		groups = append(groups, models.GraphGroup{
+			ID: "region:" + projectID + "/" + region, Kind: models.GroupKindRegion,
+			Label: region, Members: members,
+		})
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].ID < groups[j].ID })
+	return groups
 }
 
 // graphURN builds a stable URN for a GCP resource.
@@ -557,5 +588,6 @@ func allURNs(m map[string]models.GraphNode) []string {
 	for k := range m {
 		urns = append(urns, k)
 	}
+	sort.Strings(urns)
 	return urns
 }

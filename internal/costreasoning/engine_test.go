@@ -3,6 +3,7 @@ package costreasoning
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,27 @@ func TestExplainCacheAvoidsRepeatedBillingQuery(t *testing.T) {
 	}
 	if source.factCalls != 1 || !response.Coverage.CacheHit {
 		t.Fatalf("factCalls=%d cacheHit=%v", source.factCalls, response.Coverage.CacheHit)
+	}
+}
+
+func TestResponseCacheIsBoundedAndPurgesExpiredEntries(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	engine := New(nil, nil, Config{})
+	for i := 0; i <= maxCacheEntries; i++ {
+		engine.setCached(fmt.Sprintf("key-%03d", i), models.ExplainCostResponse{}, now.Add(time.Duration(i)*time.Nanosecond))
+	}
+	engine.cacheMu.RLock()
+	size := len(engine.cache)
+	engine.cacheMu.RUnlock()
+	if size != maxCacheEntries {
+		t.Fatalf("cache size = %d, want %d", size, maxCacheEntries)
+	}
+
+	engine.cacheMu.Lock()
+	engine.cache["expired"] = cacheEntry{expiresAt: now.Add(-time.Second)}
+	engine.cacheMu.Unlock()
+	if _, ok := engine.getCached("expired", now); ok {
+		t.Fatal("expired cache entry was returned")
 	}
 }
 

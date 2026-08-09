@@ -63,6 +63,7 @@ func TestRegistryRejectsInvalidMultiEnvironmentConfiguration(t *testing.T) {
 		{"duplicate project", []Environment{{ProjectID: "one", Alias: "dev", Default: true}, {ProjectID: "one", Alias: "prod"}}},
 		{"alias project collision", []Environment{{ProjectID: "dev-project", Alias: "prod-project", Default: true}, {ProjectID: "prod-project", Alias: "prod"}}},
 		{"unsafe alias", []Environment{{ProjectID: "one", Alias: "dev team", Default: true}, {ProjectID: "two", Alias: "prod"}}},
+		{"invalid project ID", []Environment{{ProjectID: "UPPER_case"}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

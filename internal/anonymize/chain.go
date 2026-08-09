@@ -19,11 +19,18 @@ func NewChainedAnonymizer(local *LocalScrubber, dlp *DLPAnonymizer) *ChainedAnon
 }
 
 func (c *ChainedAnonymizer) Scrub(ctx context.Context, result *mcp.CallToolResult) (*mcp.CallToolResult, error) {
-	intermediate, err := c.local.Scrub(ctx, result)
+	intermediate, localFindings, err := c.local.scrub(ctx, result)
 	if err != nil {
 		return nil, err
 	}
-	return c.dlp.Scrub(ctx, intermediate)
+	out, dlpFindings, err := c.dlp.scrub(ctx, intermediate)
+	if err != nil {
+		return nil, err
+	}
+	if c.dlp.auditOnly {
+		return buildAuditResult(append(localFindings, dlpFindings...))
+	}
+	return out, nil
 }
 
 // Compile-time interface check.

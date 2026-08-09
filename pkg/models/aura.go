@@ -41,8 +41,8 @@ type AuraReport struct {
 	HealthScore     int                `json:"health_score"`     // weighted health sub-score
 	EfficiencyScore int                `json:"efficiency_score"` // utilization efficiency sub-score
 	HealthSignals   []AuraHealthSignal `json:"health_signals"`
-	Reasons         []string           `json:"reasons"`                   // actionable improvement hints for the LLM
-	CachedAt        time.Time          `json:"cached_at"`                 // zero if not from cache
+	Reasons         []string           `json:"reasons"`                    // actionable improvement hints for the LLM
+	CachedAt        time.Time          `json:"cached_at"`                  // zero if not from cache
 	RecommenderNote string             `json:"recommender_note,omitempty"` // set when daily quota is exhausted
 }
 

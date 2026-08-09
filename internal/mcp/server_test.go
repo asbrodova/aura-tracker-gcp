@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	protocol "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
@@ -643,6 +644,66 @@ func TestEnvironmentUnknownSelectorIsSafeAndDoesNotCallService(t *testing.T) {
 	}
 	if len(svc.logProjects) != 0 {
 		t.Fatalf("service was called: %#v", svc.logProjects)
+	}
+}
+
+type iamScopeCaptureSvc struct {
+	*mockSvc
+	requests []models.GetResourceIAMBindingsRequest
+}
+
+func (s *iamScopeCaptureSvc) GetResourceIAMBindings(_ context.Context, req models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error) {
+	s.requests = append(s.requests, req)
+	return models.GetResourceIAMBindingsResponse{URN: req.URN, Bindings: []models.IAMBinding{}}, nil
+}
+
+func TestEnvironmentScopeRejectsCrossProjectURNBeforeServiceCall(t *testing.T) {
+	svc := &iamScopeCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleIAM: true}),
+		WithEnvironments(testEnvironmentRegistry(t)),
+	)
+
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_iam_get_resource_bindings","arguments":{"project_id":"dev","urn":"urn:gcp:project:-:private-prod-345:private-prod-345"}}}`)
+	if len(svc.requests) != 0 || !strings.Contains(response, "outside the selected configured environment") {
+		t.Fatalf("requests=%+v response=%s", svc.requests, response)
+	}
+
+	response = handleJSON(t, s, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"gcp_iam_get_resource_bindings","arguments":{"project_id":"prod","urn":"urn:gcp:project:-:private-prod-345:private-prod-345"}}}`)
+	if len(svc.requests) != 1 || svc.requests[0].ProjectID != "private-prod-345" {
+		t.Fatalf("requests=%+v response=%s", svc.requests, response)
+	}
+	if strings.Contains(response, "private-prod-345") {
+		t.Fatalf("project ID leaked: %s", response)
+	}
+}
+
+func TestValidateScopedArgumentsRejectsPathsAndOversizedStrings(t *testing.T) {
+	if err := validateScopedArguments(map[string]any{"service_name": "../../projects/other"}, "project"); err == nil {
+		t.Fatal("path-like service name was accepted")
+	}
+	if err := validateScopedArguments(map[string]any{"regions": []any{"us-central1", "../other"}}, "project"); err == nil {
+		t.Fatal("path-like region was accepted")
+	}
+	if err := validateScopedArguments(map[string]any{"filter": strings.Repeat("x", 4097)}, "project"); err == nil {
+		t.Fatal("oversized string was accepted")
+	}
+	if err := validateScopedArguments(map[string]any{"service_name": "payments"}, "project"); err != nil {
+		t.Fatalf("valid arguments rejected: %v", err)
+	}
+}
+
+type duplicateToolModule struct{ name string }
+
+func (m duplicateToolModule) Name() string { return m.name }
+func (m duplicateToolModule) GetTools() []server.ServerTool {
+	return []server.ServerTool{{Tool: protocol.NewTool("same-tool")}}
+}
+
+func TestFilteredRegistryDeduplicatesToolNames(t *testing.T) {
+	tools := FilteredRegistry([]ToolModule{duplicateToolModule{"a"}, duplicateToolModule{"b"}}, nil)
+	if len(tools) != 1 {
+		t.Fatalf("tool count = %d, want 1", len(tools))
 	}
 }
 

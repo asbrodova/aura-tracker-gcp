@@ -4,6 +4,8 @@ package anonymize
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sort"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -62,4 +64,78 @@ func buildAuditResult(findings []Finding) (*mcp.CallToolResult, error) {
 		PatternsSeen: names,
 	}
 	return mcp.NewToolResultJSON(report)
+}
+
+// ScrubResourceContents applies a configured anonymizer to textual MCP
+// resources. Binary resources are left unchanged because their blob is not
+// interpreted as text by the protocol.
+func ScrubResourceContents(ctx context.Context, a Anonymizer, contents []mcp.ResourceContents) ([]mcp.ResourceContents, error) {
+	out := make([]mcp.ResourceContents, len(contents))
+	copy(out, contents)
+	for i, content := range out {
+		text, ok := content.(mcp.TextResourceContents)
+		if !ok {
+			continue
+		}
+		result, err := a.Scrub(ctx, &mcp.CallToolResult{
+			Content:           []mcp.Content{mcp.NewTextContent(text.Text)},
+			StructuredContent: text.Meta,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if result == nil || len(result.Content) != 1 {
+			return nil, errors.New("anonymize: resource scrubber returned invalid content")
+		}
+		masked, ok := result.Content[0].(mcp.TextContent)
+		if !ok {
+			return nil, errors.New("anonymize: resource scrubber returned non-text content")
+		}
+		text.Text = masked.Text
+		if result.StructuredContent == nil {
+			text.Meta = nil
+		} else if meta, ok := result.StructuredContent.(map[string]any); ok {
+			text.Meta = meta
+		} else {
+			return nil, errors.New("anonymize: resource metadata scrubber returned invalid content")
+		}
+		out[i] = text
+	}
+	return out, nil
+}
+
+// ScrubPromptResult applies a configured anonymizer to every prompt message.
+func ScrubPromptResult(ctx context.Context, a Anonymizer, prompt *mcp.GetPromptResult) (*mcp.GetPromptResult, error) {
+	if prompt == nil {
+		return nil, nil
+	}
+	out := *prompt
+	out.Messages = append([]mcp.PromptMessage(nil), prompt.Messages...)
+	for i := range out.Messages {
+		result, err := a.Scrub(ctx, &mcp.CallToolResult{Content: []mcp.Content{out.Messages[i].Content}})
+		if err != nil {
+			return nil, err
+		}
+		if result == nil || len(result.Content) != 1 {
+			return nil, errors.New("anonymize: prompt scrubber returned invalid content")
+		}
+		out.Messages[i].Content = result.Content[0]
+	}
+	return &out, nil
+}
+
+// ScrubError prevents non-tool error channels from bypassing privacy filters.
+func ScrubError(ctx context.Context, a Anonymizer, source error) error {
+	if source == nil {
+		return nil
+	}
+	result, err := a.Scrub(ctx, mcp.NewToolResultError(source.Error()))
+	if err != nil || result == nil || len(result.Content) != 1 {
+		return errors.New("anonymize: scrub failed; error withheld")
+	}
+	text, ok := result.Content[0].(mcp.TextContent)
+	if !ok {
+		return errors.New("anonymize: scrub failed; error withheld")
+	}
+	return fmt.Errorf("%s", text.Text)
 }

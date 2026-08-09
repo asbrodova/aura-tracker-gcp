@@ -35,10 +35,17 @@ import (
 var version = "dev"
 
 func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
 	for _, arg := range os.Args[1:] {
 		if arg == "--version" || arg == "-version" {
 			fmt.Println(version)
-			os.Exit(0)
+			return nil
 		}
 	}
 
@@ -47,7 +54,10 @@ func main() {
 			"Use 'none' for zero tools (resources and non-module prompts remain available). Default: all modules.")
 	flag.Parse()
 
-	enabledModules := parseModulesFlag(*modulesFlag)
+	enabledModules, err := parseModulesFlag(*modulesFlag)
+	if err != nil {
+		return err
+	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -55,32 +65,28 @@ func main() {
 
 	userCfg, err := config.Load()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: load user config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("load user config: %w", err)
 	}
 
 	environmentRegistry, err := loadEnvironmentRegistry(userCfg, os.Getenv)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: environment config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("environment config: %w", err)
 	}
 	projectID := environmentRegistry.Default().ProjectID
 
 	ctx := context.Background()
 	securityCfg := securityAuditConfig(userCfg.SecurityAudit)
 	if err := securityaudit.ValidateConfig(securityCfg); err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: security audit config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("security audit config: %w", err)
 	}
 
 	creds, err := google.FindDefaultCredentials(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, `aura-tracker-gcp: no GCP credentials found.
+		return errors.New(`no GCP credentials found.
 
 Run:  gcloud auth application-default login
 
-Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
-		os.Exit(1)
+Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file`)
 	}
 	logCredentialSource(log, creds)
 
@@ -96,25 +102,26 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 			MaxResourcesPerKind: securityCfg.MaxResourcesPerKind,
 		}),
 	}
-	if os.Getenv("RECOMMENDER_ENABLED") != "false" {
+	recommenderEnabled, err := readBoolEnv("RECOMMENDER_ENABLED", true, os.Getenv)
+	if err != nil {
+		return err
+	}
+	if recommenderEnabled {
 		adapterOpts = append(adapterOpts, gcpadapter.WithRecommender())
 		log.Info("recommender integration enabled (set RECOMMENDER_ENABLED=false to disable)")
 	}
 
 	if err := applyCostReasoningEnv(&userCfg.CostReasoning); err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: cost reasoning config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("cost reasoning config: %w", err)
 	}
 	costModuleEnabled := userCfg.CostReasoning.Enabled && (enabledModules == nil || enabledModules[mcpserver.ModuleCost])
 	if costModuleEnabled {
 		if strings.TrimSpace(userCfg.CostReasoning.Dataset) == "" {
-			fmt.Fprintln(os.Stderr, "aura-tracker-gcp: cost_reasoning.dataset or BILLING_EXPORT_DATASET is required when cost reasoning is enabled")
-			os.Exit(1)
+			return errors.New("cost_reasoning.dataset or BILLING_EXPORT_DATASET is required when cost reasoning is enabled")
 		}
 		if userCfg.CostReasoning.Timezone != "" {
 			if _, err := time.LoadLocation(userCfg.CostReasoning.Timezone); err != nil {
-				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: invalid cost reasoning timezone %q: %v\n", userCfg.CostReasoning.Timezone, err)
-				os.Exit(1)
+				return fmt.Errorf("invalid cost reasoning timezone %q: %w", userCfg.CostReasoning.Timezone, err)
 			}
 		}
 		adapterOpts = append(adapterOpts, gcpadapter.WithCostReasoning(gcpadapter.CostAdapterConfig{
@@ -126,26 +133,34 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 	}
 
 	// RECOMMENDER_BQ_EXPORT_ENABLED/DATASET override yaml config.
-	if v := os.Getenv("RECOMMENDER_BQ_EXPORT_ENABLED"); v == "true" {
-		userCfg.RecommenderExport.Enabled = true
+	if strings.TrimSpace(os.Getenv("RECOMMENDER_BQ_EXPORT_ENABLED")) != "" {
+		enabled, err := readBoolEnv("RECOMMENDER_BQ_EXPORT_ENABLED", false, os.Getenv)
+		if err != nil {
+			return err
+		}
+		userCfg.RecommenderExport.Enabled = enabled
 	}
 	if v := os.Getenv("RECOMMENDER_BQ_EXPORT_DATASET"); v != "" {
 		userCfg.RecommenderExport.Dataset = v
 	}
 	if tb := os.Getenv("TRACE_BACKEND"); tb != "" {
+		tb = strings.ToLower(strings.TrimSpace(tb))
+		if tb != "trace" && tb != "monitoring" {
+			return errors.New("TRACE_BACKEND must be 'trace' or 'monitoring'")
+		}
 		adapterOpts = append(adapterOpts, gcpadapter.WithTraceBackend(tb))
 	}
 	if gts := os.Getenv("GRAPH_TIMEOUT_SECONDS"); gts != "" {
-		var secs int
-		if _, err := fmt.Sscanf(gts, "%d", &secs); err == nil && secs > 0 {
-			adapterOpts = append(adapterOpts, gcpadapter.WithGraphTimeout(time.Duration(secs)*time.Second))
+		secs, err := strconv.Atoi(strings.TrimSpace(gts))
+		if err != nil || secs < 1 || secs > 3600 {
+			return errors.New("GRAPH_TIMEOUT_SECONDS must be an integer between 1 and 3600")
 		}
+		adapterOpts = append(adapterOpts, gcpadapter.WithGraphTimeout(time.Duration(secs)*time.Second))
 	}
 
 	svc, err := gcpadapter.New(ctx, projectID, adapterOpts...)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: init gcp adapter: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("init gcp adapter: %w", err)
 	}
 	defer func() {
 		if err := svc.Close(); err != nil {
@@ -155,14 +170,12 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 
 	anonCfg, err := anonymize.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: load anonymize config: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("load anonymize config: %w", err)
 	}
 
 	anon, anonClose, err := buildAnonymizer(ctx, anonCfg, log, projectID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "aura-tracker-gcp: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 	defer anonClose()
 	if anonCfg.Enabled {
@@ -170,7 +183,14 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 	}
 
 	var gcpSvc ports.GCPService = svc
-	if os.Getenv("SAFETY_ENABLED") != "false" {
+	safetyEnabled, err := readBoolEnv("SAFETY_ENABLED", true, os.Getenv)
+	if err != nil {
+		return err
+	}
+	if !safetyEnabled && strings.EqualFold(strings.TrimSpace(os.Getenv("MCP_TRANSPORT")), "sse") {
+		return errors.New("SAFETY_ENABLED=false is not allowed with MCP_TRANSPORT=sse")
+	}
+	if safetyEnabled {
 		gcpSvc = safety.NewSafetyDecorator(svc, log)
 		log.Info("safety enforcement enabled", "plan_ttl", safety.PlanTTL)
 	} else {
@@ -182,7 +202,11 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		mcpserver.WithModules(enabledModules),
 		mcpserver.WithEnvironments(environmentRegistry),
 	}
-	if os.Getenv("ANONYMIZE_PROJECT_ID") == "true" {
+	maskProjectID, err := readBoolEnv("ANONYMIZE_PROJECT_ID", false, os.Getenv)
+	if err != nil {
+		return err
+	}
+	if maskProjectID {
 		replacements := make(map[string]string)
 		for _, environment := range environmentRegistry.Environments() {
 			if environment.Alias == "" {
@@ -196,7 +220,7 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		log.Info("project ID masking enabled")
 	}
 	if userCfg.RecommenderExport.Enabled {
-		mcpOpts = append(mcpOpts, mcpserver.WithRecommenderExport())
+		mcpOpts = append(mcpOpts, mcpserver.WithRecommenderExport(userCfg.RecommenderExport.Dataset))
 		log.Info("recommender BigQuery export enabled", "dataset", userCfg.RecommenderExport.Dataset)
 	}
 	if costModuleEnabled {
@@ -213,42 +237,71 @@ Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.`)
 		if port == "" {
 			port = "8080"
 		}
+		portNumber, err := strconv.Atoi(port)
+		if err != nil || portNumber < 1 || portNumber > 65535 {
+			return errors.New("PORT must be an integer between 1 and 65535")
+		}
 		baseURL := os.Getenv("MCP_BASE_URL")
 		if baseURL == "" {
 			baseURL = fmt.Sprintf("http://localhost:%s", port)
 			log.Warn("MCP_BASE_URL not set; using localhost — set to public Cloud Run URL in production")
 		}
+		authCfg, err := loadSSEAuthConfig(baseURL, os.Getenv)
+		if err != nil {
+			return fmt.Errorf("SSE authentication config: %w", err)
+		}
+		listenAddr := ":" + port
+		if authCfg.Mode == authModeDisabled {
+			listenAddr = "127.0.0.1:" + port
+			log.Warn("SSE authentication disabled for loopback development")
+		}
+		httpServer := &http.Server{
+			Addr:              listenAddr,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			IdleTimeout:       2 * time.Minute,
+			MaxHeaderBytes:    64 << 10,
+		}
 		sseServer := server.NewSSEServer(s,
 			server.WithBaseURL(baseURL),
-			server.WithSSEContextFunc(bearerAuthMiddleware(log)),
+			server.WithHTTPServer(httpServer),
 		)
-		log.Info("aura-tracker-gcp starting", "transport", "sse", "version", version, "addr", ":"+port, "base_url", baseURL)
+		httpServer.Handler = http.MaxBytesHandler(authenticatedMCPHandler(sseServer, googleIdentityTokenValidator{}, authCfg, log), 2<<20)
+		log.Info("aura-tracker-gcp starting", "transport", "sse", "version", version, "addr", listenAddr, "base_url", baseURL, "auth_mode", authCfg.Mode)
 
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
 
-		go func() {
-			if err := sseServer.Start(":" + port); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
-				stop() // unblock the wait below so the process exits cleanly.
-			}
-		}()
+		serverErr := make(chan error, 1)
+		go func() { serverErr <- sseServer.Start(listenAddr) }()
 
-		<-sigCtx.Done()
-		log.Info("shutdown signal received; draining connections")
+		select {
+		case <-sigCtx.Done():
+			log.Info("shutdown signal received; draining connections")
+		case err := <-serverErr:
+			if err == nil {
+				return errors.New("SSE server stopped unexpectedly")
+			}
+			if !errors.Is(err, http.ErrServerClosed) {
+				return fmt.Errorf("server error: %w", err)
+			}
+			return nil
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := sseServer.Shutdown(shutdownCtx); err != nil {
-			log.Error("server shutdown", "err", err)
+			return fmt.Errorf("server shutdown: %w", err)
 		}
 
-	default: // "stdio" or unset — existing behavior preserved.
+	case "", "stdio":
 		log.Info("aura-tracker-gcp starting", "transport", "stdio", "version", version)
 		if err := server.ServeStdio(s); err != nil {
-			fmt.Fprintf(os.Stderr, "aura-tracker-gcp: server error: %v\n", err)
-			os.Exit(1)
+			return fmt.Errorf("server error: %w", err)
 		}
+	default:
+		return fmt.Errorf("MCP_TRANSPORT must be %q or %q", "stdio", "sse")
 	}
+	return nil
 }
 
 func securityAuditConfig(cfg config.SecurityAuditConfig) securityaudit.Config {
@@ -423,66 +476,45 @@ func logCredentialSource(log *slog.Logger, creds *google.Credentials) {
 	}
 }
 
-// parseModulesFlag converts the --modules flag value to a map[string]bool.
-// Returns nil (all modules) when val is empty.
-// Returns an empty map (zero tools) when val is "none".
-func parseModulesFlag(val string) map[string]bool {
+// parseModulesFlag converts the --modules flag value to a validated module set.
+func parseModulesFlag(val string) (map[string]bool, error) {
+	val = strings.TrimSpace(val)
 	if val == "" {
-		return nil
+		return nil, nil
 	}
 	if strings.EqualFold(val, "none") {
-		return map[string]bool{}
+		return map[string]bool{}, nil
 	}
+	known := make(map[string]bool, len(mcpserver.AllModules))
+	for _, module := range mcpserver.AllModules {
+		known[module] = true
+	}
+	known[mcpserver.ModuleRecommenderExport] = true
 	out := make(map[string]bool)
 	for _, m := range strings.Split(val, ",") {
-		if m = strings.TrimSpace(strings.ToLower(m)); m != "" {
-			out[m] = true
+		m = strings.TrimSpace(strings.ToLower(m))
+		if m == "" {
+			return nil, errors.New("--modules contains an empty module name")
 		}
+		if !known[m] {
+			return nil, fmt.Errorf("unknown module %q; valid modules: %s", m, strings.Join(mcpserver.AllModules, ","))
+		}
+		out[m] = true
 	}
-	return out
+	return out, nil
 }
 
-// contextKeyCallerEmail is the context key for the authenticated caller's email,
-// injected by bearerAuthMiddleware for audit logging in SSE mode.
-type contextKeyCallerEmail struct{}
-
-// tokenInfoClient is a dedicated HTTP client for Google tokeninfo validation.
-// The 5-second timeout prevents a slow tokeninfo endpoint from hanging an MCP connection.
-var tokenInfoClient = &http.Client{Timeout: 5 * time.Second}
-
-// bearerAuthMiddleware validates an optional Authorization: Bearer token on each
-// MCP request. If valid, it injects the caller's email into the context for audit
-// logging. GCP API calls always use the server's Workload Identity SA regardless.
-func bearerAuthMiddleware(log *slog.Logger) server.SSEContextFunc {
-	return func(ctx context.Context, r *http.Request) context.Context {
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
-			return ctx
-		}
-		token := strings.TrimPrefix(auth, "Bearer ")
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			"https://oauth2.googleapis.com/tokeninfo?access_token="+token, nil)
-		if err != nil {
-			log.Warn("bearer token validation: build request", "err", err)
-			return ctx
-		}
-		resp, err := tokenInfoClient.Do(req)
-		if err != nil {
-			log.Warn("bearer token validation failed", "err", err)
-			return ctx
-		}
-		defer resp.Body.Close() //nolint:errcheck
-		if resp.StatusCode != http.StatusOK {
-			log.Warn("bearer token rejected", "status", resp.StatusCode)
-			return ctx
-		}
-		var info struct {
-			Email string `json:"email"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&info); err == nil && info.Email != "" {
-			log.Info("authenticated mcp request", "user", info.Email)
-			return context.WithValue(ctx, contextKeyCallerEmail{}, info.Email)
-		}
-		return ctx
+func readBoolEnv(name string, defaultValue bool, getenv func(string) string) (bool, error) {
+	value := strings.ToLower(strings.TrimSpace(getenv(name)))
+	if value == "" {
+		return defaultValue, nil
+	}
+	switch value {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be 'true' or 'false'", name)
 	}
 }

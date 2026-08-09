@@ -20,7 +20,10 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
-const auraCacheTTL = 5 * time.Minute
+const (
+	auraCacheTTL           = 5 * time.Minute
+	auraSummaryConcurrency = 8
+)
 
 // recommenderQuotaNote is surfaced in AuraReport.RecommenderNote when the daily
 // Recommender API quota is exhausted. The note instructs the LLM to stop polling.
@@ -97,14 +100,7 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 		name   string
 		region string
 	}
-	var (
-		mu = new(interface {
-			Lock()
-			Unlock()
-		})
-		resources []resource
-	)
-	_ = mu // use a plain slice guarded by errgroup serialisation below
+	var resources []resource
 
 	crServices, err := a.ListServices(ctx, models.ListServicesRequest{ProjectID: req.ProjectID, Region: req.Region})
 	if err != nil {
@@ -142,6 +138,7 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 	// Fan-out: score every resource concurrently.
 	reports := make([]models.AuraReport, len(resources))
 	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(auraSummaryConcurrency)
 	for i, r := range resources {
 		g.Go(func() error {
 			rep, err := a.GetAuraScore(gctx, models.GetAuraScoreRequest{
@@ -172,7 +169,18 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 	}
 
 	// Sort worst-first.
-	sort.Slice(reports, func(i, j int) bool { return reports[i].Score < reports[j].Score })
+	sort.Slice(reports, func(i, j int) bool {
+		if reports[i].Score != reports[j].Score {
+			return reports[i].Score < reports[j].Score
+		}
+		if reports[i].ResourceKind != reports[j].ResourceKind {
+			return reports[i].ResourceKind < reports[j].ResourceKind
+		}
+		if reports[i].Region != reports[j].Region {
+			return reports[i].Region < reports[j].Region
+		}
+		return reports[i].ResourceName < reports[j].ResourceName
+	})
 
 	// Build summary block.
 	var lines []string

@@ -69,6 +69,32 @@ func TestLoadEnvironmentRegistryRequiresAProject(t *testing.T) {
 	}
 }
 
+func TestParseModulesFlagValidatesNames(t *testing.T) {
+	modules, err := parseModulesFlag("gke, monitoring")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !modules["gke"] || !modules["monitoring"] || len(modules) != 2 {
+		t.Fatalf("modules = %#v", modules)
+	}
+	if _, err := parseModulesFlag("gke,typo"); err == nil {
+		t.Fatal("unknown module was accepted")
+	}
+	if _, err := parseModulesFlag("gke,"); err == nil {
+		t.Fatal("empty module was accepted")
+	}
+}
+
+func TestReadBoolEnvIsStrict(t *testing.T) {
+	getenv := func(string) string { return "yes" }
+	if _, err := readBoolEnv("FEATURE", false, getenv); err == nil {
+		t.Fatal("ambiguous boolean was accepted")
+	}
+	if value, err := readBoolEnv("FEATURE", true, func(string) string { return "" }); err != nil || !value {
+		t.Fatalf("default boolean = %v, %v", value, err)
+	}
+}
+
 func TestSecurityAuditConfigConversion(t *testing.T) {
 	got := securityAuditConfig(config.SecurityAuditConfig{
 		KubernetesAccess: "connect_gateway", FleetProjectID: "fleet", ClusterConcurrency: 3,

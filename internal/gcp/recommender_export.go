@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"time"
@@ -30,6 +31,7 @@ type recommendationRow struct {
 	MonthlySavingsUSD float64   `bigquery:"monthly_savings_usd"`
 	Priority          string    `bigquery:"priority"`
 	ExportedAt        time.Time `bigquery:"exported_at"`
+	insertID          string
 }
 
 // Save implements bigquery.ValueSaver for streaming insert.
@@ -42,7 +44,7 @@ func (r *recommendationRow) Save() (map[string]bigquery.Value, string, error) {
 		"monthly_savings_usd": r.MonthlySavingsUSD,
 		"priority":            r.Priority,
 		"exported_at":         r.ExportedAt,
-	}, "", nil
+	}, r.insertID, nil
 }
 
 // ExportRecommendationsToBQ fetches all active recommendations across all supported
@@ -71,19 +73,6 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 
 	projectID := req.ProjectID
 	tbl := a.bq.DatasetInProject(projectID, req.Dataset).Table(tableName)
-
-	// Create the table with inferred schema; ignore 409 (already exists).
-	schema, err := bigquery.InferSchema(recommendationRow{})
-	if err != nil {
-		return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("recommender.ExportRecommendationsToBQ: infer schema: %w", err)
-	}
-	if createErr := tbl.Create(ctx, &bigquery.TableMetadata{Schema: schema}); createErr != nil {
-		var apiErr *googleapi.Error
-		if !errors.As(createErr, &apiErr) || apiErr.Code != 409 {
-			return models.ExportRecommendationsToBQResponse{}, wrapGCPError("recommender.ExportRecommendationsToBQ", createErr)
-		}
-	}
-
 	exportedAt := time.Now().UTC()
 	var rows []*recommendationRow
 
@@ -106,7 +95,7 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 			if rec.Priority != recommenderpb.Recommendation_PRIORITY_UNSPECIFIED {
 				priority = rec.Priority.String()
 			}
-			rows = append(rows, &recommendationRow{
+			row := &recommendationRow{
 				ResourceName:      primaryTargetResource(rec),
 				RecommenderID:     recID,
 				Subtype:           classifyRecommenderID(recID),
@@ -114,7 +103,31 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 				MonthlySavingsUSD: extractMonthlySavings(rec),
 				Priority:          priority,
 				ExportedAt:        exportedAt,
-			})
+			}
+			if req.ExecutionID != "" {
+				digest := sha256.Sum256([]byte(req.ExecutionID + "\x00" + recID + "\x00" + row.ResourceName))
+				row.insertID = fmt.Sprintf("%x", digest[:16])
+			}
+			rows = append(rows, row)
+		}
+	}
+	tableRef := fmt.Sprintf("%s.%s.%s", projectID, req.Dataset, tableName)
+	if req.DryRun {
+		return models.ExportRecommendationsToBQResponse{
+			DryRun: true, Table: tableRef, RowsPlanned: len(rows),
+			Description: fmt.Sprintf("DRY RUN: would export %d active recommendations to %s", len(rows), tableRef),
+		}, nil
+	}
+
+	// Create the table with inferred schema; ignore 409 (already exists).
+	schema, err := bigquery.InferSchema(recommendationRow{})
+	if err != nil {
+		return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("recommender.ExportRecommendationsToBQ: infer schema: %w", err)
+	}
+	if createErr := tbl.Create(ctx, &bigquery.TableMetadata{Schema: schema}); createErr != nil {
+		var apiErr *googleapi.Error
+		if !errors.As(createErr, &apiErr) || apiErr.Code != 409 {
+			return models.ExportRecommendationsToBQResponse{}, wrapGCPError("recommender.ExportRecommendationsToBQ", createErr)
 		}
 	}
 
@@ -125,9 +138,11 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 	}
 
 	return models.ExportRecommendationsToBQResponse{
-		Table:        fmt.Sprintf("%s.%s.%s", projectID, req.Dataset, tableName),
+		Table:        tableRef,
+		RowsPlanned:  len(rows),
 		RowsInserted: len(rows),
 		ExportedAt:   exportedAt.Format(time.RFC3339),
+		Description:  fmt.Sprintf("exported %d active recommendations to %s", len(rows), tableRef),
 	}, nil
 }
 

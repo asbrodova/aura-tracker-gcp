@@ -18,22 +18,31 @@ func (a *gcpAdapter) ListSpannerInstances(ctx context.Context, req models.ListSp
 	defer cancel()
 
 	parent := "projects/" + req.ProjectID
-	resp, err := a.spannerSvc.Projects.Instances.List(parent).Context(ctx).Do()
-	if err != nil {
-		return models.ListSpannerInstancesResponse{}, wrapGCPError("spanner.ListSpannerInstances", err)
-	}
-
-	instances := make([]models.SpannerInstanceSummary, 0, len(resp.Instances))
-	for _, inst := range resp.Instances {
-		instances = append(instances, models.SpannerInstanceSummary{
-			Name:            inst.Name,
-			DisplayName:     inst.DisplayName,
-			State:           inst.State,
-			NodeCount:       inst.NodeCount,
-			ProcessingUnits: inst.ProcessingUnits,
-			Config:          inst.Config,
-			Edition:         inst.Edition,
-		})
+	instances := []models.SpannerInstanceSummary{}
+	for pageToken := ""; ; {
+		call := a.spannerSvc.Projects.Instances.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListSpannerInstancesResponse{}, wrapGCPError("spanner.ListSpannerInstances", err)
+		}
+		for _, inst := range resp.Instances {
+			instances = append(instances, models.SpannerInstanceSummary{
+				Name:            inst.Name,
+				DisplayName:     inst.DisplayName,
+				State:           inst.State,
+				NodeCount:       inst.NodeCount,
+				ProcessingUnits: inst.ProcessingUnits,
+				Config:          inst.Config,
+				Edition:         inst.Edition,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListSpannerInstancesResponse{Instances: instances}, nil
 }
@@ -54,22 +63,31 @@ func (a *gcpAdapter) ListAlloyDBClusters(ctx context.Context, req models.ListAll
 	}
 	parent := "projects/" + req.ProjectID + "/locations/" + loc
 
-	resp, err := a.alloydbSvc.Projects.Locations.Clusters.List(parent).Context(ctx).Do()
-	if err != nil {
-		return models.ListAlloyDBClustersResponse{}, wrapGCPError("alloydb.ListAlloyDBClusters", err)
-	}
-
-	clusters := make([]models.AlloyDBClusterSummary, 0, len(resp.Clusters))
-	for _, c := range resp.Clusters {
-		clusters = append(clusters, models.AlloyDBClusterSummary{
-			Name:            c.Name,
-			DisplayName:     c.DisplayName,
-			State:           c.State,
-			ClusterType:     c.ClusterType,
-			DatabaseVersion: c.DatabaseVersion,
-			Location:        locationFromResourceName(c.Name),
-			CreateTime:      c.CreateTime,
-		})
+	clusters := []models.AlloyDBClusterSummary{}
+	for pageToken := ""; ; {
+		call := a.alloydbSvc.Projects.Locations.Clusters.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListAlloyDBClustersResponse{}, wrapGCPError("alloydb.ListAlloyDBClusters", err)
+		}
+		for _, c := range resp.Clusters {
+			clusters = append(clusters, models.AlloyDBClusterSummary{
+				Name:            c.Name,
+				DisplayName:     c.DisplayName,
+				State:           c.State,
+				ClusterType:     c.ClusterType,
+				DatabaseVersion: c.DatabaseVersion,
+				Location:        locationFromResourceName(c.Name),
+				CreateTime:      c.CreateTime,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListAlloyDBClustersResponse{Clusters: clusters}, nil
 }
@@ -85,12 +103,11 @@ func (a *gcpAdapter) ListFirestoreDatabases(ctx context.Context, req models.List
 	defer cancel()
 
 	parent := "projects/" + req.ProjectID
+	databases := []models.FirestoreDatabaseSummary{}
 	resp, err := a.firestoreSvc.Projects.Databases.List(parent).Context(ctx).Do()
 	if err != nil {
 		return models.ListFirestoreDatabasesResponse{}, wrapGCPError("firestore.ListFirestoreDatabases", err)
 	}
-
-	databases := make([]models.FirestoreDatabaseSummary, 0, len(resp.Databases))
 	for _, db := range resp.Databases {
 		databases = append(databases, models.FirestoreDatabaseSummary{
 			Name:            db.Name,
@@ -120,23 +137,32 @@ func (a *gcpAdapter) ListMemorystoreInstances(ctx context.Context, req models.Li
 	}
 	parent := "projects/" + req.ProjectID + "/locations/" + loc
 
-	resp, err := a.redisSvc.Projects.Locations.Instances.List(parent).Context(ctx).Do()
-	if err != nil {
-		return models.ListMemorystoreInstancesResponse{}, wrapGCPError("redis.ListMemorystoreInstances", err)
-	}
-
-	instances := make([]models.MemorystoreInstanceSummary, 0, len(resp.Instances))
-	for _, inst := range resp.Instances {
-		instances = append(instances, models.MemorystoreInstanceSummary{
-			Name:         inst.Name,
-			DisplayName:  inst.DisplayName,
-			State:        inst.State,
-			Tier:         inst.Tier,
-			MemorySizeGb: inst.MemorySizeGb,
-			RedisVersion: inst.RedisVersion,
-			Host:         inst.Host,
-			LocationID:   inst.LocationId,
-		})
+	instances := []models.MemorystoreInstanceSummary{}
+	for pageToken := ""; ; {
+		call := a.redisSvc.Projects.Locations.Instances.List(parent).Context(ctx)
+		if pageToken != "" {
+			call = call.PageToken(pageToken)
+		}
+		resp, err := call.Do()
+		if err != nil {
+			return models.ListMemorystoreInstancesResponse{}, wrapGCPError("redis.ListMemorystoreInstances", err)
+		}
+		for _, inst := range resp.Instances {
+			instances = append(instances, models.MemorystoreInstanceSummary{
+				Name:         inst.Name,
+				DisplayName:  inst.DisplayName,
+				State:        inst.State,
+				Tier:         inst.Tier,
+				MemorySizeGb: inst.MemorySizeGb,
+				RedisVersion: inst.RedisVersion,
+				Host:         inst.Host,
+				LocationID:   inst.LocationId,
+			})
+		}
+		if resp.NextPageToken == "" {
+			break
+		}
+		pageToken = resp.NextPageToken
 	}
 	return models.ListMemorystoreInstancesResponse{Instances: instances}, nil
 }
