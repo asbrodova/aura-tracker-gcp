@@ -69,8 +69,8 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 		tableName = "gcp_recommendations"
 	}
 
-	projectID := a.bq.Project()
-	tbl := a.bq.Dataset(req.Dataset).Table(tableName)
+	projectID := req.ProjectID
+	tbl := a.bq.DatasetInProject(projectID, req.Dataset).Table(tableName)
 
 	// Create the table with inferred schema; ignore 409 (already exists).
 	schema, err := bigquery.InferSchema(recommendationRow{})

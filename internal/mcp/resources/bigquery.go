@@ -9,13 +9,14 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
 // DatasetList returns a static resource listing all BigQuery datasets in the project.
 // URI: gcp://{project}/bigquery/datasets
-func (r *BigQueryResources) DatasetList(project string) server.ServerResource {
-	uri := fmt.Sprintf("gcp://%s/bigquery/datasets", project)
+func (r *BigQueryResources) DatasetList(environment environments.Environment) server.ServerResource {
+	uri := fmt.Sprintf("gcp://%s/bigquery/datasets", environment.DisplayName())
 	return server.ServerResource{
 		Resource: mcp.NewResource(uri, "BigQuery Datasets",
 			mcp.WithResourceDescription("All BigQuery datasets in the project — start here to discover what data is available before writing SQL"),
@@ -23,7 +24,7 @@ func (r *BigQueryResources) DatasetList(project string) server.ServerResource {
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			r.log.InfoContext(ctx, "resource read", "uri", uri)
-			resp, err := r.svc.ListDatasets(ctx, models.ListDatasetsRequest{ProjectID: project})
+			resp, err := r.svc.ListDatasets(ctx, models.ListDatasetsRequest{ProjectID: environment.ProjectID})
 			if err != nil {
 				return nil, fmt.Errorf("bigquery datasets: %w", err)
 			}
@@ -46,12 +47,16 @@ func (r *BigQueryResources) TableListTemplate() server.ServerResourceTemplate {
 			mcp.WithTemplateMIMEType("application/json"),
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			project, dataset, err := parseBQTablesURI(req.Params.URI)
+			selector, dataset, err := parseBQTablesURI(req.Params.URI)
+			if err != nil {
+				return nil, err
+			}
+			environment, err := resolveEnvironment(r.environments, selector, r.placeholder)
 			if err != nil {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
-			resp, err := r.svc.ListTables(ctx, models.ListTablesRequest{ProjectID: project, DatasetID: dataset})
+			resp, err := r.svc.ListTables(ctx, models.ListTablesRequest{ProjectID: environment.ProjectID, DatasetID: dataset})
 			if err != nil {
 				return nil, fmt.Errorf("bigquery tables: %w", err)
 			}
@@ -74,13 +79,17 @@ func (r *BigQueryResources) TableSchemaTemplate() server.ServerResourceTemplate 
 			mcp.WithTemplateMIMEType("application/json"),
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			project, dataset, table, err := parseBQSchemaURI(req.Params.URI)
+			selector, dataset, table, err := parseBQSchemaURI(req.Params.URI)
+			if err != nil {
+				return nil, err
+			}
+			environment, err := resolveEnvironment(r.environments, selector, r.placeholder)
 			if err != nil {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
 			resp, err := r.svc.GetTableSchema(ctx, models.GetTableSchemaRequest{
-				ProjectID: project, DatasetID: dataset, TableID: table,
+				ProjectID: environment.ProjectID, DatasetID: dataset, TableID: table,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("bigquery schema: %w", err)

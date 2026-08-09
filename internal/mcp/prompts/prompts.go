@@ -6,21 +6,25 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 // GCPPrompts holds the three built-in prompt templates.
 type GCPPrompts struct {
-	svc ports.GCPService
-	log *slog.Logger
+	svc          ports.GCPService
+	log          *slog.Logger
+	environments *environments.Registry
+	placeholder  string
 }
 
-func NewGCPPrompts(svc ports.GCPService, log *slog.Logger) *GCPPrompts {
-	return &GCPPrompts{svc: svc, log: log}
+func NewGCPPrompts(svc ports.GCPService, log *slog.Logger, registry *environments.Registry, placeholder string) *GCPPrompts {
+	return &GCPPrompts{svc: svc, log: log, environments: registry, placeholder: placeholder}
 }
 
 // AuditSecurityPosture presents the deterministic project security audit.
@@ -29,8 +33,7 @@ func (p *GCPPrompts) AuditSecurityPosture() server.ServerPrompt {
 		Prompt: mcp.NewPrompt("audit-security-posture",
 			mcp.WithPromptDescription("Run one comprehensive project security audit and present its severity-ranked findings, score, remediation, and coverage gaps"),
 			mcp.WithArgument("project_id",
-				mcp.ArgumentDescription("GCP project ID to audit"),
-				mcp.RequiredArgument(),
+				mcp.ArgumentDescription(p.projectArgumentDescription()),
 			),
 			mcp.WithArgument("focus",
 				mcp.ArgumentDescription("Optional presentation emphasis: 'iam', 'network', or 'all'. The tool still performs a full audit so its score remains comparable."),
@@ -41,9 +44,9 @@ func (p *GCPPrompts) AuditSecurityPosture() server.ServerPrompt {
 }
 
 func (p *GCPPrompts) auditSecurityPostureHandler(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-	project := req.Params.Arguments["project_id"]
-	if project == "" {
-		return nil, fmt.Errorf("project_id is required")
+	project, err := p.displayProject(req.Params.Arguments["project_id"])
+	if err != nil {
+		return nil, err
 	}
 	focus := req.Params.Arguments["focus"]
 	if focus == "" {
@@ -81,8 +84,7 @@ func (p *GCPPrompts) OptimizeBigQueryCosts() server.ServerPrompt {
 		Prompt: mcp.NewPrompt("optimize-bigquery-costs",
 			mcp.WithPromptDescription("Read BigQuery schemas and slot usage to recommend partitioning, clustering, and expiration policies"),
 			mcp.WithArgument("project_id",
-				mcp.ArgumentDescription("GCP project ID"),
-				mcp.RequiredArgument(),
+				mcp.ArgumentDescription(p.projectArgumentDescription()),
 			),
 			mcp.WithArgument("dataset_id",
 				mcp.ArgumentDescription("Specific dataset to analyse (optional — analyses all datasets if omitted)"),
@@ -93,9 +95,9 @@ func (p *GCPPrompts) OptimizeBigQueryCosts() server.ServerPrompt {
 }
 
 func (p *GCPPrompts) optimizeBigQueryCostsHandler(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-	project := req.Params.Arguments["project_id"]
-	if project == "" {
-		return nil, fmt.Errorf("project_id is required")
+	project, err := p.displayProject(req.Params.Arguments["project_id"])
+	if err != nil {
+		return nil, err
 	}
 	dataset := req.Params.Arguments["dataset_id"]
 
@@ -155,8 +157,7 @@ func (p *GCPPrompts) IncidentResponseHelper() server.ServerPrompt {
 		Prompt: mcp.NewPrompt("incident-response-helper",
 			mcp.WithPromptDescription("Correlate deployments, metrics, revisions, IAM changes, logs, dependencies, and platform health for an active production incident"),
 			mcp.WithArgument("project_id",
-				mcp.ArgumentDescription("GCP project ID to diagnose"),
-				mcp.RequiredArgument(),
+				mcp.ArgumentDescription(p.projectArgumentDescription()),
 			),
 			mcp.WithArgument("service_name",
 				mcp.ArgumentDescription("Cloud Run service name (optional; production services are inferred from labels when omitted)"),
@@ -173,14 +174,14 @@ func (p *GCPPrompts) IncidentResponseHelper() server.ServerPrompt {
 }
 
 func (p *GCPPrompts) incidentResponseHelperHandler(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-	project := req.Params.Arguments["project_id"]
+	project, err := p.displayProject(req.Params.Arguments["project_id"])
+	if err != nil {
+		return nil, err
+	}
 	service := req.Params.Arguments["service_name"]
 	region := req.Params.Arguments["region"]
 	environment := req.Params.Arguments["environment"]
 
-	if project == "" {
-		return nil, fmt.Errorf("project_id is required")
-	}
 	if environment == "" {
 		environment = "production"
 	}
@@ -214,4 +215,31 @@ Do not describe a hypothesis as confirmed unless the evidence says so. Do not ex
 			mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(instructions)),
 		},
 	}, nil
+}
+
+func (p *GCPPrompts) projectArgumentDescription() string {
+	if p.environments == nil {
+		return "GCP project ID"
+	}
+	if p.placeholder != "" {
+		return "Private configured GCP project. Pass '" + p.placeholder + "' or omit it to use the default."
+	}
+	return p.environments.SelectorDescription()
+}
+
+func (p *GCPPrompts) displayProject(selector string) (string, error) {
+	if p.environments == nil {
+		if selector == "" {
+			return "", fmt.Errorf("project_id is required")
+		}
+		return selector, nil
+	}
+	if p.placeholder != "" && selector == p.placeholder {
+		selector = ""
+	}
+	environment, err := p.environments.Resolve(selector)
+	if err != nil {
+		return "", fmt.Errorf("unknown environment; available environments: %s", strings.Join(p.environments.DisplayNames(), ", "))
+	}
+	return environment.DisplayName(), nil
 }

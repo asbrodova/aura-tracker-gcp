@@ -8,6 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -64,8 +65,8 @@ var allKnownPermissions = []string{
 //
 // The AI reads this resource to understand which tools will succeed before attempting
 // tool calls, and to explain precisely which IAM role is missing when access is denied.
-func (r *IAMResources) MyPermissions(project string) server.ServerResource {
-	uri := fmt.Sprintf("gcp://%s/iam/my-permissions", project)
+func (r *IAMResources) MyPermissions(environment environments.Environment) server.ServerResource {
+	uri := fmt.Sprintf("gcp://%s/iam/my-permissions", environment.DisplayName())
 	return server.ServerResource{
 		Resource: mcp.NewResource(uri, "My IAM Permissions",
 			mcp.WithResourceDescription(
@@ -77,13 +78,13 @@ func (r *IAMResources) MyPermissions(project string) server.ServerResource {
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			r.log.InfoContext(ctx, "resource read", "uri", uri)
 			resp, err := r.svc.TestPermissions(ctx, models.TestPermissionsRequest{
-				ProjectID:   project,
+				ProjectID:   environment.ProjectID,
 				Permissions: allKnownPermissions,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("iam my-permissions: %w", err)
 			}
-			report := buildPermissionsReport(project, resp.Results)
+			report := buildPermissionsReport(environment.ProjectID, resp.Results)
 			data, _ := json.Marshal(report)
 			return []mcp.ResourceContents{mcp.TextResourceContents{
 				URI: uri, MIMEType: "application/json", Text: string(data),

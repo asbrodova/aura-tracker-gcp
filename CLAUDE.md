@@ -42,11 +42,12 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `GCP_PROJECT_ID` | Yes* | GCP project for SDK client init. Can be omitted if `project_id` is set in `~/.aura-tracker.yaml`. |
+| `GCP_PROJECT_ID` | Yes* | Legacy single-project setting. Omit when using YAML `environments` or `GCP_ENVIRONMENTS_JSON`. |
+| `GCP_ENVIRONMENTS_JSON` | No | JSON array of `{project_id, alias, default}` entries. Multiple entries require aliases and exactly one default. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | No | Service account key path (optional with ADC) |
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII scrubbing on all tool outputs (overrides YAML `enabled`) |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
-| `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask the GCP project ID in all tool outputs as `[GCP_PROJECT_ID_1]`. Off by default. Can be combined with `ANONYMIZE_ENABLED`. |
+| `ANONYMIZE_PROJECT_ID` | No | Masks an unaliased project as `[GCP_PROJECT_ID]`. Configured aliases are always enforced on MCP output. |
 | `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Enriches Aura Scores with idle/overprovisioned signals; 12h cache prevents quota exhaustion. |
 | `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name for the recommendations export (overrides `recommender_export.dataset` in YAML). |
@@ -62,7 +63,20 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 
 ## User Config File
 
-Optional per-user defaults in `~/.aura-tracker.yaml`. Overridden by environment variables.
+Optional per-user defaults in `~/.aura-tracker.yaml`. Legacy scalar settings are overridden by their environment variables; environment lists must use exactly one configuration source.
+
+Multiple environments use chat-safe aliases:
+
+```yaml
+environments:
+  - project_id: my-company-123
+    alias: dev
+    default: true
+  - project_id: my-company-345
+    alias: prod
+```
+
+Aliases are case-insensitive inputs. Configured project IDs are also accepted as inputs, but an aliased project ID is never returned in MCP results, errors, prompts, resources, or diagrams. Missing selectors use the default environment. Do not combine `environments` with legacy `project_id` or `GCP_PROJECT_ID`.
 
 ```yaml
 project_id: my-gcp-project-id   # fallback when GCP_PROJECT_ID is not set
