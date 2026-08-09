@@ -30,10 +30,6 @@ func NewPlanStore() *PlanStore {
 	return &PlanStore{entries: make(map[string]planEntry)}
 }
 
-func (s *PlanStore) put(id string, payload any) {
-	_ = s.putScoped(id, "", "", payload)
-}
-
 func (s *PlanStore) putScoped(id, owner, target string, payload any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

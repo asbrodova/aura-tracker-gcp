@@ -32,7 +32,7 @@ func TestAuthenticatedMCPHandlerRejectsMissingAndInvalidTokens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			called = false
 			recorder := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "https://service.example/message", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://service.example/message", nil)
 			req.Header.Set("Authorization", header)
 			authenticatedMCPHandler(next, stubIdentityValidator{}, cfg, slog.Default()).ServeHTTP(recorder, req)
 			if recorder.Code != http.StatusUnauthorized || called {
@@ -42,7 +42,7 @@ func TestAuthenticatedMCPHandlerRejectsMissingAndInvalidTokens(t *testing.T) {
 	}
 
 	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "https://service.example/message", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "https://service.example/message", nil)
 	req.Header.Set("Authorization", "Bearer invalid")
 	authenticatedMCPHandler(next, stubIdentityValidator{err: errors.New("bad signature")}, cfg, slog.Default()).ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusUnauthorized || called {
@@ -66,7 +66,7 @@ func TestAuthenticatedMCPHandlerInjectsPrincipalAndEnforcesAllowlist(t *testing.
 		w.WriteHeader(http.StatusNoContent)
 	})
 	recorder := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, payload.Audience+"/message", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, payload.Audience+"/message", nil)
 	req.Header.Set("Authorization", "Bearer valid-token")
 	authenticatedMCPHandler(next, validator, cfg, slog.Default()).ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusNoContent || got.Email != "caller@example.com" || got.Subject != payload.Subject {

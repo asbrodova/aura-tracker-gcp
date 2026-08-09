@@ -582,12 +582,3 @@ func buildServerlessGroups(projectID string, nodes []models.GraphNode) []models.
 func graphURN(service, region, projectID, kind, name string) string {
 	return fmt.Sprintf("urn:gcp:%s:%s:%s:%s/%s", service, region, projectID, kind, name)
 }
-
-func allURNs(m map[string]models.GraphNode) []string {
-	urns := make([]string, 0, len(m))
-	for k := range m {
-		urns = append(urns, k)
-	}
-	sort.Strings(urns)
-	return urns
-}
