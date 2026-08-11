@@ -295,7 +295,7 @@ func (a *gcpAdapter) GetServiceDetails(ctx context.Context, req models.GetServic
 
 	latestRevision := svc.LatestReadyRevision
 
-	return models.ServiceDetails{
+	details := models.ServiceDetails{
 		ServiceSummary: models.ServiceSummary{
 			Name:         svc.Name,
 			Region:       req.Region,
@@ -303,10 +303,29 @@ func (a *gcpAdapter) GetServiceDetails(ctx context.Context, req models.GetServic
 			LastModified: lastMod,
 			Labels:       svc.Labels,
 		},
-		Traffic:        traffic,
-		LatestRevision: latestRevision,
-		Labels:         svc.Labels,
-	}, nil
+		Traffic:            traffic,
+		LatestRevision:     latestRevision,
+		Labels:             svc.Labels,
+		Annotations:        svc.Annotations,
+		Description:        svc.Description,
+		Ingress:            svc.Ingress.String(),
+		LaunchStage:        svc.LaunchStage.String(),
+		InvokerIAMDisabled: svc.InvokerIamDisabled,
+		DefaultURIDisabled: svc.DefaultUriDisabled,
+		IAPEnabled:         svc.IapEnabled,
+		CustomAudiences:    svc.CustomAudiences,
+	}
+	if svc.BinaryAuthorization != nil {
+		details.BinaryAuthorizationDefault = svc.BinaryAuthorization.GetUseDefault()
+		details.BinaryAuthorizationPolicy = svc.BinaryAuthorization.GetPolicy()
+	}
+	if svc.Scaling != nil {
+		details.ServiceMinInstances = svc.Scaling.MinInstanceCount
+		details.ServiceMaxInstances = svc.Scaling.MaxInstanceCount
+		details.ServiceManualInstances = svc.Scaling.GetManualInstanceCount()
+		details.ServiceScalingMode = svc.Scaling.ScalingMode.String()
+	}
+	return details, nil
 }
 
 func (a *gcpAdapter) ListRevisions(ctx context.Context, req models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
@@ -482,8 +501,19 @@ func revisionConfigFingerprint(revision *runpb.Revision) string {
 		Containers     []fingerprintContainer
 	}
 
+	projectID := ""
+	if parts := strings.Split(revision.Name, "/"); len(parts) > 1 && parts[0] == "projects" {
+		projectID = parts[1]
+	}
+	normalizeProject := func(value string) string {
+		if projectID == "" {
+			return value
+		}
+		return strings.ReplaceAll(value, projectID, "${PROJECT}")
+	}
+
 	value := fingerprint{
-		ServiceAccount: revision.ServiceAccount,
+		ServiceAccount: normalizeProject(revision.ServiceAccount),
 		Concurrency:    revision.MaxInstanceRequestConcurrency,
 	}
 	if revision.Timeout != nil {
@@ -494,14 +524,14 @@ func revisionConfigFingerprint(revision *runpb.Revision) string {
 		value.MaxInstances = revision.Scaling.MaxInstanceCount
 	}
 	if revision.VpcAccess != nil {
-		value.VPCConnector = revision.VpcAccess.Connector
+		value.VPCConnector = normalizeProject(revision.VpcAccess.Connector)
 		value.VPCEgress = revision.VpcAccess.Egress.String()
 	}
 	for _, container := range revision.Containers {
 		if container == nil {
 			continue
 		}
-		out := fingerprintContainer{Name: container.Name, Image: container.Image}
+		out := fingerprintContainer{Name: container.Name, Image: normalizeProject(container.Image)}
 		if container.Resources != nil {
 			out.Limits = container.Resources.Limits
 			out.CPUIdle = container.Resources.CpuIdle
@@ -511,9 +541,9 @@ func revisionConfigFingerprint(revision *runpb.Revision) string {
 			if env == nil {
 				continue
 			}
-			entry := env.Name + "=value:" + env.GetValue()
+			entry := env.Name + "=value:" + normalizeProject(env.GetValue())
 			if source := env.GetValueSource(); source != nil && source.SecretKeyRef != nil {
-				entry = env.Name + "=secret:" + source.SecretKeyRef.Secret + ":" + source.SecretKeyRef.Version
+				entry = env.Name + "=secret:" + normalizeProject(source.SecretKeyRef.Secret) + ":" + source.SecretKeyRef.Version
 			}
 			out.Env = append(out.Env, entry)
 		}
