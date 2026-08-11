@@ -34,6 +34,7 @@ const (
 	ModuleIncident     = "incident"
 	ModuleCost         = "cost"
 	ModuleSecurity     = "security"
+	ModuleDrift        = "drift"
 
 	// Opt-in modules (NOT in AllModules; must be explicitly requested)
 	ModuleRecommenderExport = "recommender_export"
@@ -52,6 +53,7 @@ var AllModules = []string{
 	ModuleIncident,
 	ModuleCost,
 	ModuleSecurity,
+	ModuleDrift,
 }
 
 // ToolModule is the interface every tool domain struct must satisfy.

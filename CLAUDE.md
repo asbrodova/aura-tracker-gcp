@@ -36,7 +36,7 @@ internal/mcp/  NEVER imports internal/gcp/
 
 `go build ./internal/mcp/...` compiles zero GCP SDK code.
 
-Application-layer engines live between MCP and the port: `internal/diagnostics` for incidents, `internal/costreasoning` for cost explanations, `internal/securityaudit` for deterministic security posture findings and scoring, and `internal/diagram` for architecture scoping and deterministic rendering. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
+Application-layer engines live between MCP and the port: `internal/diagnostics` for incidents, `internal/costreasoning` for cost explanations, `internal/securityaudit` for deterministic security posture findings and scoring, `internal/diagram` for architecture scoping and deterministic rendering, and `internal/drift` for symmetric cross-environment configuration comparison. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
 
 ## Environment Variables
 
@@ -113,7 +113,7 @@ security_audit:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Correlation/reasoning: `incident`, `security`, `cost`; `cost` also requires `COST_REASONING_ENABLED=true`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
+| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Correlation/reasoning: `incident`, `security`, `drift`, `cost`; `cost` also requires `COST_REASONING_ENABLED=true`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
 | `--version` | — | Print version and exit. |
 
 ## README Hygiene

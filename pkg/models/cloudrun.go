@@ -31,9 +31,23 @@ type TrafficTarget struct {
 
 type ServiceDetails struct {
 	ServiceSummary
-	Traffic        []TrafficTarget   `json:"traffic"`
-	LatestRevision string            `json:"latest_revision"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	Traffic                    []TrafficTarget   `json:"traffic"`
+	LatestRevision             string            `json:"latest_revision"`
+	Labels                     map[string]string `json:"labels,omitempty"`
+	Annotations                map[string]string `json:"annotations,omitempty"`
+	Description                string            `json:"description,omitempty"`
+	Ingress                    string            `json:"ingress,omitempty"`
+	LaunchStage                string            `json:"launch_stage,omitempty"`
+	BinaryAuthorizationDefault bool              `json:"binary_authorization_default"`
+	BinaryAuthorizationPolicy  string            `json:"binary_authorization_policy,omitempty"`
+	InvokerIAMDisabled         bool              `json:"invoker_iam_disabled"`
+	DefaultURIDisabled         bool              `json:"default_uri_disabled"`
+	IAPEnabled                 bool              `json:"iap_enabled"`
+	CustomAudiences            []string          `json:"custom_audiences,omitempty"`
+	ServiceMinInstances        int32             `json:"service_min_instances,omitempty"`
+	ServiceMaxInstances        int32             `json:"service_max_instances,omitempty"`
+	ServiceManualInstances     int32             `json:"service_manual_instances,omitempty"`
+	ServiceScalingMode         string            `json:"service_scaling_mode,omitempty"`
 	// WrapsFunction is set when this Cloud Run service is the runtime backing a
 	// Cloud Function Gen 2. Value is the function URN.
 	WrapsFunction string `json:"wraps_function,omitempty"`

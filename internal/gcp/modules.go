@@ -73,6 +73,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"incident":           {clientRunSvc, clientRunRevisions, clientLogAdmin, clientMetric, clientPubSub, clientSQLAdmin, clientVPCAccess},
 	"cost":               {clientBQ, clientMetric, clientAsset},
 	"security":           {clientAsset, clientIAMAdmin, clientSecretMgr, clientRunSvc, clientFunctionsV1, clientCompute, clientClusterMgr, clientCRMv3, clientIAMv2, clientGKEHub},
+	"drift":              {clientRunSvc, clientRunRevisions, clientRunJobs, clientClusterMgr, clientCompute, clientAPIGateway, clientFunctionsV1, clientEventarc, clientScheduler, clientWorkflows, clientTasks, clientSecretMgr, clientVPCAccess, clientSQLAdmin, clientPubSub, clientGCS, clientBQ, clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore, clientArtifactRegistry, clientCloudBuild, clientServiceDirectory, clientMonitoringV3, clientMonitoringV1, clientIAMAdmin},
 	"recommender_export": {clientBQ},                                                         // BQ is also in _resources; listed here for --modules= explicit selection
 	"_resources":         {clientBQ, clientGCS, clientCRM, clientRunSvc, clientRunRevisions}, // always initialized for MCP Resources
 }

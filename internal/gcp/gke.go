@@ -54,31 +54,110 @@ func (a *gcpAdapter) GetClusterDetails(ctx context.Context, req models.GetCluste
 
 	pools := make([]models.NodePoolSummary, 0, len(c.NodePools))
 	for _, np := range c.NodePools {
-		machineType := ""
-		if np.Config != nil {
-			machineType = np.Config.MachineType
+		pool := models.NodePoolSummary{
+			Name: np.Name, NodeCount: np.InitialNodeCount, Status: np.Status.String(),
+			Version: np.Version, Locations: np.Locations,
 		}
-		pools = append(pools, models.NodePoolSummary{
-			Name:        np.Name,
-			MachineType: machineType,
-			NodeCount:   np.InitialNodeCount,
-			Status:      np.Status.String(),
-		})
+		if np.Config != nil {
+			pool.MachineType = np.Config.MachineType
+			pool.DiskType = np.Config.DiskType
+			pool.DiskSizeGB = np.Config.DiskSizeGb
+			pool.ImageType = np.Config.ImageType
+			pool.ServiceAccount = np.Config.ServiceAccount
+			pool.Labels = np.Config.Labels
+			pool.ResourceLabels = np.Config.ResourceLabels
+			pool.Tags = np.Config.Tags
+			pool.Preemptible = np.Config.Preemptible
+			pool.Spot = np.Config.Spot
+			for _, taint := range np.Config.Taints {
+				pool.Taints = append(pool.Taints, fmt.Sprintf("%s=%s:%s", taint.Key, taint.Value, taint.Effect.String()))
+			}
+		}
+		if np.Autoscaling != nil {
+			pool.AutoscalingEnabled = np.Autoscaling.Enabled
+			pool.MinNodeCount = np.Autoscaling.MinNodeCount
+			pool.MaxNodeCount = np.Autoscaling.MaxNodeCount
+		}
+		if np.Management != nil {
+			pool.AutoUpgrade = np.Management.AutoUpgrade
+			pool.AutoRepair = np.Management.AutoRepair
+		}
+		if np.MaxPodsConstraint != nil {
+			pool.MaxPodsPerNode = np.MaxPodsConstraint.MaxPodsPerNode
+		}
+		pools = append(pools, pool)
+	}
+	details := models.ClusterDetails{
+		ClusterSummary: models.ClusterSummary{
+			Name: c.Name, Location: c.Location, Status: c.Status.String(),
+			NodeCount: c.CurrentNodeCount, K8sVersion: c.CurrentMasterVersion, ResourceLabels: c.ResourceLabels,
+		},
+		NodePools: pools, Endpoint: c.Endpoint, CreateTime: c.CreateTime,
+		Description: c.Description, Network: c.Network, Subnetwork: c.Subnetwork,
+		NodeLocations: c.Locations, LoggingService: c.LoggingService,
+		MonitoringService: c.MonitoringService, InitialClusterVersion: c.InitialClusterVersion,
+	}
+	if c.NetworkConfig != nil {
+		details.DataplaneProvider = c.NetworkConfig.DatapathProvider.String()
+	}
+	if c.ReleaseChannel != nil {
+		details.ReleaseChannel = c.ReleaseChannel.Channel.String()
+	}
+	if c.WorkloadIdentityConfig != nil {
+		details.WorkloadIdentityPool = c.WorkloadIdentityConfig.WorkloadPool
+	}
+	if c.PrivateClusterConfig != nil {
+		details.PrivateNodes = c.PrivateClusterConfig.EnablePrivateNodes
+		details.PrivateEndpoint = c.PrivateClusterConfig.EnablePrivateEndpoint
+		details.MasterIPv4CIDR = c.PrivateClusterConfig.MasterIpv4CidrBlock
+	}
+	if c.MasterAuthorizedNetworksConfig != nil {
+		for _, block := range c.MasterAuthorizedNetworksConfig.CidrBlocks {
+			details.MasterAuthorizedNetworks = append(details.MasterAuthorizedNetworks, block.CidrBlock)
+		}
+	}
+	if c.NetworkPolicy != nil {
+		details.NetworkPolicyEnabled = c.NetworkPolicy.Enabled
+		details.NetworkPolicyProvider = c.NetworkPolicy.Provider.String()
+	}
+	if c.BinaryAuthorization != nil {
+		details.BinaryAuthorizationMode = c.BinaryAuthorization.EvaluationMode.String()
+	}
+	if c.DatabaseEncryption != nil {
+		details.DatabaseEncryptionState = c.DatabaseEncryption.State.String()
+	}
+	if c.ShieldedNodes != nil {
+		details.ShieldedNodesEnabled = c.ShieldedNodes.Enabled
+	}
+	if c.VerticalPodAutoscaling != nil {
+		details.VerticalPodAutoscaling = c.VerticalPodAutoscaling.Enabled
+	}
+	if c.Autoscaling != nil {
+		details.NodeAutoprovisioning = c.Autoscaling.EnableNodeAutoprovisioning
+		details.AutoscalingProfile = c.Autoscaling.AutoscalingProfile.String()
+	}
+	if c.Autopilot != nil {
+		details.AutopilotEnabled = c.Autopilot.Enabled
+	}
+	if c.CostManagementConfig != nil {
+		details.CostManagementEnabled = c.CostManagementConfig.Enabled
+	}
+	if c.AddonsConfig != nil {
+		if c.AddonsConfig.HttpLoadBalancing != nil {
+			details.HTTPLoadBalancingDisabled = c.AddonsConfig.HttpLoadBalancing.Disabled
+		}
+		if c.AddonsConfig.HorizontalPodAutoscaling != nil {
+			details.HorizontalAutoscalingDisabled = c.AddonsConfig.HorizontalPodAutoscaling.Disabled
+		}
+		if c.AddonsConfig.NetworkPolicyConfig != nil {
+			details.NetworkPolicyAddonDisabled = c.AddonsConfig.NetworkPolicyConfig.Disabled
+		}
+		if c.AddonsConfig.DnsCacheConfig != nil {
+			details.DNSCacheEnabled = c.AddonsConfig.DnsCacheConfig.Enabled
+		}
 	}
 
-	return models.ClusterDetails{
-		ClusterSummary: models.ClusterSummary{
-			Name:           c.Name,
-			Location:       c.Location,
-			Status:         c.Status.String(),
-			NodeCount:      c.CurrentNodeCount,
-			K8sVersion:     c.CurrentMasterVersion,
-			ResourceLabels: c.ResourceLabels,
-		},
-		NodePools:  pools,
-		Endpoint:   c.Endpoint,
-		CreateTime: c.CreateTime,
-	}, nil
+	return details, nil
 }
 
 // ScaleDeployment scales a GKE node pool to the requested node count.

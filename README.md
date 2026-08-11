@@ -13,7 +13,7 @@
 
 `aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with mandatory human approval before any infrastructure change.
 
-**72 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 29 Modules**
+**73 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 30 Modules**
 
 > For architecture deep-dives, per-service guides, and full configuration reference, see the **[GitHub Wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)**.
 
@@ -53,7 +53,7 @@ Calling a mutation tool without a plan returns a `confirmation required` error w
 
 ### Token Efficiency: Load Only What You Need
 
-All 72 default tools are registered when `--modules` is omitted. The cost tool is registered only when its feature flag and export configuration are present. Use `--modules` to load only the services relevant to your workflow—each excluded module also skips its GCP client connections at startup:
+All 73 default tools are registered when `--modules` is omitted. The cost tool is registered only when its feature flag and export configuration are present. Use `--modules` to load only the services relevant to your workflow—each excluded module also skips its GCP client connections at startup:
 
 ```json
 "args": ["--modules=cloudrun,aura,monitoring,iam"]
@@ -63,6 +63,7 @@ All 72 default tools are registered when `--modules` is omitted. The cost tool i
 |---|---|---|
 | Production incident diagnosis | `incident` | 1 |
 | Project security audit | `security` | 1 |
+| Environment drift detection | `drift` | 1 |
 | Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
@@ -70,7 +71,7 @@ All 72 default tools are registered when `--modules` is omitted. The cost tool i
 | Storage inspection | `storage` | 3 |
 | Production architecture diagram | `archgraph` | 2 |
 | Cost investigation | `cost` | 1 (requires `COST_REASONING_ENABLED=true`) |
-| Full toolkit | *(omit flag)* | 72 (73 if cost reasoning is enabled) |
+| Full toolkit | *(omit flag)* | 73 (74 if cost reasoning is enabled) |
 
 See the [full module list](#step-3--wire-it-into-claude-desktop) in Quick Start.
 
@@ -152,7 +153,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 
 #### Optional: reduce context usage with `--modules`
 
-By default all 72 base tools are registered. Use the `--modules` flag to load only the services you work with—each excluded module also skips its GCP client connection at startup. The opt-in cost tool is additional.
+By default all 73 base tools are registered. Use the `--modules` flag to load only the services you work with—each excluded module also skips its GCP client connection at startup. The opt-in cost tool is additional.
 
 ```json
 {
@@ -168,12 +169,13 @@ By default all 72 base tools are registered. Use the `--modules` flag to load on
 }
 ```
 
-Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `security` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging` · `incident` · `cost`. The `cost` module also requires `COST_REASONING_ENABLED=true`. Use `--modules=none` to register zero tools. Resources remain available; module-specific prompts are registered only when their module is enabled. Omit the flag to keep the default all-tools behaviour.
+Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `scheduler` · `workflows` · `tasks` · `pubsub` · `secretmanager` · `vpcaccess` · `cloudsql` · `logging` · `monitoring` · `iam` · `security` · `topology` · `aura` · `storage` · `serverlessgraph` · `gke_workloads` · `gke_mesh` · `networking` · `datastores` · `supplychain` · `coverage` · `archgraph` · `tagging` · `incident` · `drift` · `cost`. The `cost` module also requires `COST_REASONING_ENABLED=true`. Use `--modules=none` to register zero tools. Resources remain available; module-specific prompts are registered only when their module is enabled. Omit the flag to keep the default all-tools behaviour.
 
 | Workflow | Suggested `--modules` | Tools loaded |
 |---|---|---|
 | Production incident diagnosis | `incident` | 1 |
 | Project security audit | `security` | 1 |
+| Environment drift detection | `drift` | 1 |
 | Cloud Run + functions | `cloudrun,functions,eventarc,scheduler,aura,monitoring,iam` | 14 |
 | Serverless event graph | `serverlessgraph,cloudrun,functions,eventarc,scheduler,workflows,tasks,pubsub,secretmanager,vpcaccess,cloudsql` | 20 |
 | GKE cluster health | `gke,aura,monitoring,logging` | 8 |
@@ -181,11 +183,38 @@ Available module names: `gke` · `cloudrun` · `functions` · `eventarc` · `sch
 | Production architecture diagram | `archgraph` | 2 |
 | Data / logging | `logging,monitoring,iam` | 4 |
 | Cost investigation | `cost` | 1 (opt-in) |
-| Full toolkit | *(omit flag)* | 72 (73 if cost reasoning is enabled) |
+| Full toolkit | *(omit flag)* | 73 (74 if cost reasoning is enabled) |
 
 Restart Claude Desktop. Tools, Resources, and Prompts appear automatically. Now ask:
 
 > "Are there any bottlenecks in my-cluster in us-central1? Look back 60 minutes."
+
+### Compare environments for configuration drift
+
+Configure at least two aliased environments, then use the read-only `drift` module:
+
+```yaml
+environments:
+  - project_id: my-company-dev
+    alias: dev
+    default: true
+  - project_id: my-company-prod
+    alias: prod
+```
+
+`gcp_compare_environments` compares all supported components when `components` is omitted, or only the services named by the user. It treats both environments symmetrically—neither is a baseline. Every result uses the exact alias: for example, `missing_in: dev`, `present_in: prod`, or a field value for each environment. Collection coverage is reported separately, so an API error or partial scan is never mistaken for a clean match or a missing resource.
+
+Supported components are BigQuery, Cloud Run, Cloud SQL, data stores, Eventarc, Cloud Functions, GKE clusters and workloads, IAM service accounts, Monitoring, networking, Pub/Sub, Scheduler, Secret Manager, Storage, supply chain, Cloud Tasks, VPC Access, and Workflows. Optional filters narrow the comparison by resource name, location, or Kubernetes namespace.
+
+Try:
+
+> "Find drifts between dev and prod."
+>
+> "Find diffs between prod Cloud Run and dev Cloud Run."
+>
+> "What is the difference between dev GKE setup and prod GKE setup?"
+>
+> "Compare networking and Pub/Sub in dev and prod; show detailed field differences."
 
 ---
 
@@ -531,7 +560,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 
 ## Tools
 
-72 base tools plus one opt-in cost-reasoning tool across 29 module flags. Load only what you need with `--modules`.
+73 base tools plus one opt-in cost-reasoning tool across 30 module flags. Load only what you need with `--modules`.
 
 | Module | Flag | Tools | Mutation? |
 |---|---|---|---|
@@ -562,6 +591,7 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 | Observability Coverage | `coverage` | 1 | — |
 | Resource Tagging | `tagging` | 1 | — |
 | Incident Diagnosis | `incident` | 1 | — |
+| Environment Drift | `drift` | 1 | — |
 | Cost Reasoning | `cost` | 1 (opt-in) | — |
 
 → Full tool reference with parameters and descriptions: [Module Reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/Module-Reference)
@@ -585,6 +615,16 @@ Recommender signals are included by default (12h cache, safe 429 handling). Disa
 > "List all Pub/Sub topics with subscription lag above 10,000 unacked messages."  
 > "What IAM permissions does my current service account have — and what's missing?"  
 > "Export a full serverless event graph for my-project."
+
+### Environment Drift
+
+> "Find drifts between dev and prod."
+>
+> "Compare only Cloud Run and GKE between dev and prod."
+>
+> "Which resources are missing in dev, and which are missing in prod?"
+>
+> "Show detailed configuration differences for the api service in dev and prod."
 
 ### Automatic Architecture Diagrams
 
@@ -845,6 +885,8 @@ Aliases are matched case-insensitively, so `dev`, `DEV`, and `DeV` select the sa
 
 For example, both “check logs on PROD” and “check logs on my-company-345” query the `prod` environment, and the answer refers only to `prod`.
 
+With two or more environments, requests such as “find drifts between dev and prod” invoke one symmetric comparison. The response names aliases directly (`missing in dev`, `missing in prod`) rather than referring to a baseline or target. Omit component names for a whole-environment scan, or name one or more components to narrow it.
+
 A single project may omit both alias and default, in which case its project ID may be shown:
 
 ```yaml
@@ -941,7 +983,7 @@ The server runs under a specific service account (Application Default Credential
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
 - **Read-only guarantees**: all 70 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
-- **MCP annotations**: all registered tools (72 by default, 73 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
+- **MCP annotations**: all registered tools (73 by default, 74 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
 
 ---
@@ -1122,13 +1164,13 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 │              workflows · tasks · pubsub · secretmanager           │
 │              vpcaccess · cloudsql · logging · monitoring          │
 │              iam · topology · aura · storage · serverlessgraph    │
-│              archgraph · incident · cost                          │
+│              archgraph · incident · drift · cost                  │
 │   resources/ bigquery · cloudrun · storage · iam                 │
 │   prompts/   audit-security · optimize-bq · incident-response    │
 └─────────────────────────────┬───────────────────────────────────┘
                               │ correlation / reasoning paths ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
-│ internal/diagnostics/ · internal/costreasoning/ · internal/diagram/│
+│ diagnostics · costreasoning · diagram · drift                     │
 │ scopes · collectors · evidence scoring · deterministic renderers │
 │ partial failures become explicit coverage gaps                  │
 └─────────────────────────────┬───────────────────────────────────┘
@@ -1159,7 +1201,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
                           GCP APIs
 ```
 
-**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Ordinary tool modules depend on `ports/`; incident diagnosis and cost reasoning delegate to deterministic application-layer engines whose narrow `DataSource` interfaces are satisfied by the same `GCPService`. `internal/safety` sits at the port boundary—it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
+**Dependency rule:** `internal/mcp` never imports `internal/gcp`. Ordinary tool modules depend on `ports/`; incident diagnosis, cost reasoning, diagrams, and environment drift delegate to deterministic application-layer engines whose narrow `DataSource` interfaces are satisfied by the same `GCPService`. `internal/safety` sits at the port boundary—it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
 
 Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. SSE requires a Google-signed ID token in `Authorization: Bearer <token>` by default; validation covers signature, expiry, audience, subject, and the optional verified-email allowlist. Public base URLs must use HTTPS. The MCP protocol layer is otherwise identical in both modes.
 
@@ -1191,6 +1233,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
 
 ## Project Layout
 
-The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident correlation; `internal/costreasoning` owns complete-day windows and deterministic cost attribution; `internal/diagram` owns environment scoping and deterministic Mermaid, Graphviz, and SVG rendering. None imports MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
+The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident correlation; `internal/costreasoning` owns complete-day windows and deterministic cost attribution; `internal/diagram` owns environment scoping and deterministic Mermaid, Graphviz, and SVG rendering; `internal/drift` owns configuration collection, normalization, matching, comparison, and coverage reporting. None imports MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
 
 → Full annotated project layout and contributor guide: [Architecture & Contributing](https://github.com/asbrodova/aura-tracker-gcp/wiki/Architecture-and-Contributing)

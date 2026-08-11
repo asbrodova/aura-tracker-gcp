@@ -17,6 +17,7 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	"github.com/asbrodova/aura-tracker-gcp/internal/diagnostics"
 	"github.com/asbrodova/aura-tracker-gcp/internal/diagram"
+	"github.com/asbrodova/aura-tracker-gcp/internal/drift"
 	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/middleware"
 	"github.com/asbrodova/aura-tracker-gcp/internal/mcp/prompts"
@@ -145,12 +146,19 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	)
 
 	wrap := func(t server.ServerTool) server.ServerTool {
-		projectKeys := make([]string, 0, 1)
-		for _, key := range []string{"project_id", "project"} {
+		projectKeys := make([]string, 0, 2)
+		multiEnvironmentComparison := false
+		for _, key := range []string{"project_id", "project", "environment_a", "environment_b"} {
 			if raw, ok := t.Tool.InputSchema.Properties[key]; ok {
 				projectKeys = append(projectKeys, key)
+				if key == "environment_a" || key == "environment_b" {
+					multiEnvironmentComparison = true
+				}
 				if prop, ok := raw.(map[string]any); ok && o.environments != nil {
-					if o.projectIDPlaceholder != "" {
+					if multiEnvironmentComparison || key == "environment_a" || key == "environment_b" {
+						prop["description"] = comparisonSelectorDescription(o.environments, o.projectIDPlaceholder)
+						delete(prop, "default")
+					} else if o.projectIDPlaceholder != "" {
 						prop["description"] = "Configured GCP project. Pass '" + o.projectIDPlaceholder + "' or omit it to use the private server default."
 						prop["default"] = o.projectIDPlaceholder
 					} else {
@@ -177,6 +185,9 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 							return mcp.NewToolResultError(environmentSelectionError(o.environments)), nil
 						}
 					}
+					if multiEnvironmentComparison && strings.TrimSpace(selector) == "" {
+						return mcp.NewToolResultError("environment_a and environment_b are required; available environments: " + strings.Join(o.environments.DisplayNames(), ", ")), nil
+					}
 					if o.projectIDPlaceholder != "" && selector == o.projectIDPlaceholder {
 						selector = ""
 					}
@@ -185,14 +196,22 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 						return mcp.NewToolResultError(environmentSelectionError(o.environments)), nil
 					}
 					args[key] = environment.ProjectID
-					if resolvedProject == "" {
+					if multiEnvironmentComparison {
+						continue
+					} else if resolvedProject == "" {
 						resolvedProject = environment.ProjectID
 					} else if resolvedProject != environment.ProjectID {
 						return mcp.NewToolResultError("all project selectors in one request must resolve to the same configured environment"), nil
 					}
 				}
-				if err := validateScopedArguments(args, resolvedProject); err != nil {
-					return mcp.NewToolResultError(err.Error()), nil
+				var validationErr error
+				if multiEnvironmentComparison {
+					validationErr = validateArgumentStrings(args, "arguments")
+				} else {
+					validationErr = validateScopedArguments(args, resolvedProject)
+				}
+				if validationErr != nil {
+					return mcp.NewToolResultError(validationErr.Error()), nil
 				}
 				req.Params.Arguments = args
 			}
@@ -284,6 +303,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewTaggingTools(svc, log),
 		tools.NewIncidentTools(diagnostics.New(svc, log), log),
 		tools.NewSecurityTools(securityaudit.New(svc, log, securityaudit.WithConfig(o.securityAuditConfig)), log),
+		tools.NewDriftTools(drift.New(drift.NewGCPCollector(svc), log), log),
 	}
 	if o.enableRecommenderExport {
 		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log, o.recommenderExportDataset))
@@ -433,6 +453,16 @@ func environmentSelectionError(registry *environments.Registry) string {
 	return "unknown environment; available environments: " + strings.Join(registry.DisplayNames(), ", ")
 }
 
+func comparisonSelectorDescription(registry *environments.Registry, placeholder string) string {
+	if registry == nil {
+		return "Configured GCP environment alias or project ID."
+	}
+	if placeholder != "" {
+		return "Configured private GCP environment. Environment comparison requires two distinct configured environments."
+	}
+	return "Configured GCP environment alias or project ID. Required and must differ from the other environment. Available environments: " + strings.Join(registry.DisplayNames(), ", ") + "."
+}
+
 func environmentInstructions(registry *environments.Registry, placeholder string) string {
 	if registry == nil {
 		return ""
@@ -452,7 +482,7 @@ func environmentInstructions(registry *environments.Registry, placeholder string
 		configured = append(configured, name)
 	}
 	return fmt.Sprintf(
-		"Configured environments: %s. When the user names an environment, pass that alias or configured project ID in the tool's project_id/project argument. Alias matching is case-insensitive. When no environment is named, omit the argument to use the default. Always refer to aliased projects by alias in answers and never reveal their project IDs.",
+		"Configured environments: %s. When the user names an environment, pass that alias or configured project ID in the tool's project_id/project argument. Alias matching is case-insensitive. When no environment is named, omit the argument to use the default. For drift, diff, difference, parity, or comparison requests involving two environments, call gcp_compare_environments once with environment_a and environment_b; omit components to compare the whole environments or pass only the named components. Treat the comparison symmetrically. Present its summary first, group missing resources under headings that name the exact alias (for example, 'Missing in dev'), show changed fields with both alias-specific values, and put coverage gaps last. Never call either environment the baseline or target. Always refer to aliased projects by alias in answers and never reveal their project IDs.",
 		strings.Join(configured, ", "),
 	)
 }

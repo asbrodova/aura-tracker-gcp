@@ -63,6 +63,28 @@ func TestRevisionConfigFingerprintDetectsValueChangeButIgnoresEnvOrder(t *testin
 	}
 }
 
+func TestRevisionConfigFingerprintNormalizesProjectReferences(t *testing.T) {
+	dev := &runpb.Revision{
+		Name:           "projects/private-dev/locations/us-central1/services/api/revisions/api-1",
+		ServiceAccount: "runner@private-dev.iam.gserviceaccount.com",
+		Containers: []*runpb.Container{{
+			Image: "us-docker.pkg.dev/private-dev/apps/api:v1",
+			Env:   []*runpb.EnvVar{{Name: "PROJECT", Values: &runpb.EnvVar_Value{Value: "private-dev"}}},
+		}},
+	}
+	prod := &runpb.Revision{
+		Name:           "projects/private-prod/locations/us-central1/services/api/revisions/api-99",
+		ServiceAccount: "runner@private-prod.iam.gserviceaccount.com",
+		Containers: []*runpb.Container{{
+			Image: "us-docker.pkg.dev/private-prod/apps/api:v1",
+			Env:   []*runpb.EnvVar{{Name: "PROJECT", Values: &runpb.EnvVar_Value{Value: "private-prod"}}},
+		}},
+	}
+	if revisionConfigFingerprint(dev) != revisionConfigFingerprint(prod) {
+		t.Fatal("environment-local project references should not create drift")
+	}
+}
+
 func TestParseRevisionResourceName(t *testing.T) {
 	region, service, revision := parseRevisionResourceName("projects/p/locations/europe-west1/services/api/revisions/api-00003")
 	if region != "europe-west1" || service != "api" || revision != "api-00003" {

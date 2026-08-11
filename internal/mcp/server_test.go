@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	protocol "github.com/mark3labs/mcp-go/mcp"
@@ -294,6 +295,7 @@ func TestServerRegistersAllTools(t *testing.T) {
 		"gcp_tag_list_resources",
 		"gcp_incident_diagnose",
 		"gcp_project_security_audit",
+		"gcp_compare_environments",
 	}
 
 	registered := s.ListTools()
@@ -626,6 +628,77 @@ func TestEnvironmentAliasesRouteCaseInsensitivelyAndMaskOutputs(t *testing.T) {
 	}
 	if svc.logProjects[len(svc.logProjects)-1] != "private-dev-123" {
 		t.Fatalf("default project = %q", svc.logProjects[len(svc.logProjects)-1])
+	}
+}
+
+type driftCaptureSvc struct {
+	*mockSvc
+	mu       sync.Mutex
+	projects []string
+}
+
+func (s *driftCaptureSvc) ListServices(_ context.Context, req models.ListServicesRequest) (models.ListServicesResponse, error) {
+	s.mu.Lock()
+	s.projects = append(s.projects, req.ProjectID)
+	s.mu.Unlock()
+	services := []models.ServiceSummary{{Name: "api", Region: "us-central1"}}
+	if req.ProjectID == "private-dev-123" {
+		services = append(services, models.ServiceSummary{Name: "worker", Region: "us-central1"})
+	}
+	return models.ListServicesResponse{Services: services}, nil
+}
+
+func (s *driftCaptureSvc) GetServiceDetails(_ context.Context, req models.GetServiceDetailsRequest) (models.ServiceDetails, error) {
+	return models.ServiceDetails{
+		ServiceSummary: models.ServiceSummary{Name: req.ServiceName, Region: req.Region},
+		LatestRevision: req.ServiceName + "-00001",
+		Traffic:        []models.TrafficTarget{{Revision: req.ServiceName + "-00001", Percent: 100}},
+		Labels:         map[string]string{"environment": req.ProjectID},
+	}, nil
+}
+
+func (s *driftCaptureSvc) ListRevisions(_ context.Context, req models.ListRevisionsRequest) (models.ListRevisionsResponse, error) {
+	minimum := int32(0)
+	if req.ProjectID == "private-prod-345" {
+		minimum = 3
+	}
+	return models.ListRevisionsResponse{Revisions: []models.RevisionSummary{{
+		Name: req.ServiceName + "-00001", ServiceName: req.ServiceName, Region: req.Region,
+		Ready: true, MinInstances: minimum,
+	}}}, nil
+}
+
+func TestEnvironmentDriftResolvesTwoAliasesAndNamesMissingEnvironment(t *testing.T) {
+	svc := &driftCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test", WithModules(map[string]bool{ModuleDrift: true}), WithEnvironments(testEnvironmentRegistry(t)))
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_compare_environments","arguments":{"environment_a":"DEV","environment_b":"private-prod-345","components":["cloudrun"]}}}`)
+	if strings.Contains(response, "private-dev-123") || strings.Contains(response, "private-prod-345") {
+		t.Fatalf("project ID leaked: %s", response)
+	}
+	if !strings.Contains(response, `\"missing_in\":\"prod\"`) || !strings.Contains(response, "missing in prod") {
+		t.Fatalf("alias-specific missing result absent: %s", response)
+	}
+	if !strings.Contains(response, `\"environment_a\":\"dev\"`) || !strings.Contains(response, `\"environment_b\":\"prod\"`) {
+		t.Fatalf("environment aliases absent: %s", response)
+	}
+	if !strings.Contains(response, `\"resources_only_in\":[{\"environment\":\"dev\",\"resources\":1},{\"environment\":\"prod\",\"resources\":0}]`) {
+		t.Fatalf("alias-specific summary totals absent: %s", response)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if len(svc.projects) != 2 || svc.projects[0] == svc.projects[1] {
+		t.Fatalf("collected projects = %#v", svc.projects)
+	}
+}
+
+func TestEnvironmentDriftRejectsSameResolvedEnvironment(t *testing.T) {
+	svc := &driftCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test", WithModules(map[string]bool{ModuleDrift: true}), WithEnvironments(testEnvironmentRegistry(t)))
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_compare_environments","arguments":{"environment_a":"dev","environment_b":"private-dev-123","components":["cloudrun"]}}}`)
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if !strings.Contains(response, "different configured environments") || len(svc.projects) != 0 {
+		t.Fatalf("response=%s projects=%#v", response, svc.projects)
 	}
 }
 
