@@ -33,8 +33,9 @@ type ListTriggersRequest struct {
 
 // ListTriggersResponse holds the list result with any per-region errors.
 type ListTriggersResponse struct {
-	Triggers []TriggerSummary `json:"triggers"`
-	Errors   []ToolError      `json:"errors,omitempty"`
+	Triggers  []TriggerSummary `json:"triggers"`
+	Errors    []ToolError      `json:"errors,omitempty"`
+	Truncated bool             `json:"truncated,omitempty"`
 }
 
 // GetTriggerRequest fetches a single trigger.

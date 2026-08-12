@@ -86,7 +86,7 @@ func run() error {
 
 Run:  gcloud auth application-default login
 
-Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file`)
+For automation, use an attached service account, Workload Identity, or service-account impersonation`)
 	}
 	logCredentialSource(log, creds)
 
@@ -420,6 +420,13 @@ func buildAnonymizer(ctx context.Context, cfg anonymize.Config, log *slog.Logger
 	}
 
 	switch cfg.Mode {
+	case anonymize.ModeLocal:
+		scrubber, err := anonymize.NewLocalScrubber(cfg)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init local scrubber: %w", err)
+		}
+		return scrubber, func() {}, nil
+
 	case anonymize.ModeDLP:
 		dlp, err := gcpadapter.NewDLPAdapter(ctx, log)
 		if err != nil {
@@ -453,22 +460,17 @@ func buildAnonymizer(ctx context.Context, cfg anonymize.Config, log *slog.Logger
 				}
 			}, nil
 
-	default: // ModeLocal
-		scrubber, err := anonymize.NewLocalScrubber(cfg)
-		if err != nil {
-			return nil, nil, fmt.Errorf("init local scrubber: %w", err)
-		}
-		return scrubber, func() {}, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported anonymization mode %q", cfg.Mode)
 	}
 }
 
-// logCredentialSource logs which ADC credential source was detected at startup.
-// creds.JSON is non-nil only when credentials were loaded from a file (SA key or
-// gcloud well-known file); it is nil when coming from the GCE metadata server.
+// logCredentialSource logs which broad ADC source was detected without exposing
+// local credential paths or credential contents.
 func logCredentialSource(log *slog.Logger, creds *google.Credentials) {
 	switch {
 	case os.Getenv("GOOGLE_APPLICATION_CREDENTIALS") != "":
-		log.Info("adc: service account key file", "path", os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"))
+		log.Info("adc: explicit credential file configured")
 	case len(creds.JSON) > 0:
 		log.Info("adc: user credentials (gcloud application-default login)")
 	default:

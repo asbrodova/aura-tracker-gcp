@@ -18,24 +18,25 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 		return models.ListTaskQueuesResponse{}, err
 	}
 
-	regions, err := a.discoverRegions(ctx, req.ProjectID)
-	if err != nil {
-		return models.ListTaskQueuesResponse{}, err
-	}
+	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceTasks)
+	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
+		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var queues []models.TaskQueueSummary
-	var errs []models.ToolError
+	truncated := false
+	errs := discoveryToolError(discovery, "cloudtasks.projects.locations.list")
+	perRegionLimit := regionalInventoryLimit(len(regions))
 
 	for _, r := range regions {
 		r := r
 		g.Go(func() error {
-			items, rerr := a.listTaskQueuesForRegion(gctx, req.ProjectID, r)
+			items, regionTruncated, rerr := a.listTaskQueuesForRegion(gctx, req.ProjectID, r, perRegionLimit)
 			mu.Lock()
 			defer mu.Unlock()
 			if rerr != nil {
@@ -46,6 +47,10 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 				return nil
 			}
 			queues = append(queues, items...)
+			if regionTruncated {
+				truncated = true
+				errs = append(errs, models.ToolError{FailingAPI: "cloudtasks.projects.locations.queues.list", Message: fmt.Sprintf("region %s truncated at %d items", r, perRegionLimit)})
+			}
 			return nil
 		})
 	}
@@ -61,30 +66,33 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 		return queues[i].Name < queues[j].Name
 	})
 	sortToolErrors(errs)
-	return models.ListTaskQueuesResponse{Queues: queues, Errors: errs}, nil
+	return models.ListTaskQueuesResponse{Queues: queues, Errors: errs, Truncated: truncated}, nil
 }
 
-func (a *gcpAdapter) listTaskQueuesForRegion(ctx context.Context, projectID, region string) ([]models.TaskQueueSummary, error) {
+func (a *gcpAdapter) listTaskQueuesForRegion(ctx context.Context, projectID, region string, limit int) ([]models.TaskQueueSummary, bool, error) {
 	if a.tasksClient == nil {
-		return nil, nil
+		return nil, false, fmt.Errorf("Cloud Tasks client is not initialized")
 	}
 	if err := a.rateWait(ctx, "tasks.listQueuesForRegion"); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, region)
-	it := a.tasksClient.ListQueues(ctx, &cloudtaskspb.ListQueuesRequest{Parent: parent})
+	it := a.tasksClient.ListQueues(ctx, &cloudtaskspb.ListQueuesRequest{Parent: parent, PageSize: int32(limit)})
 
 	var queues []models.TaskQueueSummary
 	for {
 		q, err := it.Next()
 		if err != nil {
 			if isIteratorDone(err) {
-				break
+				return queues, false, nil
 			}
-			return nil, wrapGCPError("tasks.listQueuesForRegion", err)
+			return nil, false, wrapGCPError("tasks.listQueuesForRegion", err)
+		}
+		if len(queues) >= limit {
+			return queues, true, nil
 		}
 		_, name := parseTaskQueueResourceName(q.Name)
 		queues = append(queues, models.TaskQueueSummary{
@@ -93,7 +101,6 @@ func (a *gcpAdapter) listTaskQueuesForRegion(ctx context.Context, projectID, reg
 			State:  q.State.String(),
 		})
 	}
-	return queues, nil
 }
 
 // parseTaskQueueResourceName extracts region and name from:

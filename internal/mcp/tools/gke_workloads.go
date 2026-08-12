@@ -53,7 +53,8 @@ func (t *GKEWorkloadTools) ListWorkloads() server.ServerTool {
 		mcp.WithString("kind",
 			mcp.Description("Filter by workload kind: Deployment, StatefulSet, DaemonSet, CronJob, or Job. Omit for all."),
 		),
-		mcp.WithNumber("page_size", mcp.Description("Max workloads to return per kind (default 500)")),
+		mcp.WithNumber("page_size", mcp.Description("Maximum total workloads to return (default 500, maximum 1000)"), mcp.Min(1), mcp.Max(1000)),
+		mcp.WithString("page_token", mcp.Description("Opaque next_page_token from a previous call")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List GKE Workloads",
 			ReadOnlyHint:    boolPtr(true),
@@ -87,9 +88,9 @@ func (t *GKEWorkloadTools) listWorkloadsHandler(ctx context.Context, _ mcp.CallT
 func (t *GKEWorkloadTools) GetWorkloadDetails() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_get_workload_details",
 		mcp.WithDescription(
-			"Get full details for a single GKE workload: all container specs, environment variables "+
-				"(with secret references masked), resource requests/limits, node selector, tolerations, "+
-				"and annotations. Useful for diagnosing misconfigurations or tracing secret dependencies.",
+			"Get secret-safe details for a single GKE workload: container specs, environment-variable "+
+				"sources (literal values are withheld), Secret and ConfigMap reference names, resource "+
+				"requests/limits, node selector, tolerations, and allowlisted boolean annotations.",
 		),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),

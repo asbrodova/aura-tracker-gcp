@@ -30,9 +30,10 @@ func (googleIdentityTokenValidator) Validate(ctx context.Context, token, audienc
 }
 
 type sseAuthConfig struct {
-	Mode          string
-	Audience      string
-	AllowedEmails map[string]struct{}
+	Mode               string
+	Audience           string
+	AllowedEmails      map[string]struct{}
+	AllowAnyValidToken bool
 }
 
 func loadSSEAuthConfig(baseURL string, getenv func(string) string) (sseAuthConfig, error) {
@@ -72,7 +73,20 @@ func loadSSEAuthConfig(baseURL string, getenv func(string) string) (sseAuthConfi
 			allowed[email] = struct{}{}
 		}
 	}
-	return sseAuthConfig{Mode: mode, Audience: audience, AllowedEmails: allowed}, nil
+	allowAny := false
+	if raw := strings.ToLower(strings.TrimSpace(getenv("MCP_AUTH_ALLOW_ANY_VALID_TOKEN"))); raw != "" {
+		switch raw {
+		case "true":
+			allowAny = true
+		case "false":
+		default:
+			return sseAuthConfig{}, fmt.Errorf("MCP_AUTH_ALLOW_ANY_VALID_TOKEN must be 'true' or 'false'")
+		}
+	}
+	if mode == authModeRequired && !isLoopbackHostname(parsedBaseURL.Hostname()) && len(allowed) == 0 && !allowAny {
+		return sseAuthConfig{}, fmt.Errorf("public SSE requires MCP_AUTH_ALLOWED_EMAILS or explicit MCP_AUTH_ALLOW_ANY_VALID_TOKEN=true")
+	}
+	return sseAuthConfig{Mode: mode, Audience: audience, AllowedEmails: allowed, AllowAnyValidToken: allowAny}, nil
 }
 
 func isLoopbackHostname(host string) bool {

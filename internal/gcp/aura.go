@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -21,9 +22,17 @@ import (
 )
 
 const (
-	auraCacheTTL           = 5 * time.Minute
-	auraSummaryConcurrency = 8
+	auraCacheTTL            = 5 * time.Minute
+	auraSummaryConcurrency  = 8
+	maxAuraSummaryResources = 100
 )
+
+var (
+	auraResourceNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	auraLocationRE     = regexp.MustCompile(`^[a-z]+(?:-[a-z0-9]+)*[0-9](?:-[a-z])?$`)
+)
+
+var errAuraMetricNoData = errors.New("monitoring metric has no data in the requested window")
 
 // recommenderQuotaNote is surfaced in AuraReport.RecommenderNote when the daily
 // Recommender API quota is exhausted. The note instructs the LLM to stop polling.
@@ -41,6 +50,10 @@ func cacheKey(projectID string, kind models.ResourceKind, region, name string) s
 // GetAuraScore returns a composite health+efficiency score for a single named resource.
 // Results are cached for auraCacheTTL to keep repeated MCP calls under 500 ms.
 func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRequest) (models.AuraReport, error) {
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	if err := validateAuraRequest(req); err != nil {
+		return models.AuraReport{}, err
+	}
 	key := cacheKey(req.ProjectID, req.ResourceKind, req.Region, req.ResourceName)
 	if cached, ok := a.auraCache.get(key); ok {
 		return cached, nil
@@ -85,54 +98,183 @@ func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRe
 	return report, nil
 }
 
+func validateAuraRequest(req models.GetAuraScoreRequest) error {
+	if !costProjectIDRE.MatchString(strings.TrimSpace(req.ProjectID)) {
+		return fmt.Errorf("aura.GetAuraScore: invalid project_id")
+	}
+	if len(req.ResourceName) > 1024 || !auraResourceNameRE.MatchString(req.ResourceName) {
+		return fmt.Errorf("aura.GetAuraScore: invalid resource_name")
+	}
+	if req.Region != "" && !auraLocationRE.MatchString(req.Region) {
+		return fmt.Errorf("aura.GetAuraScore: invalid region")
+	}
+	return nil
+}
+
+func firstError(values ...error) error {
+	for _, err := range values {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ratioMetricValue combines independently fetched numerator and denominator
+// metrics without treating an absent zero-valued numerator as missing telemetry.
+// Monitoring commonly returns no series for zero errors, while still returning
+// a positive total count. A missing or zero denominator remains unavailable
+// because the ratio cannot be established safely.
+func ratioMetricValue(numerator float64, numeratorErr error, denominator float64, denominatorErr error) (float64, error) {
+	if denominatorErr != nil {
+		return 0, denominatorErr
+	}
+	if denominator <= 0 {
+		return 0, fmt.Errorf("%w: ratio denominator is zero", errAuraMetricNoData)
+	}
+	if numeratorErr != nil {
+		if errors.Is(numeratorErr, errAuraMetricNoData) {
+			return 0, nil
+		}
+		return 0, numeratorErr
+	}
+	return numerator / denominator, nil
+}
+
+func metricHealthSignal(name string, value float64, err error, score func(float64) (int, string)) models.AuraHealthSignal {
+	if err != nil {
+		availability, label := "error", "Unavailable"
+		if errors.Is(err, errAuraMetricNoData) {
+			availability, label = "no_data", "No data"
+		}
+		return models.AuraHealthSignal{Name: name, Availability: availability, Label: label, Message: err.Error()}
+	}
+	signalScore, label := score(value)
+	return models.AuraHealthSignal{Name: name, Value: value, Score: signalScore, Label: label, Availability: "observed"}
+}
+
+func signalObserved(signal models.AuraHealthSignal) bool {
+	return signal.Availability == "" || signal.Availability == "observed"
+}
+
+func expectedAuraSignals(kind models.ResourceKind) []string {
+	switch kind {
+	case models.ResourceKindCloudRun:
+		return []string{"error_rate", "cpu_util", "latency_p99", "request_count_total"}
+	case models.ResourceKindCloudSQL:
+		return []string{"cpu_util", "memory_util", "disk_util"}
+	case models.ResourceKindBigQuery:
+		return []string{"job_failure_rate", "slot_utilization", "storage_bytes"}
+	case models.ResourceKindGKE:
+		return []string{"node_cpu_util", "node_mem_util", "pod_restart_rate", "control_plane_health"}
+	case models.ResourceKindGCS:
+		return []string{"public_access_prevention", "uniform_bucket_level_access", "versioning", "lifecycle_policy", "storage_class_fit"}
+	default:
+		return nil
+	}
+}
+
 // GetProjectAuraSummary discovers all Cloud Run, Cloud SQL, and BigQuery resources in the
 // project and returns their Aura Scores sorted worst-first.
 func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.ProjectAuraSummaryRequest) (models.ProjectAuraSummaryResponse, error) {
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	if !costProjectIDRE.MatchString(req.ProjectID) || (req.Region != "" && !auraLocationRE.MatchString(req.Region)) {
+		return models.ProjectAuraSummaryResponse{}, fmt.Errorf("aura.GetProjectAuraSummary: invalid project_id or region")
+	}
 	if err := a.rateWait(ctx, "aura.GetProjectAuraSummary"); err != nil {
 		return models.ProjectAuraSummaryResponse{}, err
 	}
-	ctx, cancel := a.withTimeout(ctx)
+	// Project summaries fan out into several metric reads per resource. Use the
+	// bounded graph-operation budget rather than one single-call timeout.
+	ctx, cancel := context.WithTimeout(ctx, a.graphTimeout)
 	defer cancel()
 
-	// Discover resources concurrently.
+	// Discover a bounded resource inventory.
 	type resource struct {
 		kind   models.ResourceKind
 		name   string
 		region string
 	}
 	var resources []resource
+	truncated := false
+	var discoveryWarnings []string
+	appendResource := func(value resource) bool {
+		if len(resources) >= maxAuraSummaryResources {
+			truncated = true
+			return false
+		}
+		resources = append(resources, value)
+		return true
+	}
 
 	crServices, err := a.ListServices(ctx, models.ListServicesRequest{ProjectID: req.ProjectID, Region: req.Region})
 	if err != nil {
 		return models.ProjectAuraSummaryResponse{}, wrapGCPError("aura.GetProjectAuraSummary", err)
 	}
 	for _, svc := range crServices.Services {
-		resources = append(resources, resource{models.ResourceKindCloudRun, svc.Name, svc.Region})
+		if !appendResource(resource{models.ResourceKindCloudRun, svc.Name, svc.Region}) {
+			break
+		}
+	}
+	truncated = truncated || crServices.Truncated
+	if truncated {
+		discoveryWarnings = append(discoveryWarnings, fmt.Sprintf("Aura resource discovery stopped at %d resources; narrow by region", maxAuraSummaryResources))
 	}
 
-	sqlInstances, err := a.listSQLInstances(ctx, req.ProjectID)
+	var sqlInstances []sqlInstance
+	err = nil
+	if !truncated {
+		sqlInstances, err = a.listSQLInstances(ctx, req.ProjectID)
+	}
 	if err != nil {
-		// Non-fatal: log and continue with whatever we have.
-		a.log.WarnContext(ctx, "aura: could not list Cloud SQL instances", "err", err)
+		if errors.Is(err, errInventoryLimitReached) {
+			truncated = true
+			discoveryWarnings = append(discoveryWarnings, fmt.Sprintf("Aura resource discovery stopped at %d resources; narrow by region", maxAuraSummaryResources))
+		} else {
+			// Non-fatal: log and continue with whatever we have.
+			a.log.WarnContext(ctx, "aura: could not list Cloud SQL instances", "err", err)
+		}
 	}
 	for _, inst := range sqlInstances {
-		resources = append(resources, resource{models.ResourceKindCloudSQL, inst.name, inst.region})
+		if !appendResource(resource{models.ResourceKindCloudSQL, inst.name, inst.region}) {
+			break
+		}
 	}
 
-	bqDatasets, err := a.listBigQueryDatasets(ctx, req.ProjectID)
+	var bqDatasets []string
+	err = nil
+	if !truncated {
+		bqDatasets, err = a.listBigQueryDatasets(ctx, req.ProjectID)
+	}
 	if err != nil {
-		a.log.WarnContext(ctx, "aura: could not list BigQuery datasets", "err", err)
+		if errors.Is(err, errInventoryLimitReached) {
+			truncated = true
+			discoveryWarnings = append(discoveryWarnings, fmt.Sprintf("Aura resource discovery stopped at %d resources; narrow by region", maxAuraSummaryResources))
+		} else {
+			a.log.WarnContext(ctx, "aura: could not list BigQuery datasets", "err", err)
+		}
 	}
 	for _, ds := range bqDatasets {
-		resources = append(resources, resource{models.ResourceKindBigQuery, ds, ""})
+		if !appendResource(resource{models.ResourceKindBigQuery, ds, ""}) {
+			break
+		}
 	}
 
-	gkeClusters, err := a.listGKEClusters(ctx, req.ProjectID)
+	var gkeClusters []gkeCluster
+	err = nil
+	if !truncated {
+		gkeClusters, err = a.listGKEClusters(ctx, req.ProjectID)
+	}
 	if err != nil {
 		a.log.WarnContext(ctx, "aura: could not list GKE clusters", "err", err)
 	}
 	for _, c := range gkeClusters {
-		resources = append(resources, resource{models.ResourceKindGKE, c.name, c.location})
+		if !appendResource(resource{models.ResourceKindGKE, c.name, c.location}) {
+			break
+		}
+	}
+	if truncated && len(discoveryWarnings) == 0 {
+		discoveryWarnings = append(discoveryWarnings, fmt.Sprintf("Aura resource discovery stopped at %d resources; narrow by region", maxAuraSummaryResources))
 	}
 
 	// Fan-out: score every resource concurrently.
@@ -148,15 +290,17 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 				Region:       r.region,
 			})
 			if err != nil {
-				// Degrade gracefully: emit a red placeholder so the LLM knows something is wrong.
+				// Degrade gracefully: emit an explicitly unavailable placeholder.
 				reports[i] = models.AuraReport{
-					ResourceKind: r.kind,
-					ResourceName: r.name,
-					Region:       r.region,
-					Score:        0,
-					Band:         models.AuraBandRed,
-					Display:      fmt.Sprintf("🔴 %s: %s | Aura: N/A (fetch error: %v)", kindLabel(r.kind), r.name, err),
-					Reasons:      []string{fmt.Sprintf("Failed to fetch metrics: %v", err)},
+					ResourceKind:   r.kind,
+					ResourceName:   r.name,
+					Region:         r.region,
+					Score:          0,
+					Band:           models.AuraBandUnavailable,
+					Display:        fmt.Sprintf("⚪ %s: %s | Aura: N/A (fetch error: %v)", kindLabel(r.kind), r.name, err),
+					Reasons:        []string{fmt.Sprintf("Failed to fetch metrics: %v", err)},
+					CoverageStatus: "unavailable",
+					Warnings:       []string{err.Error()},
 				}
 				return nil // don't abort sibling goroutines
 			}
@@ -168,8 +312,14 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 		return models.ProjectAuraSummaryResponse{}, err
 	}
 
-	// Sort worst-first.
+	// Sort scored resources worst-first, with unavailable resources last. Their
+	// placeholder score is not a health score and must not rank as critical.
 	sort.Slice(reports, func(i, j int) bool {
+		iUnavailable := reports[i].CoverageStatus == "unavailable"
+		jUnavailable := reports[j].CoverageStatus == "unavailable"
+		if iUnavailable != jUnavailable {
+			return !iUnavailable
+		}
 		if reports[i].Score != reports[j].Score {
 			return reports[i].Score < reports[j].Score
 		}
@@ -184,9 +334,13 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 
 	// Build summary block.
 	var lines []string
-	var critical, warning, healthy int
+	var critical, warning, healthy, unavailable int
 	for _, r := range reports {
 		lines = append(lines, r.Display)
+		if r.CoverageStatus == "unavailable" {
+			unavailable++
+			continue
+		}
 		switch r.Band {
 		case models.AuraBandRed:
 			critical++
@@ -198,13 +352,16 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 	}
 
 	return models.ProjectAuraSummaryResponse{
-		ProjectID:     req.ProjectID,
-		Resources:     reports,
-		Summary:       strings.Join(lines, "\n"),
-		TotalCount:    len(reports),
-		CriticalCount: critical,
-		WarningCount:  warning,
-		HealthyCount:  healthy,
+		ProjectID:        req.ProjectID,
+		Resources:        reports,
+		Summary:          strings.Join(lines, "\n"),
+		TotalCount:       len(reports),
+		CriticalCount:    critical,
+		WarningCount:     warning,
+		HealthyCount:     healthy,
+		UnavailableCount: unavailable,
+		Truncated:        truncated,
+		Warnings:         discoveryWarnings,
 	}, nil
 }
 
@@ -213,15 +370,13 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 // ---------------------------------------------------------------------------
 
 func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, region string) ([]models.AuraHealthSignal, bool, error) {
-	baseFilter := fmt.Sprintf(`resource.labels.service_name = "%s" AND resource.labels.location = "%s"`, name, region)
+	baseFilter := fmt.Sprintf(`resource.labels.service_name = "%s" AND resource.labels.location = "%s"`, escapeMonitoringString(name), escapeMonitoringString(region))
 
 	var (
-		errCount5xx    float64
-		totalCount     float64
-		cpuUtil        float64
-		latencyP99     float64
-		recInsights    []recommenderInsight
-		quotaExhausted bool
+		errCount5xx, totalCount, cpuUtil, latencyP99   float64
+		errCountErr, totalCountErr, cpuErr, latencyErr error
+		recInsights                                    []recommenderInsight
+		quotaExhausted                                 bool
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -230,22 +385,14 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 		v, err := a.fetchRateMetric(gctx, projectID,
 			`run.googleapis.com/request_count`,
 			baseFilter+` AND metric.labels.response_code_class = "5xx"`, 60)
-		if err != nil {
-			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "error_count_5xx", "err", err)
-			return nil
-		}
-		errCount5xx = v
+		errCount5xx, errCountErr = v, err
 		return nil
 	})
 	g.Go(func() error {
 		v, err := a.fetchRateMetric(gctx, projectID,
 			`run.googleapis.com/request_count`,
 			baseFilter, 60)
-		if err != nil {
-			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "request_count_total", "err", err)
-			return nil
-		}
-		totalCount = v
+		totalCount, totalCountErr = v, err
 		return nil
 	})
 	g.Go(func() error {
@@ -254,22 +401,14 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 		v, err := a.fetchPercentileMetric(gctx, projectID,
 			`run.googleapis.com/container/cpu/utilizations`,
 			baseFilter, 50, 60)
-		if err != nil {
-			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "cpu_util", "err", err)
-			return nil
-		}
-		cpuUtil = v
+		cpuUtil, cpuErr = v, err
 		return nil
 	})
 	g.Go(func() error {
 		v, err := a.fetchPercentileMetric(gctx, projectID,
 			`run.googleapis.com/request_latencies`,
 			baseFilter, 99, 60)
-		if err != nil {
-			a.log.WarnContext(gctx, "aura: metric unavailable", "signal", "latency_p99", "err", err)
-			return nil
-		}
-		latencyP99 = v
+		latencyP99, latencyErr = v, err
 		return nil
 	})
 	g.Go(func() error {
@@ -295,21 +434,12 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 		return nil, false, err
 	}
 
-	errorRate := 0.0
-	if totalCount > 0 {
-		errorRate = errCount5xx / totalCount
-	}
-
-	errScore, errLabel := cloudRunSignalScore("error_rate", errorRate)
-	cpuScore, cpuLabel := cloudRunSignalScore("cpu_util", cpuUtil)
-	latScore, latLabel := cloudRunSignalScore("latency_p99", latencyP99)
-
+	errorRate, errorRateErr := ratioMetricValue(errCount5xx, errCountErr, totalCount, totalCountErr)
 	signals := []models.AuraHealthSignal{
-		{Name: "error_rate", Value: round4(errorRate), Score: errScore, Label: errLabel},
-		{Name: "cpu_util", Value: round4(cpuUtil), Score: cpuScore, Label: cpuLabel},
-		{Name: "latency_p99", Value: math.Round(latencyP99), Score: latScore, Label: latLabel},
-		// total_count is kept for efficiency calculation via a synthetic signal
-		{Name: "request_count_total", Value: round4(totalCount), Score: 100, Label: "info"},
+		metricHealthSignal("error_rate", round4(errorRate), errorRateErr, func(value float64) (int, string) { return cloudRunSignalScore("error_rate", value) }),
+		metricHealthSignal("cpu_util", round4(cpuUtil), cpuErr, func(value float64) (int, string) { return cloudRunSignalScore("cpu_util", value) }),
+		metricHealthSignal("latency_p99", math.Round(latencyP99), latencyErr, func(value float64) (int, string) { return cloudRunSignalScore("latency_p99", value) }),
+		metricHealthSignal("request_count_total", round4(totalCount), totalCountErr, func(float64) (int, string) { return 100, "info" }),
 	}
 	for _, ins := range recInsights {
 		signals = append(signals, recommenderSignal(ins))
@@ -320,35 +450,24 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instanceName, region string) ([]models.AuraHealthSignal, bool, error) {
 	// Cloud SQL instance IDs are formatted as "project:region:instance" in some APIs
 	// but resource.labels.database_id uses the plain instance name.
-	baseFilter := fmt.Sprintf(`resource.labels.database_id = "%s:%s"`, projectID, instanceName)
+	baseFilter := fmt.Sprintf(`resource.labels.database_id = "%s:%s"`, escapeMonitoringString(projectID), escapeMonitoringString(instanceName))
 
 	var cpuUtil, memUtil, diskUtil float64
-	var recInsights []recommenderInsight
-	var quotaExhausted bool
+	var cpuErr, memErr, diskErr error
+	var idleInsights, overprovisionedInsights []recommenderInsight
+	var idleQuotaExhausted, overprovisionedQuotaExhausted bool
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID, `cloudsql.googleapis.com/database/cpu/utilization`, baseFilter, 60)
-		if err != nil {
-			return err
-		}
-		cpuUtil = v
+		cpuUtil, cpuErr = a.fetchMeanMetric(gctx, projectID, `cloudsql.googleapis.com/database/cpu/utilization`, baseFilter, 60)
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID, `cloudsql.googleapis.com/database/memory/utilization`, baseFilter, 60)
-		if err != nil {
-			return err
-		}
-		memUtil = v
+		memUtil, memErr = a.fetchMeanMetric(gctx, projectID, `cloudsql.googleapis.com/database/memory/utilization`, baseFilter, 60)
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID, `cloudsql.googleapis.com/database/disk/utilization`, baseFilter, 60)
-		if err != nil {
-			return err
-		}
-		diskUtil = v
+		diskUtil, diskErr = a.fetchMeanMetric(gctx, projectID, `cloudsql.googleapis.com/database/disk/utilization`, baseFilter, 60)
 		return nil
 	})
 	// Fetch both Cloud SQL recommenders concurrently; results are merged.
@@ -361,13 +480,13 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 		if err != nil {
 			var qe *ports.RecommenderQuotaExhaustedError
 			if errors.As(err, &qe) {
-				quotaExhausted = true
+				idleQuotaExhausted = true
 				return nil
 			}
 			a.log.WarnContext(gctx, "aura: recommender unavailable for Cloud SQL idle", "instance", instanceName, "err", err)
 			return nil
 		}
-		recInsights = append(recInsights, idle...)
+		idleInsights = idle
 		return nil
 	})
 	g.Go(func() error {
@@ -379,151 +498,109 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 		if err != nil {
 			var qe *ports.RecommenderQuotaExhaustedError
 			if errors.As(err, &qe) {
-				quotaExhausted = true
+				overprovisionedQuotaExhausted = true
 				return nil
 			}
 			a.log.WarnContext(gctx, "aura: recommender unavailable for Cloud SQL overprovisioned", "instance", instanceName, "err", err)
 			return nil
 		}
-		recInsights = append(recInsights, op...)
+		overprovisionedInsights = op
 		return nil
 	})
 
-	if err := g.Wait(); err != nil {
-		return nil, false, err
-	}
-
-	cpuScore, cpuLabel := sqlSignalScore(cpuUtil)
-	memScore, memLabel := sqlSignalScore(memUtil)
-	diskScore, diskLabel := sqlSignalScore(diskUtil)
+	_ = g.Wait()
 
 	signals := []models.AuraHealthSignal{
-		{Name: "cpu_util", Value: round4(cpuUtil), Score: cpuScore, Label: cpuLabel},
-		{Name: "memory_util", Value: round4(memUtil), Score: memScore, Label: memLabel},
-		{Name: "disk_util", Value: round4(diskUtil), Score: diskScore, Label: diskLabel},
+		metricHealthSignal("cpu_util", round4(cpuUtil), cpuErr, sqlSignalScore),
+		metricHealthSignal("memory_util", round4(memUtil), memErr, sqlSignalScore),
+		metricHealthSignal("disk_util", round4(diskUtil), diskErr, sqlSignalScore),
 	}
+	recInsights := append(idleInsights, overprovisionedInsights...)
 	for _, ins := range recInsights {
 		signals = append(signals, recommenderSignal(ins))
 	}
-	return signals, quotaExhausted, nil
+	return signals, idleQuotaExhausted || overprovisionedQuotaExhausted, nil
 }
 
 func (a *gcpAdapter) fetchBigQuerySignals(ctx context.Context, projectID, datasetID string) ([]models.AuraHealthSignal, error) {
-	projectFilter := fmt.Sprintf(`resource.labels.project_id = "%s"`, projectID)
+	projectFilter := fmt.Sprintf(`resource.labels.project_id = "%s"`, escapeMonitoringString(projectID))
 
 	var failedJobs, totalJobs, slotsAlloc, storageBytes float64
+	var failedJobsErr, totalJobsErr, slotsErr, storageErr error
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		failedJobs, failedJobsErr = a.fetchMeanMetric(gctx, projectID,
 			`bigquery.googleapis.com/job_count`,
 			projectFilter+` AND metric.labels.status = "error"`, 60)
-		if err != nil {
-			return err
-		}
-		failedJobs = v
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		totalJobs, totalJobsErr = a.fetchMeanMetric(gctx, projectID,
 			`bigquery.googleapis.com/job_count`,
 			projectFilter, 60)
-		if err != nil {
-			return err
-		}
-		totalJobs = v
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		slotsAlloc, slotsErr = a.fetchMeanMetric(gctx, projectID,
 			`bigquery.googleapis.com/slots/allocated_for_project`,
 			projectFilter, 60)
-		if err != nil {
-			return err
-		}
-		slotsAlloc = v
 		return nil
 	})
 	g.Go(func() error {
-		dsFilter := fmt.Sprintf(`resource.labels.dataset_id = "%s"`, datasetID)
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		dsFilter := fmt.Sprintf(`resource.labels.dataset_id = "%s"`, escapeMonitoringString(datasetID))
+		storageBytes, storageErr = a.fetchMeanMetric(gctx, projectID,
 			`bigquery.googleapis.com/storage/billable_bytes_stored`,
 			dsFilter, 60)
-		if err != nil {
-			return err
-		}
-		storageBytes = v
 		return nil
 	})
 
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
+	_ = g.Wait()
 
-	failRate := 0.0
-	if totalJobs > 0 {
-		failRate = failedJobs / totalJobs
-	}
-
-	failScore, failLabel := bqSignalScore("job_failure_rate", failRate)
-	slotScore, slotLabel := bqSignalScore("slot_utilization", slotsAlloc)
-	storScore, storLabel := bqSignalScore("storage_bytes", storageBytes)
+	failRate, failRateErr := ratioMetricValue(failedJobs, failedJobsErr, totalJobs, totalJobsErr)
 
 	return []models.AuraHealthSignal{
-		{Name: "job_failure_rate", Value: round4(failRate), Score: failScore, Label: failLabel},
-		{Name: "slot_utilization", Value: round4(slotsAlloc), Score: slotScore, Label: slotLabel},
-		{Name: "storage_bytes", Value: storageBytes, Score: storScore, Label: storLabel},
+		metricHealthSignal("job_failure_rate", round4(failRate), failRateErr, func(value float64) (int, string) { return bqSignalScore("job_failure_rate", value) }),
+		metricHealthSignal("slot_utilization", round4(slotsAlloc), slotsErr, func(value float64) (int, string) { return bqSignalScore("slot_utilization", value) }),
+		metricHealthSignal("storage_bytes", storageBytes, storageErr, func(value float64) (int, string) { return bqSignalScore("storage_bytes", value) }),
 	}, nil
 }
 
 func (a *gcpAdapter) fetchGKESignals(ctx context.Context, projectID, clusterName, location string) ([]models.AuraHealthSignal, error) {
-	clusterFilter := fmt.Sprintf(`resource.labels.cluster_name = "%s" AND resource.labels.location = "%s"`, clusterName, location)
+	clusterFilter := fmt.Sprintf(`resource.labels.cluster_name = "%s" AND resource.labels.location = "%s"`, escapeMonitoringString(clusterName), escapeMonitoringString(location))
 
 	var nodeCPU, nodeMem, restartRate, ctrlHealth float64
+	var nodeCPUErr, nodeMemErr, restartErr, ctrlErr error
 
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		nodeCPU, nodeCPUErr = a.fetchMeanMetric(gctx, projectID,
 			`kubernetes.io/node/cpu/allocatable_utilization`,
 			clusterFilter, 60)
-		if err != nil {
-			return err
-		}
-		nodeCPU = v
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchMeanMetric(gctx, projectID,
+		nodeMem, nodeMemErr = a.fetchMeanMetric(gctx, projectID,
 			`kubernetes.io/node/memory/allocatable_utilization`,
 			clusterFilter, 60)
-		if err != nil {
-			return err
-		}
-		nodeMem = v
 		return nil
 	})
 	g.Go(func() error {
-		v, err := a.fetchRateMetric(gctx, projectID,
+		restartRate, restartErr = a.fetchRateMetric(gctx, projectID,
 			`kubernetes.io/container/restart_count`,
 			clusterFilter, 60)
-		if err != nil {
-			return err
-		}
-		restartRate = v
 		return nil
 	})
 	g.Go(func() error {
 		if a.clusterMgr == nil {
-			ctrlHealth = 1.0 // graceful: no client = assume healthy
+			ctrlErr = fmt.Errorf("GKE control-plane client is unavailable")
 			return nil
 		}
 		clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", projectID, location, clusterName)
 		c, err := a.clusterMgr.GetCluster(gctx, &containerpb.GetClusterRequest{Name: clusterPath})
 		if err != nil {
-			// Non-fatal: treat as unknown health rather than failing the whole score.
-			a.log.WarnContext(gctx, "aura: GKE control-plane health check failed", "cluster", clusterName, "err", err)
-			ctrlHealth = 1.0
+			ctrlErr = fmt.Errorf("GKE control-plane health check: %w", err)
 			return nil
 		}
 		switch c.Status {
@@ -537,34 +614,27 @@ func (a *gcpAdapter) fetchGKESignals(ctx context.Context, projectID, clusterName
 		return nil
 	})
 
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-
-	cpuScore, cpuLabel := gkeSignalScore("node_cpu_util", nodeCPU)
-	memScore, memLabel := gkeSignalScore("node_mem_util", nodeMem)
-	restartScore, restartLabel := gkeSignalScore("pod_restart_rate", restartRate)
-	ctrlScore, ctrlLabel := gkeSignalScore("control_plane_health", ctrlHealth)
+	_ = g.Wait()
 
 	return []models.AuraHealthSignal{
-		{Name: "node_cpu_util", Value: round4(nodeCPU), Score: cpuScore, Label: cpuLabel},
-		{Name: "node_mem_util", Value: round4(nodeMem), Score: memScore, Label: memLabel},
-		{Name: "pod_restart_rate", Value: round4(restartRate), Score: restartScore, Label: restartLabel},
-		{Name: "control_plane_health", Value: ctrlHealth, Score: ctrlScore, Label: ctrlLabel},
+		metricHealthSignal("node_cpu_util", round4(nodeCPU), nodeCPUErr, func(value float64) (int, string) { return gkeSignalScore("node_cpu_util", value) }),
+		metricHealthSignal("node_mem_util", round4(nodeMem), nodeMemErr, func(value float64) (int, string) { return gkeSignalScore("node_mem_util", value) }),
+		metricHealthSignal("pod_restart_rate", round4(restartRate), restartErr, func(value float64) (int, string) { return gkeSignalScore("pod_restart_rate", value) }),
+		metricHealthSignal("control_plane_health", ctrlHealth, ctrlErr, func(value float64) (int, string) { return gkeSignalScore("control_plane_health", value) }),
 	}, nil
 }
 
 // fetchGKESignalsRich fans out 5 goroutines: the 3 metric fetches from
 // fetchGKESignals, plus GetCluster (for node-pool autoscaling details) and
-// GetServerConfig (for release-channel version drift). Both cluster API calls
-// are non-fatal — on error they log a warning and fall back to safe defaults.
+// GetServerConfig (for release-channel version drift). A missing input makes the
+// richer audit unavailable so callers do not receive a falsely healthy score.
 func (a *gcpAdapter) fetchGKESignalsRich(ctx context.Context, projectID, clusterName, location string) (
 	[]models.AuraHealthSignal, []models.NodePoolAudit, models.GKEVersionDrift, error,
 ) {
-	clusterFilter := fmt.Sprintf(`resource.labels.cluster_name = "%s" AND resource.labels.location = "%s"`, clusterName, location)
+	clusterFilter := fmt.Sprintf(`resource.labels.cluster_name = "%s" AND resource.labels.location = "%s"`, escapeMonitoringString(clusterName), escapeMonitoringString(location))
 
 	var nodeCPU, nodeMem, restartRate float64
-	ctrlHealth := 1.0
+	ctrlHealth := 0.0
 	var pools []models.NodePoolAudit
 	var channelName, currentVersion string
 	var serverChannels map[string]string // channel name → latest default version
@@ -597,13 +667,12 @@ func (a *gcpAdapter) fetchGKESignalsRich(ctx context.Context, projectID, cluster
 	})
 	g.Go(func() error {
 		if a.clusterMgr == nil {
-			return nil
+			return fmt.Errorf("GKE control-plane client is unavailable")
 		}
 		clusterPath := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", projectID, location, clusterName)
 		c, err := a.clusterMgr.GetCluster(gctx, &containerpb.GetClusterRequest{Name: clusterPath})
 		if err != nil {
-			a.log.WarnContext(gctx, "aura: GKE GetCluster failed in rich fetch", "cluster", clusterName, "err", err)
-			return nil
+			return fmt.Errorf("GKE GetCluster: %w", err)
 		}
 		switch c.Status {
 		case containerpb.Cluster_RUNNING:
@@ -640,14 +709,13 @@ func (a *gcpAdapter) fetchGKESignalsRich(ctx context.Context, projectID, cluster
 	})
 	g.Go(func() error {
 		if a.clusterMgr == nil {
-			return nil
+			return fmt.Errorf("GKE server-config client is unavailable")
 		}
 		cfg, err := a.clusterMgr.GetServerConfig(gctx, &containerpb.GetServerConfigRequest{
 			Name: fmt.Sprintf("projects/%s/locations/%s", projectID, location),
 		})
 		if err != nil {
-			a.log.WarnContext(gctx, "aura: GKE GetServerConfig failed", "location", location, "err", err)
-			return nil
+			return fmt.Errorf("GKE GetServerConfig: %w", err)
 		}
 		m := make(map[string]string, len(cfg.Channels))
 		for _, ch := range cfg.Channels {
@@ -710,6 +778,12 @@ func (a *gcpAdapter) fetchGKESignalsRich(ctx context.Context, projectID, cluster
 // GetGKEAuraScore returns a rich GKE Aura Score including node-pool autoscaling
 // audit and version-drift analysis. Results are not cached (use for fresh deep-dives).
 func (a *gcpAdapter) GetGKEAuraScore(ctx context.Context, req models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error) {
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	if err := validateAuraRequest(models.GetAuraScoreRequest{
+		ProjectID: req.ProjectID, ResourceKind: models.ResourceKindGKE, ResourceName: req.ClusterName, Region: req.Location,
+	}); err != nil {
+		return models.GKEAuraReport{}, err
+	}
 	if err := a.rateWait(ctx, "aura.GetGKEAuraScore"); err != nil {
 		return models.GKEAuraReport{}, err
 	}
@@ -854,7 +928,7 @@ func (a *gcpAdapter) fetchMetricPoint(ctx context.Context, projectID, metricType
 	now := time.Now().UTC()
 	start := now.Add(-time.Duration(lookbackMinutes) * time.Minute)
 
-	fullFilter := fmt.Sprintf(`metric.type = "%s"`, metricType)
+	fullFilter := fmt.Sprintf(`metric.type = "%s"`, escapeMonitoringString(metricType))
 	if filter != "" {
 		fullFilter += " AND " + filter
 	}
@@ -877,13 +951,13 @@ func (a *gcpAdapter) fetchMetricPoint(ctx context.Context, projectID, metricType
 	it := a.metric.ListTimeSeries(ctx, req)
 	ts, err := it.Next()
 	if err == iterator.Done {
-		return 0, nil // no data = metric not emitted = resource likely idle
+		return 0, fmt.Errorf("%w: %s", errAuraMetricNoData, metricType)
 	}
 	if err != nil {
 		return 0, err
 	}
 	if len(ts.Points) == 0 {
-		return 0, nil
+		return 0, fmt.Errorf("%w: %s", errAuraMetricNoData, metricType)
 	}
 	return extractPointValue(ts.Points[0]), nil
 }
@@ -915,13 +989,16 @@ func (a *gcpAdapter) listSQLInstances(ctx context.Context, projectID string) ([]
 	it := a.metric.ListTimeSeries(ctx, req)
 	seen := map[string]bool{}
 	var instances []sqlInstance
-	for {
+	for scanned := 0; ; scanned++ {
 		ts, err := it.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
 			return nil, err
+		}
+		if scanned >= maxUnpagedInventoryItems {
+			return instances, errInventoryLimitReached
 		}
 		if ts.Resource == nil {
 			continue
@@ -959,13 +1036,16 @@ func (a *gcpAdapter) listBigQueryDatasets(ctx context.Context, projectID string)
 	it := a.metric.ListTimeSeries(ctx, req)
 	seen := map[string]bool{}
 	var datasets []string
-	for {
+	for scanned := 0; ; scanned++ {
 		ts, err := it.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
 			return nil, err
+		}
+		if scanned >= maxUnpagedInventoryItems {
+			return datasets, errInventoryLimitReached
 		}
 		if ts.Resource == nil {
 			continue
@@ -986,11 +1066,50 @@ func (a *gcpAdapter) listBigQueryDatasets(ctx context.Context, projectID string)
 
 // calculateAura computes the composite AuraReport from raw signals.
 func calculateAura(kind models.ResourceKind, name, region string, signals []models.AuraHealthSignal) models.AuraReport {
-	healthScore, efficiencyScore := weightedScores(kind, signals)
+	expected := expectedAuraSignals(kind)
+	observedSignals := make([]models.AuraHealthSignal, 0, len(signals))
+	warnings := make([]string, 0)
+	observedCore := 0
+	expectedSet := make(map[string]bool, len(expected))
+	for _, signalName := range expected {
+		expectedSet[signalName] = true
+	}
+	for _, signal := range signals {
+		if signalObserved(signal) {
+			observedSignals = append(observedSignals, signal)
+			if expectedSet[signal.Name] {
+				observedCore++
+			}
+			continue
+		}
+		if expectedSet[signal.Name] {
+			warnings = append(warnings, fmt.Sprintf("%s is %s: %s", signal.Name, signal.Availability, signal.Message))
+		}
+	}
+	coverageStatus := "complete"
+	if observedCore == 0 && len(expected) > 0 {
+		coverageStatus = "unavailable"
+	} else if observedCore < len(expected) {
+		coverageStatus = "partial"
+	}
+	healthScore, efficiencyScore := weightedScores(kind, observedSignals)
 	score := int(math.Round(float64(healthScore)*0.6 + float64(efficiencyScore)*0.4))
 	band := auraBand(score)
-	label := auraLabel(score, signals, kind)
-	reasons := buildReasons(kind, signals)
+	label := auraLabel(score, observedSignals, kind)
+	reasons := buildReasons(kind, observedSignals)
+	if coverageStatus == "partial" {
+		reasons = append([]string{fmt.Sprintf("Aura score uses %d of %d expected signals; review coverage warnings before acting", observedCore, len(expected))}, reasons...)
+	}
+	display := buildDisplay(kind, name, score, label, reasons)
+	if coverageStatus == "partial" {
+		display += fmt.Sprintf(" [PARTIAL: %d/%d signals]", observedCore, len(expected))
+	}
+	if coverageStatus == "unavailable" {
+		healthScore, efficiencyScore, score = 0, 0, 0
+		band = models.AuraBandUnavailable
+		display = fmt.Sprintf("⚪ %s: %s | Aura: N/A (telemetry unavailable)", kindLabel(kind), name)
+		reasons = []string{"No expected health signals were observed; do not interpret missing telemetry as a healthy zero."}
+	}
 
 	return models.AuraReport{
 		ResourceKind:    kind,
@@ -998,11 +1117,15 @@ func calculateAura(kind models.ResourceKind, name, region string, signals []mode
 		Region:          region,
 		Score:           score,
 		Band:            band,
-		Display:         buildDisplay(kind, name, score, label, reasons),
+		Display:         display,
 		HealthScore:     healthScore,
 		EfficiencyScore: efficiencyScore,
 		HealthSignals:   signals,
 		Reasons:         reasons,
+		CoverageStatus:  coverageStatus,
+		SignalsObserved: observedCore,
+		SignalsExpected: len(expected),
+		Warnings:        warnings,
 	}
 }
 
@@ -1012,77 +1135,52 @@ func weightedScores(kind models.ResourceKind, signals []models.AuraHealthSignal)
 
 	switch kind {
 	case models.ResourceKindCloudRun:
-		errScore := byName["error_rate"]
-		cpuScore := byName["cpu_util"]
-		latScore := byName["latency_p99"]
-		health := int(math.Round(float64(errScore)*0.5 + float64(cpuScore)*0.3 + float64(latScore)*0.2))
+		health := weightedAvailableScore(byName, map[string]float64{"error_rate": 0.5, "cpu_util": 0.3, "latency_p99": 0.2})
 
 		// Efficiency: start with metric-based estimate, then let Recommender override.
 		eff := 90
 		cpuVal := signalValue(signals, "cpu_util")
 		totalReq := signalValue(signals, "request_count_total")
-		if cpuVal < 0.05 && totalReq > 0 {
+		if hasSignal(signals, "cpu_util") && hasSignal(signals, "request_count_total") && cpuVal < 0.05 && totalReq > 0 {
 			eff = 40
 		}
 		eff = applyRecommenderEfficiency(byName, eff)
 		return clamp(health), clamp(eff)
 
 	case models.ResourceKindCloudSQL:
-		cpuScore := byName["cpu_util"]
-		memScore := byName["memory_util"]
-		diskScore := byName["disk_util"]
-		health := int(math.Round(float64(cpuScore)*0.4 + float64(memScore)*0.3 + float64(diskScore)*0.3))
+		health := weightedAvailableScore(byName, map[string]float64{"cpu_util": 0.4, "memory_util": 0.3, "disk_util": 0.3})
 
 		eff := 90
-		if signalValue(signals, "cpu_util") < 0.10 {
+		if hasSignal(signals, "cpu_util") && signalValue(signals, "cpu_util") < 0.10 {
 			eff = 30
-		} else if signalValue(signals, "disk_util") > 0.80 {
+		} else if hasSignal(signals, "disk_util") && signalValue(signals, "disk_util") > 0.80 {
 			eff = 55
 		}
 		eff = applyRecommenderEfficiency(byName, eff)
 		return clamp(health), clamp(eff)
 
 	case models.ResourceKindBigQuery:
-		failScore := byName["job_failure_rate"]
-		slotScore := byName["slot_utilization"]
-		storScore := byName["storage_bytes"]
-		health := int(math.Round(float64(failScore)*0.6 + float64(slotScore)*0.2 + float64(storScore)*0.2))
+		health := weightedAvailableScore(byName, map[string]float64{"job_failure_rate": 0.6, "slot_utilization": 0.2, "storage_bytes": 0.2})
 
 		eff := 90
-		if signalValue(signals, "slot_utilization") < 10 { // < 10 slots ≈ idle
+		if hasSignal(signals, "slot_utilization") && signalValue(signals, "slot_utilization") < 10 { // < 10 slots ≈ idle
 			eff = 50
 		}
 		eff = applyRecommenderEfficiency(byName, eff)
 		return clamp(health), clamp(eff)
 
 	case models.ResourceKindGKE:
-		cpuScore := byName["node_cpu_util"]
-		memScore := byName["node_mem_util"]
-		restartScore := byName["pod_restart_rate"]
-		ctrlScore := byName["control_plane_health"]
-
 		var health int
 		if driftScore, ok := byName["version_drift"]; ok {
-			// Rich path (5 health signals from fetchGKESignalsRich).
-			health = int(math.Round(
-				float64(cpuScore)*0.25 +
-					float64(memScore)*0.25 +
-					float64(restartScore)*0.20 +
-					float64(ctrlScore)*0.20 +
-					float64(driftScore)*0.10,
-			))
+			_ = driftScore
+			health = weightedAvailableScore(byName, map[string]float64{"node_cpu_util": 0.25, "node_mem_util": 0.25, "pod_restart_rate": 0.20, "control_plane_health": 0.20, "version_drift": 0.10})
 		} else {
-			// Legacy 4-signal path (fetchGKESignals via generic GetAuraScore).
-			health = int(math.Round(
-				float64(cpuScore)*0.35 +
-					float64(memScore)*0.35 +
-					float64(restartScore)*0.20 +
-					float64(ctrlScore)*0.10,
-			))
+			health = weightedAvailableScore(byName, map[string]float64{"node_cpu_util": 0.35, "node_mem_util": 0.35, "pod_restart_rate": 0.20, "control_plane_health": 0.10})
 		}
 
 		eff := 90
-		if signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
+		if hasSignal(signals, "node_cpu_util") && hasSignal(signals, "node_mem_util") &&
+			signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
 			eff = 40 // cluster is idle / over-provisioned
 		}
 		if _, ok := byName["autoscaling_disabled"]; ok {
@@ -1094,24 +1192,28 @@ func weightedScores(kind models.ResourceKind, signals []models.AuraHealthSignal)
 		return clamp(health), clamp(eff)
 
 	case models.ResourceKindGCS:
-		papScore := byName["public_access_prevention"]
-		ublaScore := byName["uniform_bucket_level_access"]
-		verScore := byName["versioning"]
-		lcScore := byName["lifecycle_policy"]
-		clsScore := byName["storage_class_fit"]
-
-		// Health = security posture: PAP 45%, UBLA 35%, versioning 20%.
-		health := int(math.Round(
-			float64(papScore)*0.45 + float64(ublaScore)*0.35 + float64(verScore)*0.20,
-		))
-		// Efficiency = cost optimisation: lifecycle 60%, storage class fit 40%.
-		eff := int(math.Round(
-			float64(lcScore)*0.60 + float64(clsScore)*0.40,
-		))
+		health := weightedAvailableScore(byName, map[string]float64{"public_access_prevention": 0.45, "uniform_bucket_level_access": 0.35, "versioning": 0.20})
+		eff := weightedAvailableScore(byName, map[string]float64{"lifecycle_policy": 0.60, "storage_class_fit": 0.40})
 		return clamp(health), clamp(eff)
 	}
 
 	return 100, 100
+}
+
+func weightedAvailableScore(scores map[string]int, weights map[string]float64) int {
+	weighted, totalWeight := 0.0, 0.0
+	for name, weight := range weights {
+		score, ok := scores[name]
+		if !ok {
+			continue
+		}
+		weighted += float64(score) * weight
+		totalWeight += weight
+	}
+	if totalWeight == 0 {
+		return 0
+	}
+	return int(math.Round(weighted / totalWeight))
 }
 
 // applyRecommenderEfficiency overrides the metric-based efficiency score when
@@ -1250,6 +1352,8 @@ func auraEmoji(band models.AuraBand) string {
 		return "🟢"
 	case models.AuraBandYellow:
 		return "🟡"
+	case models.AuraBandUnavailable:
+		return "⚪"
 	default:
 		return "🔴"
 	}
@@ -1287,7 +1391,7 @@ func auraLabel(score int, signals []models.AuraHealthSignal, kind models.Resourc
 
 	// GKE-specific labels.
 	if kind == models.ResourceKindGKE {
-		if signalValue(signals, "control_plane_health") < 0.5 {
+		if controlPlane, ok := signalValueObserved(signals, "control_plane_health"); ok && controlPlane < 0.5 {
 			return "Control Plane Error"
 		}
 		if hasSignal(signals, "pod_restart_rate") {
@@ -1297,12 +1401,16 @@ func auraLabel(score int, signals []models.AuraHealthSignal, kind models.Resourc
 		}
 		switch band {
 		case models.AuraBandGreen:
-			if signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
+			cpu, cpuOK := signalValueObserved(signals, "node_cpu_util")
+			mem, memOK := signalValueObserved(signals, "node_mem_util")
+			if cpuOK && memOK && cpu < 0.10 && mem < 0.10 {
 				return "Healthy, Over-provisioned"
 			}
 			return "Healthy Cluster"
 		case models.AuraBandYellow:
-			if signalValue(signals, "node_cpu_util") < 0.10 && signalValue(signals, "node_mem_util") < 0.10 {
+			cpu, cpuOK := signalValueObserved(signals, "node_cpu_util")
+			mem, memOK := signalValueObserved(signals, "node_mem_util")
+			if cpuOK && memOK && cpu < 0.10 && mem < 0.10 {
 				return "Idle Cluster, Consider Downsize"
 			}
 			return "Cluster Under Pressure"
@@ -1313,18 +1421,18 @@ func auraLabel(score int, signals []models.AuraHealthSignal, kind models.Resourc
 
 	switch band {
 	case models.AuraBandGreen:
-		if kind == models.ResourceKindCloudRun && signalValue(signals, "cpu_util") < 0.05 {
+		if cpu, ok := signalValueObserved(signals, "cpu_util"); kind == models.ResourceKindCloudRun && ok && cpu < 0.05 {
 			return "Healthy, Over-provisioned"
 		}
 		return "Healthy & Scaled"
 	case models.AuraBandYellow:
-		if kind == models.ResourceKindCloudRun && signalValue(signals, "cpu_util") < 0.05 {
+		if cpu, ok := signalValueObserved(signals, "cpu_util"); kind == models.ResourceKindCloudRun && ok && cpu < 0.05 {
 			return "Healthy, Over-provisioned"
 		}
-		if kind == models.ResourceKindCloudSQL && signalValue(signals, "cpu_util") < 0.10 {
+		if cpu, ok := signalValueObserved(signals, "cpu_util"); kind == models.ResourceKindCloudSQL && ok && cpu < 0.10 {
 			return "Idle, Consider Downsize"
 		}
-		if kind == models.ResourceKindCloudSQL && signalValue(signals, "disk_util") > 0.80 {
+		if disk, ok := signalValueObserved(signals, "disk_util"); kind == models.ResourceKindCloudSQL && ok && disk > 0.80 {
 			return "Healthy, but High Disk Cost"
 		}
 		return "Degraded"
@@ -1400,66 +1508,69 @@ func buildReasons(kind models.ResourceKind, signals []models.AuraHealthSignal) [
 
 	switch kind {
 	case models.ResourceKindCloudRun:
-		if v := signalValue(signals, "error_rate"); v >= 0.05 {
+		if v, ok := signalValueObserved(signals, "error_rate"); ok && v >= 0.05 {
 			reasons = append(reasons, fmt.Sprintf("Error rate at %.1f%% — investigate recent deployments or upstream dependencies", v*100))
-		} else if v >= 0.01 {
+		} else if ok && v >= 0.01 {
 			reasons = append(reasons, fmt.Sprintf("Error rate elevated at %.1f%% — monitor for trends", v*100))
 		}
-		if v := signalValue(signals, "cpu_util"); v < 0.05 && signalValue(signals, "request_count_total") > 0 {
-			reasons = append(reasons, fmt.Sprintf("CPU at %.0f%% — consider min-instances=0 or a smaller instance class to reduce cost", v*100))
-		} else if v >= 0.90 {
-			reasons = append(reasons, fmt.Sprintf("CPU at %.0f%% — service is CPU-saturated; scale up or optimise hot paths", v*100))
+		if v, ok := signalValueObserved(signals, "cpu_util"); ok {
+			requestCount, requestCountOK := signalValueObserved(signals, "request_count_total")
+			if v < 0.05 && requestCountOK && requestCount > 0 {
+				reasons = append(reasons, fmt.Sprintf("CPU at %.0f%% — consider min-instances=0 or a smaller instance class to reduce cost", v*100))
+			} else if v >= 0.90 {
+				reasons = append(reasons, fmt.Sprintf("CPU at %.0f%% — service is CPU-saturated; scale up or optimise hot paths", v*100))
+			}
 		}
-		if v := signalValue(signals, "latency_p99"); v >= 3000 {
+		if v, ok := signalValueObserved(signals, "latency_p99"); ok && v >= 3000 {
 			reasons = append(reasons, fmt.Sprintf("p99 latency at %.0fms — investigate slow requests or cold starts", v))
-		} else if v >= 1000 {
+		} else if ok && v >= 1000 {
 			reasons = append(reasons, fmt.Sprintf("p99 latency at %.0fms — consider caching or startup optimisation", v))
 		}
 
 	case models.ResourceKindCloudSQL:
-		if v := signalValue(signals, "cpu_util"); v < 0.10 {
+		if v, ok := signalValueObserved(signals, "cpu_util"); ok && v < 0.10 {
 			reasons = append(reasons, fmt.Sprintf("CPU at %.0f%% — instance may be idle; consider a smaller machine type", v*100))
-		} else if v >= 0.95 {
+		} else if ok && v >= 0.95 {
 			reasons = append(reasons, fmt.Sprintf("CPU at %.0f%% — database is CPU-saturated; optimise queries or upgrade tier", v*100))
 		}
-		if v := signalValue(signals, "disk_util"); v >= 0.80 {
+		if v, ok := signalValueObserved(signals, "disk_util"); ok && v >= 0.80 {
 			reasons = append(reasons, fmt.Sprintf("Disk at %.0f%% — increase storage capacity or enable auto-storage-increase", v*100))
 		}
-		if v := signalValue(signals, "memory_util"); v >= 0.90 {
+		if v, ok := signalValueObserved(signals, "memory_util"); ok && v >= 0.90 {
 			reasons = append(reasons, fmt.Sprintf("Memory at %.0f%% — consider increasing RAM or tuning buffer pool", v*100))
 		}
 
 	case models.ResourceKindBigQuery:
-		if v := signalValue(signals, "job_failure_rate"); v >= 0.05 {
+		if v, ok := signalValueObserved(signals, "job_failure_rate"); ok && v >= 0.05 {
 			reasons = append(reasons, fmt.Sprintf("Job failure rate at %.1f%% — review INFORMATION_SCHEMA.JOBS for error details", v*100))
 		}
-		if v := signalValue(signals, "slot_utilization"); v < 10 {
+		if v, ok := signalValueObserved(signals, "slot_utilization"); ok && v < 10 {
 			reasons = append(reasons, "Slot utilization near zero — consider on-demand pricing if jobs are infrequent")
 		}
-		if v := signalValue(signals, "storage_bytes"); v > 1<<40 { // > 1 TB
+		if v, ok := signalValueObserved(signals, "storage_bytes"); ok && v > 1<<40 { // > 1 TB
 			reasons = append(reasons, fmt.Sprintf("Storage at %.1f TB — review table expiration policies and partitioning strategy", v/float64(1<<40)))
 		}
 
 	case models.ResourceKindGKE:
-		if signalValue(signals, "control_plane_health") < 0.5 {
+		if controlPlane, ok := signalValueObserved(signals, "control_plane_health"); ok && controlPlane < 0.5 {
 			reasons = append(reasons, "Control plane is in an error or degraded state — check GKE console for active conditions")
-		} else if signalValue(signals, "control_plane_health") < 1.0 {
+		} else if ok && controlPlane < 1.0 {
 			reasons = append(reasons, "Control plane is reconciling — avoid cluster mutations until it returns to RUNNING")
 		}
-		if v := signalValue(signals, "pod_restart_rate"); v >= 0.005 {
+		if v, ok := signalValueObserved(signals, "pod_restart_rate"); ok && v >= 0.005 {
 			reasons = append(reasons, fmt.Sprintf("Container restart rate at %.4f/s — investigate crashing pods with `kubectl get pods --all-namespaces`", v))
-		} else if v > 0 {
+		} else if ok && v > 0 {
 			reasons = append(reasons, fmt.Sprintf("Container restart rate at %.4f/s — monitor for increasing instability", v))
 		}
-		cpu := signalValue(signals, "node_cpu_util")
-		mem := signalValue(signals, "node_mem_util")
-		if cpu >= 0.90 {
+		cpu, cpuOK := signalValueObserved(signals, "node_cpu_util")
+		mem, memOK := signalValueObserved(signals, "node_mem_util")
+		if cpuOK && cpu >= 0.90 {
 			reasons = append(reasons, fmt.Sprintf("Node CPU at %.0f%% — cluster is CPU-saturated; add node pool capacity or upgrade machine type", cpu*100))
 		}
-		if mem >= 0.90 {
+		if memOK && mem >= 0.90 {
 			reasons = append(reasons, fmt.Sprintf("Node memory at %.0f%% — cluster is memory-saturated; add nodes or use larger machine type", mem*100))
 		}
-		if cpu < 0.10 && mem < 0.10 {
+		if cpuOK && memOK && cpu < 0.10 && mem < 0.10 {
 			reasons = append(reasons, fmt.Sprintf("Node CPU %.0f%% and memory %.0f%% — cluster is idle; consider scaling down node pools to reduce cost", cpu*100, mem*100))
 		}
 		if hasSignal(signals, "autoscaling_disabled") {
@@ -1473,22 +1584,22 @@ func buildReasons(kind models.ResourceKind, signals []models.AuraHealthSignal) [
 		}
 
 	case models.ResourceKindGCS:
-		if signalValue(signals, "public_access_prevention") < 1.0 {
+		if v, ok := signalValueObserved(signals, "public_access_prevention"); ok && v < 1.0 {
 			reasons = append(reasons, "Public access prevention is not enforced — set publicAccessPrevention to 'enforced' to block all public ACLs")
 		}
-		if signalValue(signals, "uniform_bucket_level_access") < 1.0 {
+		if v, ok := signalValueObserved(signals, "uniform_bucket_level_access"); ok && v < 1.0 {
 			reasons = append(reasons, "Uniform bucket-level access is disabled — legacy ACLs may bypass IAM policies; enable UBLA for uniform access control")
 		}
-		if signalValue(signals, "lifecycle_policy") == 0 {
+		if v, ok := signalValueObserved(signals, "lifecycle_policy"); ok && v == 0 {
 			reasons = append(reasons, "No lifecycle management rules — add transition rules to NEARLINE/COLDLINE/ARCHIVE to reduce long-term storage costs")
 		}
-		if signalValue(signals, "versioning") < 1.0 {
+		if v, ok := signalValueObserved(signals, "versioning"); ok && v < 1.0 {
 			reasons = append(reasons, "Object versioning is disabled — enable it to protect against accidental deletes and overwrites")
 		}
 	}
 
 	if len(reasons) == 0 {
-		reasons = []string{"All signals nominal — no immediate action required"}
+		reasons = []string{"All observed signals nominal — no immediate action required"}
 	}
 	return reasons
 }
@@ -1529,6 +1640,15 @@ func signalValue(signals []models.AuraHealthSignal, name string) float64 {
 		}
 	}
 	return 0
+}
+
+func signalValueObserved(signals []models.AuraHealthSignal, name string) (float64, bool) {
+	for _, signal := range signals {
+		if signal.Name == name && signalObserved(signal) {
+			return signal.Value, true
+		}
+	}
+	return 0, false
 }
 
 func hasSignal(signals []models.AuraHealthSignal, name string) bool {
@@ -1618,6 +1738,12 @@ func (a *gcpAdapter) fetchGCSSignals(ctx context.Context, projectID, bucketName 
 
 // GetGCSAuraScore returns a security- and cost-focused Aura Score for a single GCS bucket.
 func (a *gcpAdapter) GetGCSAuraScore(ctx context.Context, req models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error) {
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	if err := validateAuraRequest(models.GetAuraScoreRequest{
+		ProjectID: req.ProjectID, ResourceKind: models.ResourceKindGCS, ResourceName: req.BucketName,
+	}); err != nil {
+		return models.GCSAuraReport{}, err
+	}
 	if err := a.rateWait(ctx, "aura.GetGCSAuraScore"); err != nil {
 		return models.GCSAuraReport{}, err
 	}

@@ -22,6 +22,8 @@ var recommenderIDs = []string{
 	recommenderIDCloudSQLOverpro,
 }
 
+const maxRecommendationExportRows = 10000
+
 // recommendationRow is the BigQuery row schema for exported recommendations.
 type recommendationRow struct {
 	ResourceName      string    `bigquery:"resource_name"`
@@ -80,8 +82,9 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 	for _, recID := range recommenderIDs {
 		parent := fmt.Sprintf("projects/%s/locations/-/recommenders/%s", projectID, recID)
 		it := a.rec.ListRecommendations(ctx, &recommenderpb.ListRecommendationsRequest{
-			Parent: parent,
-			Filter: `stateInfo.state = "ACTIVE"`,
+			Parent:   parent,
+			Filter:   `stateInfo.state = "ACTIVE"`,
+			PageSize: maxUnpagedInventoryItems,
 		})
 		for {
 			rec, err := it.Next()
@@ -90,6 +93,9 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 			}
 			if err != nil {
 				return models.ExportRecommendationsToBQResponse{}, wrapGCPError("recommender.ExportRecommendationsToBQ", err)
+			}
+			if len(rows) >= maxRecommendationExportRows {
+				return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("recommender.ExportRecommendationsToBQ: active recommendation count exceeded the %d-row safety limit", maxRecommendationExportRows)
 			}
 			priority := "UNSPECIFIED"
 			if rec.Priority != recommenderpb.Recommendation_PRIORITY_UNSPECIFIED {

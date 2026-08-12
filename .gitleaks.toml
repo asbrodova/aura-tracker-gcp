@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic Google API key used by the anonymizer regression test"
+condition = "AND"
+regexTarget = "secret"
+regexes = ['''AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsH[I]''']
+paths = ['''internal/anonymize/local_test\.go''']

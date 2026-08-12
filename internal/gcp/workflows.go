@@ -19,24 +19,25 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 		return models.ListWorkflowsResponse{}, err
 	}
 
-	regions, err := a.discoverRegions(ctx, req.ProjectID)
-	if err != nil {
-		return models.ListWorkflowsResponse{}, err
-	}
+	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceWorkflows)
+	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
+		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var workflows []models.WorkflowSummary
-	var errs []models.ToolError
+	truncated := false
+	errs := discoveryToolError(discovery, "workflows.projects.locations.list")
+	perRegionLimit := regionalInventoryLimit(len(regions))
 
 	for _, r := range regions {
 		r := r
 		g.Go(func() error {
-			items, rerr := a.listWorkflowsForRegion(gctx, req.ProjectID, r)
+			items, regionTruncated, rerr := a.listWorkflowsForRegion(gctx, req.ProjectID, r, perRegionLimit)
 			mu.Lock()
 			defer mu.Unlock()
 			if rerr != nil {
@@ -47,6 +48,10 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 				return nil
 			}
 			workflows = append(workflows, items...)
+			if regionTruncated {
+				truncated = true
+				errs = append(errs, models.ToolError{FailingAPI: "workflows.projects.locations.workflows.list", Message: fmt.Sprintf("region %s truncated at %d items", r, perRegionLimit)})
+			}
 			return nil
 		})
 	}
@@ -62,30 +67,33 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 		return workflows[i].Name < workflows[j].Name
 	})
 	sortToolErrors(errs)
-	return models.ListWorkflowsResponse{Workflows: workflows, Errors: errs}, nil
+	return models.ListWorkflowsResponse{Workflows: workflows, Errors: errs, Truncated: truncated}, nil
 }
 
-func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, region string) ([]models.WorkflowSummary, error) {
+func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, region string, limit int) ([]models.WorkflowSummary, bool, error) {
 	if a.workflowsClient == nil {
-		return nil, nil
+		return nil, false, fmt.Errorf("Workflows client is not initialized")
 	}
 	if err := a.rateWait(ctx, "workflows.listForRegion"); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, region)
-	it := a.workflowsClient.ListWorkflows(ctx, &workflowspb.ListWorkflowsRequest{Parent: parent})
+	it := a.workflowsClient.ListWorkflows(ctx, &workflowspb.ListWorkflowsRequest{Parent: parent, PageSize: int32(limit)})
 
 	var workflows []models.WorkflowSummary
 	for {
 		wf, err := it.Next()
 		if err != nil {
 			if isIteratorDone(err) {
-				break
+				return workflows, false, nil
 			}
-			return nil, wrapGCPError("workflows.listForRegion", err)
+			return nil, false, wrapGCPError("workflows.listForRegion", err)
+		}
+		if len(workflows) >= limit {
+			return workflows, true, nil
 		}
 		_, name := parseWorkflowResourceName(wf.Name)
 		lastMod := ""
@@ -102,7 +110,6 @@ func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, regi
 			Labels:       wf.Labels,
 		})
 	}
-	return workflows, nil
 }
 
 func (a *gcpAdapter) ListWorkflowExecutions(ctx context.Context, req models.ListWorkflowExecutionsRequest) (models.ListWorkflowExecutionsResponse, error) {

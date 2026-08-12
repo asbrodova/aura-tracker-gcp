@@ -75,8 +75,9 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 
 	// ── Step 3: build "has_alerts" set ───────────────────────────────────
 	alertNames := map[string]bool{}
+	alertInventoryWarning := ""
 	if a.monitoringSvc != nil {
-		alertResp, err := a.ListAlertPolicies(ctx, models.ListAlertPoliciesRequest{ProjectID: req.ProjectID})
+		alertResp, err := a.ListAlertPolicies(ctx, models.ListAlertPoliciesRequest{ProjectID: req.ProjectID, PageSize: maxInventoryPageSize})
 		if err == nil {
 			for _, p := range alertResp.Policies {
 				for _, cond := range p.Conditions {
@@ -88,6 +89,11 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 					}
 				}
 			}
+			if alertResp.Truncated {
+				alertInventoryWarning = "Alert policy inventory was truncated; alert coverage may be understated. Narrow the project inventory or inspect the next page directly."
+			}
+		} else {
+			alertInventoryWarning = "Alert policy inventory could not be read; alert coverage may be understated: " + err.Error()
 		}
 	}
 
@@ -124,6 +130,9 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 	// ── Step 5: build summary ─────────────────────────────────────────────
 	summary := buildCoverageSummary(coverages)
 	recs := buildRecommendations(coverages)
+	if alertInventoryWarning != "" {
+		recs = append([]string{alertInventoryWarning}, recs...)
+	}
 
 	return models.ObservabilityCoverageResponse{
 		ProjectID:       req.ProjectID,

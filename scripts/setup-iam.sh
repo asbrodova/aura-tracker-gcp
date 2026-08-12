@@ -13,6 +13,7 @@
 #   PROJECT_ID=my-project SECURITY_AUDIT_ENABLED=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project SERVICE_HEALTH_ENABLED=true bash scripts/setup-iam.sh
 #   PROJECT_ID=my-project COST_REASONING_ENABLED=true BILLING_EXPORT_DATASET=cloud_billing bash scripts/setup-iam.sh
+#   PROJECT_ID=my-project LOCAL_IMPERSONATION_PRINCIPAL=user:developer@example.com bash scripts/setup-iam.sh
 set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:?PROJECT_ID environment variable is required}"
@@ -26,6 +27,7 @@ COST_REASONING_ENABLED="${COST_REASONING_ENABLED:-false}"
 COST_QUERY_PROJECT_ID="${COST_QUERY_PROJECT_ID:-$PROJECT_ID}"
 BILLING_EXPORT_PROJECT_ID="${BILLING_EXPORT_PROJECT_ID:-$PROJECT_ID}"
 BILLING_EXPORT_DATASET="${BILLING_EXPORT_DATASET:-}"
+LOCAL_IMPERSONATION_PRINCIPAL="${LOCAL_IMPERSONATION_PRINCIPAL:-}"
 
 SA_NAME="aura-tracker-mcp"
 SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
@@ -37,6 +39,24 @@ validate_boolean() {
     echo "ERROR: ${name} must be 'true' or 'false' (got '${value}')." >&2
     exit 2
   fi
+}
+
+validate_local_impersonation_principal() {
+	local principal="$1"
+	if [[ -z "$principal" ]]; then
+		return
+	fi
+	if [[ "$principal" =~ [[:space:]] ]]; then
+		echo "ERROR: LOCAL_IMPERSONATION_PRINCIPAL must not contain whitespace." >&2
+		exit 2
+	fi
+	case "$principal" in
+		user:*|group:*|serviceAccount:*) ;;
+		*)
+			echo "ERROR: LOCAL_IMPERSONATION_PRINCIPAL must start with user:, group:, or serviceAccount:." >&2
+			exit 2
+			;;
+	esac
 }
 
 grant_project_role() {
@@ -85,6 +105,7 @@ validate_boolean RECOMMENDER_ENABLED "$RECOMMENDER_ENABLED"
 validate_boolean SECURITY_AUDIT_ENABLED "$SECURITY_AUDIT_ENABLED"
 validate_boolean SERVICE_HEALTH_ENABLED "$SERVICE_HEALTH_ENABLED"
 validate_boolean COST_REASONING_ENABLED "$COST_REASONING_ENABLED"
+validate_local_impersonation_principal "$LOCAL_IMPERSONATION_PRINCIPAL"
 
 if [[ "$COST_REASONING_ENABLED" == "true" && -z "$BILLING_EXPORT_DATASET" ]]; then
   echo "ERROR: BILLING_EXPORT_DATASET is required when COST_REASONING_ENABLED=true." >&2
@@ -111,6 +132,21 @@ else
     echo "$describe_output" >&2
     exit "$describe_status"
   fi
+fi
+
+# Service Account Credentials is required for ADC impersonation. Enabling it is
+# harmless for attached-service-account deployments and keeps the printed local
+# development command from failing on a fresh project.
+enable_api iamcredentials.googleapis.com
+
+if [[ -n "$LOCAL_IMPERSONATION_PRINCIPAL" ]]; then
+	echo "Granting keyless local impersonation to ${LOCAL_IMPERSONATION_PRINCIPAL}..."
+	gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+		--project="$PROJECT_ID" \
+		--member="$LOCAL_IMPERSONATION_PRINCIPAL" \
+		--role=roles/iam.serviceAccountTokenCreator \
+		--condition=None \
+		--quiet
 fi
 
 # ── Role reconciliation ────────────────────────────────────────────────────────
@@ -141,7 +177,7 @@ if [[ "$SERVICE_HEALTH_ENABLED" == "true" ]]; then
 fi
 
 # Mutation roles (opt-in) — required only for gcp_gke_scale_deployment and
-# gcp_cloudrun_update_traffic. Both tools enforce two-step HITL confirmation.
+# gcp_cloudrun_update_traffic. Both tools use two-step confirmation when safety is enabled.
 if [[ "$MUTATION_ROLES" == "true" ]]; then
   echo "Reconciling mutation roles (container.admin, run.admin)..."
   for role in roles/container.admin roles/run.admin; do
@@ -221,13 +257,18 @@ fi
 echo ""
 echo "Done. APIs and IAM roles are reconciled for: ${SA_EMAIL}"
 echo ""
-echo "--- Option A: Key file (local dev) ---"
-echo "  gcloud iam service-accounts keys create sa-key.json \\"
-echo "    --iam-account=${SA_EMAIL} --project=${PROJECT_ID}"
-echo "  export GOOGLE_APPLICATION_CREDENTIALS=\$(pwd)/sa-key.json"
-echo "  # Add sa-key.json to .gitignore — never commit key files"
+echo "--- Option A: Keyless local development ---"
+if [[ -z "$LOCAL_IMPERSONATION_PRINCIPAL" ]]; then
+	echo "  # Prerequisite: rerun this script as an admin with"
+	echo "  # LOCAL_IMPERSONATION_PRINCIPAL=user:YOUR_EMAIL (or group:/serviceAccount:)."
+else
+	echo "  # Token Creator was reconciled on this service account for ${LOCAL_IMPERSONATION_PRINCIPAL}."
+fi
+echo "  gcloud auth application-default login \\"
+echo "    --impersonate-service-account=${SA_EMAIL}"
+echo "  # No service-account key file is created or stored in the repository."
 echo ""
-echo "--- Option B: Workload Identity (Cloud Run — recommended for production) ---"
+echo "--- Option B: Attached service account (Cloud Run — recommended for production) ---"
 echo "  gcloud run services update aura-tracker-gcp \\"
 echo "    --service-account=${SA_EMAIL} \\"
 echo "    --project=${PROJECT_ID} \\"

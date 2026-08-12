@@ -182,3 +182,11 @@ func mergePartial(result *CollectionResult, partial bool, warnings []string) {
 	result.Partial = result.Partial || partial
 	result.Warnings = append(result.Warnings, warnings...)
 }
+
+func markInventoryTruncated(result *CollectionResult, truncated bool, inventory string) {
+	if !truncated {
+		return
+	}
+	result.Partial = true
+	result.Warnings = append(result.Warnings, inventory+" inventory was truncated; omitted resources were not compared")
+}

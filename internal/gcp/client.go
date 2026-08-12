@@ -197,7 +197,7 @@ type gcpAdapter struct {
 	limiter                   *rate.Limiter
 	log                       *slog.Logger
 	auraCache                 *ttlCache[models.AuraReport]
-	regionsCache              *ttlCache[[]string]
+	regionsCache              *ttlCache[regionDiscovery]
 	graphCache                *ttlCache[models.ServerlessGraph]
 	recommenderCache          *ttlCache[[]recommenderInsight]
 	costRecommendationCache   *ttlCache[models.ListCostRecommendationsResponse]
@@ -236,7 +236,7 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 		traceBackend: "trace",
 		log:          slog.Default(),
 		auraCache:    newTTLCache[models.AuraReport](auraCacheTTL),
-		regionsCache: newTTLCache[[]string](10 * time.Minute),
+		regionsCache: newTTLCache[regionDiscovery](10 * time.Minute),
 		graphCache:   newTTLCache[models.ServerlessGraph](archGraphCacheTTL),
 	}
 	defer func() {

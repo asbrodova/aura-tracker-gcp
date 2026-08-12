@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -81,7 +82,17 @@ func LoadConfig() (Config, error) {
 
 	// Env var takes precedence over YAML field.
 	if v := os.Getenv("ANONYMIZE_ENABLED"); v != "" {
-		cfg.Enabled = v == "1" || v == "true" || v == "yes"
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "true":
+			cfg.Enabled = true
+		case "false":
+			cfg.Enabled = false
+		default:
+			return cfg, fmt.Errorf("ANONYMIZE_ENABLED must be 'true' or 'false'")
+		}
+	}
+	if cfg.Mode != ModeLocal && cfg.Mode != ModeDLP && cfg.Mode != ModeBoth {
+		return cfg, fmt.Errorf("anonymize: mode must be local, dlp, or both")
 	}
 
 	return cfg, nil

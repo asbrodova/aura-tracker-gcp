@@ -15,7 +15,13 @@ type k8sMeta struct {
 // k8sWorkloadList covers Deployment, StatefulSet, DaemonSet, CronJob, and Job
 // list responses. All share the same items[*].spec.template.spec structure.
 type k8sWorkloadList struct {
-	Items []k8sWorkload `json:"items"`
+	Metadata k8sListMeta   `json:"metadata"`
+	Items    []k8sWorkload `json:"items"`
+}
+
+type k8sListMeta struct {
+	Continue           string `json:"continue"`
+	RemainingItemCount *int64 `json:"remainingItemCount"`
 }
 
 type k8sWorkload struct {
@@ -74,12 +80,28 @@ type k8sEnvVar struct {
 }
 
 type k8sEnvVarSource struct {
-	SecretKeyRef *k8sSecretKeySelector `json:"secretKeyRef"`
+	SecretKeyRef     *k8sSecretKeySelector     `json:"secretKeyRef"`
+	ConfigMapKeyRef  *k8sConfigMapKeySelector  `json:"configMapKeyRef"`
+	FieldRef         *k8sObjectFieldSelector   `json:"fieldRef"`
+	ResourceFieldRef *k8sResourceFieldSelector `json:"resourceFieldRef"`
 }
 
 type k8sSecretKeySelector struct {
 	Name string `json:"name"`
 	Key  string `json:"key"`
+}
+
+type k8sConfigMapKeySelector struct {
+	Name string `json:"name"`
+	Key  string `json:"key"`
+}
+
+type k8sObjectFieldSelector struct {
+	FieldPath string `json:"fieldPath"`
+}
+
+type k8sResourceFieldSelector struct {
+	Resource string `json:"resource"`
 }
 
 type k8sEnvFrom struct {

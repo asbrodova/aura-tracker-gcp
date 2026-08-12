@@ -13,7 +13,14 @@ func compareComponent(environmentA, environmentB string, a, b []Resource, comple
 	pairs, onlyA, onlyB := matchResources(a, b)
 	results := make([]models.ResourceDrift, 0, len(pairs)+len(onlyA)+len(onlyB))
 	for _, pair := range pairs {
-		differences := compareMaps(pair.a.Config, pair.b.Config, environmentA, environmentB)
+		differences := compareResourceIdentity(pair, environmentA, environmentB)
+		differences = append(differences, compareMaps(pair.a.Config, pair.b.Config, environmentA, environmentB)...)
+		sort.SliceStable(differences, func(i, j int) bool {
+			if importanceRank(differences[i].Importance) != importanceRank(differences[j].Importance) {
+				return importanceRank(differences[i].Importance) < importanceRank(differences[j].Importance)
+			}
+			return differences[i].Path < differences[j].Path
+		})
 		status := "equivalent"
 		summary := fmt.Sprintf("%s has equivalent configuration in %s and %s", pair.a.Name, environmentA, environmentB)
 		if len(differences) > 0 {
@@ -26,9 +33,15 @@ func compareComponent(environmentA, environmentB string, a, b []Resource, comple
 		} else if pair.b.Location != "" && pair.b.Location != location {
 			location = pair.a.Location + " ↔ " + pair.b.Location
 		}
+		qualifier := pair.a.Qualifier
+		if qualifier == "" {
+			qualifier = pair.b.Qualifier
+		} else if pair.b.Qualifier != "" && pair.b.Qualifier != qualifier {
+			qualifier = pair.a.Qualifier + " ↔ " + pair.b.Qualifier
+		}
 		results = append(results, models.ResourceDrift{
 			Component: pair.a.Component, ResourceType: pair.a.ResourceType,
-			Name: pair.a.Name, Location: location, Qualifier: pair.a.Qualifier,
+			Name: pair.a.Name, Location: location, Qualifier: qualifier,
 			Status: status, Summary: summary, FieldDifferences: differences,
 		})
 	}
@@ -62,6 +75,39 @@ func compareComponent(environmentA, environmentB string, a, b []Resource, comple
 	}
 	sortResourceDrifts(results)
 	return results
+}
+
+func compareResourceIdentity(pair resourcePair, environmentA, environmentB string) []models.DriftFieldDifference {
+	var differences []models.DriftFieldDifference
+	for _, field := range []struct {
+		path string
+		a    string
+		b    string
+	}{
+		{path: "/location", a: pair.a.Location, b: pair.b.Location},
+		{path: "/qualifier", a: pair.a.Qualifier, b: pair.b.Qualifier},
+	} {
+		if field.a == field.b {
+			continue
+		}
+		aPresent, bPresent := field.a != "", field.b != ""
+		changeType := "modified"
+		if !aPresent {
+			changeType = "missing_in_" + environmentA
+		} else if !bPresent {
+			changeType = "missing_in_" + environmentB
+		}
+		category, importance := classifyPath(field.path)
+		differences = append(differences, models.DriftFieldDifference{
+			Path: field.path, ChangeType: changeType, Category: category, Importance: importance,
+			Summary: fieldSummary(field.path, environmentA, environmentB, aPresent, bPresent),
+			Values: []models.DriftEnvironmentValue{
+				{Environment: environmentA, Value: field.a, Present: aPresent},
+				{Environment: environmentB, Value: field.b, Present: bPresent},
+			},
+		})
+	}
+	return differences
 }
 
 type resourcePair struct{ a, b Resource }
@@ -297,7 +343,8 @@ func safeDifferenceValue(path string, value any, present bool) any {
 	if index := strings.LastIndex(leaf, "/"); index >= 0 {
 		leaf = leaf[index+1:]
 	}
-	if (strings.Contains(lower, "/env_vars/") && leaf == "value") ||
+	if (strings.Contains(lower, "/env_vars/") && (leaf == "value" || leaf == "literal_value_fingerprint")) ||
+		strings.Contains(lower, "/omitted_annotation_fingerprints/") ||
 		leaf == "password" || leaf == "token" || leaf == "api_key" ||
 		leaf == "private_key" || leaf == "credential" || leaf == "credentials" {
 		return "[REDACTED]"
@@ -331,6 +378,9 @@ func classifyPath(path string) (string, string) {
 		if strings.Contains(lower, token) {
 			return "networking", "medium"
 		}
+	}
+	if strings.Contains(lower, "location") || strings.Contains(lower, "qualifier") {
+		return "placement", "medium"
 	}
 	for _, token := range []string{"image", "runtime", "version", "machine_type"} {
 		if strings.Contains(lower, token) {

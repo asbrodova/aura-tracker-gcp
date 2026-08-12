@@ -13,6 +13,14 @@ func (c *GCPCollector) collectPubSub(ctx context.Context, req CollectionRequest)
 		return CollectionResult{}, err
 	}
 	result := CollectionResult{Resources: []Resource{}}
+	markInventoryTruncated(&result, topics.Truncated, "Pub/Sub topic")
+	for _, topic := range topics.Topics {
+		if topic.SubscriptionCountTruncated {
+			result.Partial = true
+			result.Warnings = append(result.Warnings, "Pub/Sub subscription counts were incomplete and were excluded from comparison")
+			break
+		}
+	}
 	for _, topic := range topics.Topics {
 		if includeResource(req, topic.Name, "") {
 			result.Resources = append(result.Resources, resource("pubsub", "pubsub.topic", topic.Name, "", "", topic))
@@ -29,6 +37,7 @@ func (c *GCPCollector) collectPubSub(ctx context.Context, req CollectionRequest)
 			result.Resources = append(result.Resources, resource("pubsub", "pubsub.subscription", subscription.Name, "", "", subscription))
 		}
 	}
+	markInventoryTruncated(&result, subscriptions.Truncated, "Pub/Sub subscription")
 	return result, nil
 }
 
@@ -193,7 +202,7 @@ func (c *GCPCollector) collectSupplyChain(ctx context.Context, req CollectionReq
 
 func (c *GCPCollector) collectMonitoring(ctx context.Context, req CollectionRequest) (CollectionResult, error) {
 	result := CollectionResult{Resources: []Resource{}}
-	policies, err := c.source.ListAlertPolicies(ctx, models.ListAlertPoliciesRequest{ProjectID: req.ProjectID})
+	policies, err := c.source.ListAlertPolicies(ctx, models.ListAlertPoliciesRequest{ProjectID: req.ProjectID, PageSize: maxResourcesPerComponent})
 	if err != nil {
 		result.Partial = true
 		result.Warnings = append(result.Warnings, "alert policies: "+err.Error())
@@ -206,6 +215,10 @@ func (c *GCPCollector) collectMonitoring(ctx context.Context, req CollectionRequ
 			if includeResource(req, name, "") {
 				result.Resources = append(result.Resources, resource("monitoring", "monitoring.alert_policy", name, "", "", value))
 			}
+		}
+		if policies.Truncated {
+			result.Partial = true
+			result.Warnings = append(result.Warnings, "alert policy page limit reached; additional pages were not compared")
 		}
 	}
 	uptime, err := c.source.ListUptimeChecks(ctx, models.ListUptimeChecksRequest{ProjectID: req.ProjectID})
@@ -257,7 +270,7 @@ func (c *GCPCollector) collectMonitoring(ctx context.Context, req CollectionRequ
 }
 
 func (c *GCPCollector) collectIAM(ctx context.Context, req CollectionRequest) (CollectionResult, error) {
-	accounts, err := c.source.ListServiceAccounts(ctx, models.ListServiceAccountsRequest{ProjectID: req.ProjectID})
+	accounts, err := c.source.ListServiceAccounts(ctx, models.ListServiceAccountsRequest{ProjectID: req.ProjectID, PageSize: maxResourcesPerComponent})
 	if err != nil {
 		return CollectionResult{}, err
 	}
@@ -270,6 +283,9 @@ func (c *GCPCollector) collectIAM(ctx context.Context, req CollectionRequest) (C
 		if includeResource(req, name, "") {
 			result.Resources = append(result.Resources, resource("iam", "iam.service_account", name, "", "", value))
 		}
+	}
+	if accounts.Truncated {
+		result.Warnings = append(result.Warnings, "service-account page limit reached; additional pages were not compared")
 	}
 	return result, nil
 }

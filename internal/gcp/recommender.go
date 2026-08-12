@@ -59,13 +59,14 @@ func (a *gcpAdapter) fetchRecommenderInsights(
 
 	parent := fmt.Sprintf("projects/%s/locations/%s/recommenders/%s", projectID, location, recommenderID)
 	req := &recommenderpb.ListRecommendationsRequest{
-		Parent: parent,
-		Filter: `stateInfo.state = "ACTIVE"`,
+		Parent:   parent,
+		Filter:   `stateInfo.state = "ACTIVE"`,
+		PageSize: maxUnpagedInventoryItems,
 	}
 
 	var insights []recommenderInsight
 	it := a.rec.ListRecommendations(ctx, req)
-	for {
+	for scanned := 0; ; scanned++ {
 		rec, err := it.Next()
 		if err == iterator.Done {
 			break
@@ -76,6 +77,9 @@ func (a *gcpAdapter) fetchRecommenderInsights(
 				return nil, &ports.RecommenderQuotaExhaustedError{Op: "recommender.fetchInsights"}
 			}
 			return nil, err
+		}
+		if scanned >= maxUnpagedInventoryItems {
+			return nil, fmt.Errorf("recommender.fetchInsights: %w at %d recommendations", errInventoryLimitReached, maxUnpagedInventoryItems)
 		}
 		if !recommenderTargetsResource(rec.GetContent(), resourceSuffix) {
 			continue

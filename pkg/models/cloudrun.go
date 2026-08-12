@@ -14,7 +14,8 @@ type ServiceSummary struct {
 }
 
 type ListServicesResponse struct {
-	Services []ServiceSummary `json:"services"`
+	Services  []ServiceSummary `json:"services"`
+	Truncated bool             `json:"truncated,omitempty"`
 }
 
 type GetServiceDetailsRequest struct {
@@ -130,7 +131,8 @@ type JobSummary struct {
 }
 
 type ListJobsResponse struct {
-	Jobs []JobSummary `json:"jobs"`
+	Jobs      []JobSummary `json:"jobs"`
+	Truncated bool         `json:"truncated,omitempty"`
 }
 
 type GetJobDetailsRequest struct {

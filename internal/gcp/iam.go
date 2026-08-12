@@ -88,6 +88,10 @@ func (a *gcpAdapter) fetchResourceBindings(ctx context.Context, selectedProject,
 }
 
 func (a *gcpAdapter) ListServiceAccounts(ctx context.Context, req models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error) {
+	pageSize, err := inventoryPageSize(req.PageSize)
+	if err != nil {
+		return models.ListServiceAccountsResponse{}, fmt.Errorf("iam.ListServiceAccounts: %w", err)
+	}
 	if err := a.rateWait(ctx, "iam.ListServiceAccounts"); err != nil {
 		return models.ListServiceAccountsResponse{}, err
 	}
@@ -97,28 +101,24 @@ func (a *gcpAdapter) ListServiceAccounts(ctx context.Context, req models.ListSer
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	accounts := []models.ServiceAccountSummary{}
-	for pageToken := ""; ; {
-		call := a.iamAdminSvc.Projects.ServiceAccounts.List("projects/" + req.ProjectID).Context(ctx)
-		if pageToken != "" {
-			call = call.PageToken(pageToken)
-		}
-		resp, err := call.Do()
-		if err != nil {
-			return models.ListServiceAccountsResponse{}, wrapGCPError("iam.ListServiceAccounts", err)
-		}
-		for _, sa := range resp.Accounts {
-			accounts = append(accounts, models.ServiceAccountSummary{
-				Name: sa.Name, Email: sa.Email, DisplayName: sa.DisplayName,
-				Description: sa.Description, Disabled: sa.Disabled, UniqueID: sa.UniqueId,
-			})
-		}
-		if resp.NextPageToken == "" {
-			break
-		}
-		pageToken = resp.NextPageToken
+	call := a.iamAdminSvc.Projects.ServiceAccounts.List("projects/" + req.ProjectID).Context(ctx).PageSize(int64(pageSize))
+	if req.PageToken != "" {
+		call = call.PageToken(req.PageToken)
 	}
-	return models.ListServiceAccountsResponse{ServiceAccounts: accounts}, nil
+	resp, err := call.Do()
+	if err != nil {
+		return models.ListServiceAccountsResponse{}, wrapGCPError("iam.ListServiceAccounts", err)
+	}
+	accounts := make([]models.ServiceAccountSummary, 0, len(resp.Accounts))
+	for _, sa := range resp.Accounts {
+		accounts = append(accounts, models.ServiceAccountSummary{
+			Name: sa.Name, Email: sa.Email, DisplayName: sa.DisplayName,
+			Description: sa.Description, Disabled: sa.Disabled, UniqueID: sa.UniqueId,
+		})
+	}
+	return models.ListServiceAccountsResponse{
+		ServiceAccounts: accounts, NextPageToken: resp.NextPageToken, Truncated: resp.NextPageToken != "",
+	}, nil
 }
 
 func (a *gcpAdapter) TestPermissions(ctx context.Context, req models.TestPermissionsRequest) (models.TestPermissionsResponse, error) {

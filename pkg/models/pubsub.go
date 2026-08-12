@@ -5,13 +5,15 @@ type ListTopicsRequest struct {
 }
 
 type TopicSummary struct {
-	Name              string            `json:"name"`
-	Labels            map[string]string `json:"labels,omitempty"`
-	SubscriptionCount int               `json:"subscription_count"`
+	Name                       string            `json:"name"`
+	Labels                     map[string]string `json:"labels,omitempty"`
+	SubscriptionCount          int               `json:"subscription_count"`
+	SubscriptionCountTruncated bool              `json:"subscription_count_truncated,omitempty"`
 }
 
 type ListTopicsResponse struct {
-	Topics []TopicSummary `json:"topics"`
+	Topics    []TopicSummary `json:"topics"`
+	Truncated bool           `json:"truncated,omitempty"`
 }
 
 type InspectTopicHealthRequest struct {
@@ -51,4 +53,5 @@ type ListSubscriptionsRequest struct {
 // ListSubscriptionsResponse holds the list result.
 type ListSubscriptionsResponse struct {
 	Subscriptions []SubscriptionSummary `json:"subscriptions"`
+	Truncated     bool                  `json:"truncated,omitempty"`
 }

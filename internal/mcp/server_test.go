@@ -403,6 +403,19 @@ func TestServerRegistersResourcesAndPrompts(t *testing.T) {
 	}
 }
 
+func TestResourceContentsSafetyLimit(t *testing.T) {
+	withinLimit := []protocol.ResourceContents{protocol.TextResourceContents{URI: "gcp://test/resource", Text: "small"}}
+	if _, err := enforceResourceContentsLimit(withinLimit); err != nil {
+		t.Fatalf("small resource rejected: %v", err)
+	}
+	oversized := []protocol.ResourceContents{protocol.TextResourceContents{
+		URI: "gcp://test/resource", Text: strings.Repeat("x", maxMCPResourceBytes+1),
+	}}
+	if _, err := enforceResourceContentsLimit(oversized); err == nil || !strings.Contains(err.Error(), "safety limit") {
+		t.Fatalf("oversized resource error = %v", err)
+	}
+}
+
 func TestFilteredRegistration(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test",
 		WithModules(map[string]bool{"gke": true}),
@@ -559,6 +572,23 @@ type environmentCaptureSvc struct {
 	logProjects     []string
 	datasetProjects []string
 	logError        error
+}
+
+type oversizedLogSvc struct{ *mockSvc }
+
+func (s *oversizedLogSvc) QueryRecentLogs(context.Context, models.QueryRecentLogsRequest) (models.QueryRecentLogsResponse, error) {
+	return models.QueryRecentLogsResponse{
+		Entries:      []models.LogEntry{{Message: strings.Repeat("x", maxMCPToolResultBytes+1024)}},
+		TotalFetched: 1,
+	}, nil
+}
+
+func TestServerWithholdsOversizedToolResults(t *testing.T) {
+	s := New(&oversizedLogSvc{mockSvc: &mockSvc{}}, slog.Default(), "test", WithModules(map[string]bool{ModuleLogging: true}))
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_logging_query_recent","arguments":{}}}`)
+	if !strings.Contains(response, "safety limit") || len(response) > 4096 {
+		t.Fatalf("oversized result was not replaced with a bounded error: length=%d response=%s", len(response), response)
+	}
 }
 
 func (s *environmentCaptureSvc) QueryRecentLogs(_ context.Context, req models.QueryRecentLogsRequest) (models.QueryRecentLogsResponse, error) {

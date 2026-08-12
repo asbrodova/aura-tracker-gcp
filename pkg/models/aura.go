@@ -17,17 +17,20 @@ const (
 type AuraBand string
 
 const (
-	AuraBandGreen  AuraBand = "green"  // 80-100
-	AuraBandYellow AuraBand = "yellow" // 50-79
-	AuraBandRed    AuraBand = "red"    // 0-49
+	AuraBandGreen       AuraBand = "green"       // 80-100
+	AuraBandYellow      AuraBand = "yellow"      // 50-79
+	AuraBandRed         AuraBand = "red"         // 0-49
+	AuraBandUnavailable AuraBand = "unavailable" // no score because expected telemetry was not observed
 )
 
 // AuraHealthSignal is one golden-signal measurement contributing to the score.
 type AuraHealthSignal struct {
-	Name  string  `json:"name"`  // e.g. "error_rate", "cpu_util", "latency_p99"
-	Value float64 `json:"value"` // raw metric value (ratio 0-1, ms, bytes, etc.)
-	Score int     `json:"score"` // 0-100 contribution after threshold mapping
-	Label string  `json:"label"` // "OK", "Warning", "Critical"
+	Name         string  `json:"name"`                   // e.g. "error_rate", "cpu_util", "latency_p99"
+	Value        float64 `json:"value"`                  // meaningful only when availability is observed
+	Score        int     `json:"score"`                  // 0-100 contribution after threshold mapping
+	Label        string  `json:"label"`                  // OK, Warning, Critical, No data, or Unavailable
+	Availability string  `json:"availability,omitempty"` // observed, no_data, or error; empty is treated as observed for compatibility
+	Message      string  `json:"message,omitempty"`
 }
 
 // AuraReport is the complete Aura Score for a single GCP resource.
@@ -36,7 +39,7 @@ type AuraReport struct {
 	ResourceName    string             `json:"resource_name"`
 	Region          string             `json:"region"`
 	Score           int                `json:"score"`            // 0-100 composite
-	Band            AuraBand           `json:"band"`             // green/yellow/red
+	Band            AuraBand           `json:"band"`             // green/yellow/red/unavailable
 	Display         string             `json:"display"`          // "🟢 Cloud Run: svc | Aura: 98 (Healthy & Scaled)"
 	HealthScore     int                `json:"health_score"`     // weighted health sub-score
 	EfficiencyScore int                `json:"efficiency_score"` // utilization efficiency sub-score
@@ -44,6 +47,10 @@ type AuraReport struct {
 	Reasons         []string           `json:"reasons"`                    // actionable improvement hints for the LLM
 	CachedAt        time.Time          `json:"cached_at"`                  // zero if not from cache
 	RecommenderNote string             `json:"recommender_note,omitempty"` // set when daily quota is exhausted
+	CoverageStatus  string             `json:"coverage_status"`            // complete, partial, or unavailable
+	SignalsObserved int                `json:"signals_observed"`
+	SignalsExpected int                `json:"signals_expected"`
+	Warnings        []string           `json:"warnings,omitempty"`
 }
 
 // GetAuraScoreRequest is the input for the gcp_get_aura_score tool.
@@ -127,11 +134,14 @@ type GCSAuraReport struct {
 
 // ProjectAuraSummaryResponse lists all discovered resources with their Aura Scores.
 type ProjectAuraSummaryResponse struct {
-	ProjectID     string       `json:"project_id"`
-	Resources     []AuraReport `json:"resources"` // sorted worst-first
-	Summary       string       `json:"summary"`   // pre-formatted emoji block for LLM display
-	TotalCount    int          `json:"total_count"`
-	CriticalCount int          `json:"critical_count"`
-	WarningCount  int          `json:"warning_count"`
-	HealthyCount  int          `json:"healthy_count"`
+	ProjectID        string       `json:"project_id"`
+	Resources        []AuraReport `json:"resources"` // sorted worst-first
+	Summary          string       `json:"summary"`   // pre-formatted emoji block for LLM display
+	TotalCount       int          `json:"total_count"`
+	CriticalCount    int          `json:"critical_count"`
+	WarningCount     int          `json:"warning_count"`
+	HealthyCount     int          `json:"healthy_count"`
+	UnavailableCount int          `json:"unavailable_count"`
+	Truncated        bool         `json:"truncated,omitempty"`
+	Warnings         []string     `json:"warnings,omitempty"`
 }

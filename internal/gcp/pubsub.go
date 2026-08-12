@@ -20,10 +20,35 @@ func (a *gcpAdapter) ListTopics(ctx context.Context, req models.ListTopicsReques
 
 	project := fmt.Sprintf("projects/%s", req.ProjectID)
 	it := a.pubsub.TopicAdminClient.ListTopics(ctx, &pubsubpb.ListTopicsRequest{
-		Project: project,
+		Project: project, PageSize: maxUnpagedInventoryItems,
 	})
 
+	// Build subscription counts with one bounded project-wide scan. The former
+	// per-topic scan could issue up to one million iterator calls for a large
+	// project (1,000 topics x 1,000 subscriptions each).
+	subscriptionCounts := make(map[string]int)
+	subscriptionCountsTruncated := false
+	subIt := a.pubsub.SubscriptionAdminClient.ListSubscriptions(ctx, &pubsubpb.ListSubscriptionsRequest{
+		Project: project, PageSize: maxUnpagedInventoryItems,
+	})
+	for scanned := 0; ; scanned++ {
+		subscription, err := subIt.Next()
+		if isIteratorDone(err) {
+			break
+		}
+		if err != nil {
+			subscriptionCountsTruncated = true
+			break
+		}
+		if scanned >= maxUnpagedInventoryItems {
+			subscriptionCountsTruncated = true
+			break
+		}
+		subscriptionCounts[subscription.Topic]++
+	}
+
 	var topics []models.TopicSummary
+	truncated := false
 	for {
 		t, err := it.Next()
 		if isIteratorDone(err) {
@@ -32,33 +57,22 @@ func (a *gcpAdapter) ListTopics(ctx context.Context, req models.ListTopicsReques
 		if err != nil {
 			return models.ListTopicsResponse{}, wrapGCPError("pubsub.ListTopics", err)
 		}
-
-		// Count subscriptions for this topic (best-effort).
-		subCount := 0
-		subIt := a.pubsub.TopicAdminClient.ListTopicSubscriptions(ctx, &pubsubpb.ListTopicSubscriptionsRequest{
-			Topic: t.Name,
-		})
-		for {
-			_, err := subIt.Next()
-			if isIteratorDone(err) {
-				break
-			}
-			if err != nil {
-				break // best-effort; do not fail the whole list
-			}
-			subCount++
+		if len(topics) >= maxUnpagedInventoryItems {
+			truncated = true
+			break
 		}
 
 		topics = append(topics, models.TopicSummary{
-			Name:              t.Name,
-			Labels:            t.Labels,
-			SubscriptionCount: subCount,
+			Name:                       t.Name,
+			Labels:                     t.Labels,
+			SubscriptionCount:          subscriptionCounts[t.Name],
+			SubscriptionCountTruncated: subscriptionCountsTruncated,
 		})
 	}
 	if topics == nil {
 		topics = []models.TopicSummary{}
 	}
-	return models.ListTopicsResponse{Topics: topics}, nil
+	return models.ListTopicsResponse{Topics: topics, Truncated: truncated}, nil
 }
 
 func (a *gcpAdapter) InspectTopicHealth(ctx context.Context, req models.InspectTopicHealthRequest) (models.TopicHealthReport, error) {
@@ -85,19 +99,24 @@ func (a *gcpAdapter) InspectTopicHealth(ctx context.Context, req models.InspectT
 
 	// List subscriptions and fetch their ack deadline as a proxy for health.
 	subIt := a.pubsub.TopicAdminClient.ListTopicSubscriptions(ctx, &pubsubpb.ListTopicSubscriptionsRequest{
-		Topic: topicName,
+		Topic: topicName, PageSize: maxUnpagedInventoryItems,
 	})
 
 	var lags []models.SubscriptionLag
 	var issues []string
 
-	for {
+	subscriptionScanTruncated := false
+	for scanned := 0; ; scanned++ {
 		subName, err := subIt.Next()
 		if isIteratorDone(err) {
 			break
 		}
 		if err != nil {
 			issues = append(issues, fmt.Sprintf("error listing subscriptions: %v", err))
+			break
+		}
+		if scanned >= maxUnpagedInventoryItems {
+			subscriptionScanTruncated = true
 			break
 		}
 
@@ -118,6 +137,9 @@ func (a *gcpAdapter) InspectTopicHealth(ctx context.Context, req models.InspectT
 			SubscriptionName: subName,
 			OldestUnackedAge: ageStr,
 		})
+	}
+	if subscriptionScanTruncated {
+		issues = append(issues, fmt.Sprintf("subscription inspection truncated at %d items", maxUnpagedInventoryItems))
 	}
 
 	healthy := len(issues) == 0
@@ -153,14 +175,15 @@ func (a *gcpAdapter) ListSubscriptions(ctx context.Context, req models.ListSubsc
 	project := fmt.Sprintf("projects/%s", req.ProjectID)
 
 	var subs []models.SubscriptionSummary
+	truncated := false
 
 	if req.TopicName != "" {
 		// Filter by topic: list subscriptions on a specific topic.
 		topic := fmt.Sprintf("projects/%s/topics/%s", req.ProjectID, req.TopicName)
 		it := a.pubsub.TopicAdminClient.ListTopicSubscriptions(ctx, &pubsubpb.ListTopicSubscriptionsRequest{
-			Topic: topic,
+			Topic: topic, PageSize: maxUnpagedInventoryItems,
 		})
-		for {
+		for scanned := 0; ; scanned++ {
 			subName, err := it.Next()
 			if err != nil {
 				if isIteratorDone(err) {
@@ -168,17 +191,22 @@ func (a *gcpAdapter) ListSubscriptions(ctx context.Context, req models.ListSubsc
 				}
 				return models.ListSubscriptionsResponse{}, wrapGCPError("pubsub.ListSubscriptions", err)
 			}
+			if scanned >= maxUnpagedInventoryItems {
+				truncated = true
+				break
+			}
 			sub, err := a.pubsub.SubscriptionAdminClient.GetSubscription(ctx, &pubsubpb.GetSubscriptionRequest{
 				Subscription: subName,
 			})
 			if err != nil {
+				truncated = true
 				continue
 			}
 			subs = append(subs, subscriptionToSummary(sub))
 		}
 	} else {
 		it := a.pubsub.SubscriptionAdminClient.ListSubscriptions(ctx, &pubsubpb.ListSubscriptionsRequest{
-			Project: project,
+			Project: project, PageSize: maxUnpagedInventoryItems,
 		})
 		for {
 			sub, err := it.Next()
@@ -188,6 +216,10 @@ func (a *gcpAdapter) ListSubscriptions(ctx context.Context, req models.ListSubsc
 				}
 				return models.ListSubscriptionsResponse{}, wrapGCPError("pubsub.ListSubscriptions", err)
 			}
+			if len(subs) >= maxUnpagedInventoryItems {
+				truncated = true
+				break
+			}
 			subs = append(subs, subscriptionToSummary(sub))
 		}
 	}
@@ -195,7 +227,7 @@ func (a *gcpAdapter) ListSubscriptions(ctx context.Context, req models.ListSubsc
 	if subs == nil {
 		subs = []models.SubscriptionSummary{}
 	}
-	return models.ListSubscriptionsResponse{Subscriptions: subs}, nil
+	return models.ListSubscriptionsResponse{Subscriptions: subs, Truncated: truncated}, nil
 }
 
 func subscriptionToSummary(sub *pubsubpb.Subscription) models.SubscriptionSummary {

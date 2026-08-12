@@ -15,6 +15,7 @@ type ListTaskQueuesRequest struct {
 
 // ListTaskQueuesResponse holds the list result with any per-region errors.
 type ListTaskQueuesResponse struct {
-	Queues []TaskQueueSummary `json:"queues"`
-	Errors []ToolError        `json:"errors,omitempty"`
+	Queues    []TaskQueueSummary `json:"queues"`
+	Errors    []ToolError        `json:"errors,omitempty"`
+	Truncated bool               `json:"truncated,omitempty"`
 }

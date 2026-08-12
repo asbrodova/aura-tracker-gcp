@@ -1,0 +1,28 @@
+# Local credentials and environment files
+.env
+.env.*
+!.env.example
+sa-key*.json
+*service-account*.json
+application_default_credentials.json
+credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Build and test artifacts
+/aura-tracker-gcp
+/bin/
+/dist/
+/coverage.out
+*.test
+*.prof
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+
+# A local clone of the separately versioned GitHub Wiki.
+/wiki/

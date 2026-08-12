@@ -20,6 +20,7 @@ type ListSchedulerJobsRequest struct {
 
 // ListSchedulerJobsResponse holds the list result with any per-region errors.
 type ListSchedulerJobsResponse struct {
-	Jobs   []SchedulerJobSummary `json:"jobs"`
-	Errors []ToolError           `json:"errors,omitempty"`
+	Jobs      []SchedulerJobSummary `json:"jobs"`
+	Errors    []ToolError           `json:"errors,omitempty"`
+	Truncated bool                  `json:"truncated,omitempty"`
 }

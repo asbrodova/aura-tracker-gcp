@@ -5,6 +5,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,7 +28,22 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
-const serverName = "aura-tracker-gcp"
+const (
+	serverName            = "aura-tracker-gcp"
+	maxMCPToolResultBytes = 4 << 20
+	maxMCPResourceBytes   = 4 << 20
+)
+
+func enforceResourceContentsLimit(contents []mcp.ResourceContents) ([]mcp.ResourceContents, error) {
+	encoded, err := json.Marshal(contents)
+	if err != nil {
+		return nil, fmt.Errorf("measure resource result: %w", err)
+	}
+	if len(encoded) > maxMCPResourceBytes {
+		return nil, fmt.Errorf("resource result exceeded the %d-byte safety limit; use a paginated tool or narrower resource", maxMCPResourceBytes)
+	}
+	return contents, nil
+}
 
 // Option configures the MCP server created by New.
 type Option func(*serverOptions)
@@ -225,7 +241,23 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			}
 			return scrubbed, nil
 		}
-		return anonymize.WrapHandler(t, o.anonymizer)
+		wrapped := anonymize.WrapHandler(t, o.anonymizer)
+		wrappedHandler := wrapped.Handler
+		wrapped.Handler = func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			result, err := wrappedHandler(ctx, req)
+			if err != nil || result == nil {
+				return result, err
+			}
+			encoded, marshalErr := json.Marshal(result)
+			if marshalErr != nil {
+				return nil, fmt.Errorf("measure tool result: %w", marshalErr)
+			}
+			if len(encoded) > maxMCPToolResultBytes {
+				return mcp.NewToolResultError(fmt.Sprintf("tool result exceeded the %d-byte safety limit; narrow the request or use pagination", maxMCPToolResultBytes)), nil
+			}
+			return result, nil
+		}
+		return wrapped
 	}
 	wrapResource := func(resource server.ServerResource) server.ServerResource {
 		original := resource.Handler
@@ -238,7 +270,11 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			if err != nil {
 				return nil, errors.New("project identifier privacy filter failed; resource withheld")
 			}
-			return anonymize.ScrubResourceContents(ctx, o.anonymizer, scrubbed)
+			scrubbed, err = anonymize.ScrubResourceContents(ctx, o.anonymizer, scrubbed)
+			if err != nil {
+				return nil, err
+			}
+			return enforceResourceContentsLimit(scrubbed)
 		}
 		return resource
 	}
@@ -253,7 +289,11 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			if err != nil {
 				return nil, errors.New("project identifier privacy filter failed; resource withheld")
 			}
-			return anonymize.ScrubResourceContents(ctx, o.anonymizer, scrubbed)
+			scrubbed, err = anonymize.ScrubResourceContents(ctx, o.anonymizer, scrubbed)
+			if err != nil {
+				return nil, err
+			}
+			return enforceResourceContentsLimit(scrubbed)
 		}
 		return resource
 	}

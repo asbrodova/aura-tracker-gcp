@@ -22,45 +22,61 @@ func (a *gcpAdapter) ListLoadBalancers(ctx context.Context, req models.ListLoadB
 	defer cancel()
 
 	var lbs []models.LoadBalancerSummary
+	truncated := false
 
 	// Global forwarding rules (always included when region is unspecified or "global")
 	if req.Region == "" || req.Region == "global" {
-		err := a.computeSvc.GlobalForwardingRules.List(req.ProjectID).
+		err := a.computeSvc.GlobalForwardingRules.List(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 			Context(ctx).Pages(ctx, func(page *compute.ForwardingRuleList) error {
 			for _, fr := range page.Items {
-				lbs = append(lbs, forwardingRuleToLB(fr, "global", ""))
+				if !appendInventoryBounded(&lbs, forwardingRuleToLB(fr, "global", "")) {
+					return errInventoryLimitReached
+				}
 			}
 			return nil
 		})
+		var limited bool
+		limited, err = inventoryLimitResult(err)
+		truncated = truncated || limited
 		if err != nil {
 			return models.ListLoadBalancersResponse{}, wrapGCPError("networking.ListLoadBalancers.global", err)
 		}
 	}
 
 	// Regional forwarding rules
-	if req.Region != "" && req.Region != "global" {
-		err := a.computeSvc.ForwardingRules.List(req.ProjectID, req.Region).
+	if !truncated && req.Region != "" && req.Region != "global" {
+		err := a.computeSvc.ForwardingRules.List(req.ProjectID, req.Region).MaxResults(maxUnpagedInventoryItems).
 			Context(ctx).Pages(ctx, func(page *compute.ForwardingRuleList) error {
 			for _, fr := range page.Items {
-				lbs = append(lbs, forwardingRuleToLB(fr, "regional", req.Region))
+				if !appendInventoryBounded(&lbs, forwardingRuleToLB(fr, "regional", req.Region)) {
+					return errInventoryLimitReached
+				}
 			}
 			return nil
 		})
+		var limited bool
+		limited, err = inventoryLimitResult(err)
+		truncated = truncated || limited
 		if err != nil {
 			return models.ListLoadBalancersResponse{}, wrapGCPError("networking.ListLoadBalancers.regional", err)
 		}
-	} else if req.Region == "" {
+	} else if !truncated && req.Region == "" {
 		// All regions via aggregated list
 		err := a.computeSvc.ForwardingRules.AggregatedList(req.ProjectID).
 			Context(ctx).Pages(ctx, func(page *compute.ForwardingRuleAggregatedList) error {
 			for scopeKey, scopedList := range page.Items {
 				region := regionFromScopeKey(scopeKey)
 				for _, fr := range scopedList.ForwardingRules {
-					lbs = append(lbs, forwardingRuleToLB(fr, "regional", region))
+					if !appendInventoryBounded(&lbs, forwardingRuleToLB(fr, "regional", region)) {
+						return errInventoryLimitReached
+					}
 				}
 			}
 			return nil
 		})
+		var limited bool
+		limited, err = inventoryLimitResult(err)
+		truncated = truncated || limited
 		if err != nil {
 			return models.ListLoadBalancersResponse{}, wrapGCPError("networking.ListLoadBalancers.aggregated", err)
 		}
@@ -69,7 +85,7 @@ func (a *gcpAdapter) ListLoadBalancers(ctx context.Context, req models.ListLoadB
 	if lbs == nil {
 		lbs = []models.LoadBalancerSummary{}
 	}
-	return models.ListLoadBalancersResponse{LoadBalancers: lbs}, nil
+	return models.ListLoadBalancersResponse{LoadBalancers: lbs, Truncated: truncated}, nil
 }
 
 func forwardingRuleToLB(fr *compute.ForwardingRule, scope, region string) models.LoadBalancerSummary {
@@ -100,28 +116,39 @@ func (a *gcpAdapter) ListURLMaps(ctx context.Context, req models.ListURLMapsRequ
 	defer cancel()
 
 	var maps []models.URLMapSummary
+	truncated := false
 
 	if req.Region == "" || req.Region == "global" {
-		err := a.computeSvc.UrlMaps.List(req.ProjectID).
+		err := a.computeSvc.UrlMaps.List(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 			Context(ctx).Pages(ctx, func(page *compute.UrlMapList) error {
 			for _, um := range page.Items {
-				maps = append(maps, urlMapToSummary(um, "global", ""))
+				if !appendInventoryBounded(&maps, urlMapToSummary(um, "global", "")) {
+					return errInventoryLimitReached
+				}
 			}
 			return nil
 		})
+		var limited bool
+		limited, err = inventoryLimitResult(err)
+		truncated = truncated || limited
 		if err != nil {
 			return models.ListURLMapsResponse{}, wrapGCPError("networking.ListURLMaps.global", err)
 		}
 	}
 
-	if req.Region != "" && req.Region != "global" {
-		err := a.computeSvc.RegionUrlMaps.List(req.ProjectID, req.Region).
+	if !truncated && req.Region != "" && req.Region != "global" {
+		err := a.computeSvc.RegionUrlMaps.List(req.ProjectID, req.Region).MaxResults(maxUnpagedInventoryItems).
 			Context(ctx).Pages(ctx, func(page *compute.UrlMapList) error {
 			for _, um := range page.Items {
-				maps = append(maps, urlMapToSummary(um, "regional", req.Region))
+				if !appendInventoryBounded(&maps, urlMapToSummary(um, "regional", req.Region)) {
+					return errInventoryLimitReached
+				}
 			}
 			return nil
 		})
+		var limited bool
+		limited, err = inventoryLimitResult(err)
+		truncated = truncated || limited
 		if err != nil {
 			return models.ListURLMapsResponse{}, wrapGCPError("networking.ListURLMaps.regional", err)
 		}
@@ -130,7 +157,7 @@ func (a *gcpAdapter) ListURLMaps(ctx context.Context, req models.ListURLMapsRequ
 	if maps == nil {
 		maps = []models.URLMapSummary{}
 	}
-	return models.ListURLMapsResponse{URLMaps: maps}, nil
+	return models.ListURLMapsResponse{URLMaps: maps, Truncated: truncated}, nil
 }
 
 func urlMapToSummary(um *compute.UrlMap, scope, region string) models.URLMapSummary {
@@ -154,7 +181,7 @@ func (a *gcpAdapter) ListNEGs(ctx context.Context, req models.ListNEGsRequest) (
 
 	var negs []models.NEGSummary
 
-	err := a.computeSvc.NetworkEndpointGroups.AggregatedList(req.ProjectID).
+	err := a.computeSvc.NetworkEndpointGroups.AggregatedList(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *compute.NetworkEndpointGroupAggregatedList) error {
 		for scopeKey, scopedList := range page.Items {
 			zone := zoneFromScopeKey(scopeKey)
@@ -163,11 +190,14 @@ func (a *gcpAdapter) ListNEGs(ctx context.Context, req models.ListNEGsRequest) (
 				if req.Region != "" && region != req.Region {
 					continue
 				}
-				negs = append(negs, negToSummary(neg, region, zone))
+				if !appendInventoryBounded(&negs, negToSummary(neg, region, zone)) {
+					return errInventoryLimitReached
+				}
 			}
 		}
 		return nil
 	})
+	truncated, err := inventoryLimitResult(err)
 	if err != nil {
 		return models.ListNEGsResponse{}, wrapGCPError("networking.ListNEGs", err)
 	}
@@ -175,7 +205,7 @@ func (a *gcpAdapter) ListNEGs(ctx context.Context, req models.ListNEGsRequest) (
 	if negs == nil {
 		negs = []models.NEGSummary{}
 	}
-	return models.ListNEGsResponse{NEGs: negs}, nil
+	return models.ListNEGsResponse{NEGs: negs, Truncated: truncated}, nil
 }
 
 func negToSummary(neg *compute.NetworkEndpointGroup, region, zone string) models.NEGSummary {
@@ -211,12 +241,16 @@ func (a *gcpAdapter) ListAPIGateways(ctx context.Context, req models.ListAPIGate
 
 	var gateways []models.APIGatewaySummary
 	err := a.apiGatewaySvc.Projects.Locations.Gateways.List(parent).
+		PageSize(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *apigateway.ApigatewayListGatewaysResponse) error {
 		for _, gw := range page.Gateways {
-			gateways = append(gateways, apiGatewayToSummary(gw))
+			if !appendInventoryBounded(&gateways, apiGatewayToSummary(gw)) {
+				return errInventoryLimitReached
+			}
 		}
 		return nil
 	})
+	truncated, err := inventoryLimitResult(err)
 	if err != nil {
 		return models.ListAPIGatewaysResponse{}, wrapGCPError("networking.ListAPIGateways", err)
 	}
@@ -224,7 +258,7 @@ func (a *gcpAdapter) ListAPIGateways(ctx context.Context, req models.ListAPIGate
 	if gateways == nil {
 		gateways = []models.APIGatewaySummary{}
 	}
-	return models.ListAPIGatewaysResponse{Gateways: gateways}, nil
+	return models.ListAPIGatewaysResponse{Gateways: gateways, Truncated: truncated}, nil
 }
 
 func apiGatewayToSummary(gw *apigateway.ApigatewayGateway) models.APIGatewaySummary {
@@ -262,13 +296,16 @@ func (a *gcpAdapter) ListVPCNetworks(ctx context.Context, req models.ListVPCNetw
 	defer cancel()
 
 	var networks []models.VPCNetworkSummary
-	err := a.computeSvc.Networks.List(req.ProjectID).
+	err := a.computeSvc.Networks.List(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *compute.NetworkList) error {
 		for _, n := range page.Items {
-			networks = append(networks, vpcNetworkToSummary(n))
+			if !appendInventoryBounded(&networks, vpcNetworkToSummary(n)) {
+				return errInventoryLimitReached
+			}
 		}
 		return nil
 	})
+	truncated, err := inventoryLimitResult(err)
 	if err != nil {
 		return models.ListVPCNetworksResponse{}, wrapGCPError("networking.ListVPCNetworks", err)
 	}
@@ -276,7 +313,7 @@ func (a *gcpAdapter) ListVPCNetworks(ctx context.Context, req models.ListVPCNetw
 	if networks == nil {
 		networks = []models.VPCNetworkSummary{}
 	}
-	return models.ListVPCNetworksResponse{Networks: networks}, nil
+	return models.ListVPCNetworksResponse{Networks: networks, Truncated: truncated}, nil
 }
 
 func vpcNetworkToSummary(n *compute.Network) models.VPCNetworkSummary {
@@ -300,7 +337,7 @@ func (a *gcpAdapter) ListVPCSubnets(ctx context.Context, req models.ListVPCSubne
 	defer cancel()
 
 	var subnets []models.VPCSubnetSummary
-	err := a.computeSvc.Subnetworks.AggregatedList(req.ProjectID).
+	err := a.computeSvc.Subnetworks.AggregatedList(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *compute.SubnetworkAggregatedList) error {
 		for scopeKey, scopedList := range page.Items {
 			region := regionFromScopeKey(scopeKey)
@@ -312,11 +349,14 @@ func (a *gcpAdapter) ListVPCSubnets(ctx context.Context, req models.ListVPCSubne
 				if req.Network != "" && networkName != req.Network && sn.Network != req.Network {
 					continue
 				}
-				subnets = append(subnets, subnetToSummary(sn, region))
+				if !appendInventoryBounded(&subnets, subnetToSummary(sn, region)) {
+					return errInventoryLimitReached
+				}
 			}
 		}
 		return nil
 	})
+	truncated, err := inventoryLimitResult(err)
 	if err != nil {
 		return models.ListVPCSubnetsResponse{}, wrapGCPError("networking.ListVPCSubnets", err)
 	}
@@ -324,7 +364,7 @@ func (a *gcpAdapter) ListVPCSubnets(ctx context.Context, req models.ListVPCSubne
 	if subnets == nil {
 		subnets = []models.VPCSubnetSummary{}
 	}
-	return models.ListVPCSubnetsResponse{Subnets: subnets}, nil
+	return models.ListVPCSubnetsResponse{Subnets: subnets, Truncated: truncated}, nil
 }
 
 func subnetToSummary(sn *compute.Subnetwork, region string) models.VPCSubnetSummary {
@@ -350,7 +390,8 @@ func (a *gcpAdapter) ListPSCEndpoints(ctx context.Context, req models.ListPSCEnd
 
 	var endpoints []models.PSCEndpointSummary
 	call := a.computeSvc.ForwardingRules.AggregatedList(req.ProjectID).
-		Filter(`purpose="PRIVATE_SERVICE_CONNECT"`)
+		Filter(`purpose="PRIVATE_SERVICE_CONNECT"`).
+		MaxResults(maxUnpagedInventoryItems)
 
 	err := call.Context(ctx).Pages(ctx, func(page *compute.ForwardingRuleAggregatedList) error {
 		for scopeKey, scopedList := range page.Items {
@@ -359,11 +400,14 @@ func (a *gcpAdapter) ListPSCEndpoints(ctx context.Context, req models.ListPSCEnd
 				continue
 			}
 			for _, fr := range scopedList.ForwardingRules {
-				endpoints = append(endpoints, pscEndpointToSummary(fr, region))
+				if !appendInventoryBounded(&endpoints, pscEndpointToSummary(fr, region)) {
+					return errInventoryLimitReached
+				}
 			}
 		}
 		return nil
 	})
+	truncated, err := inventoryLimitResult(err)
 	if err != nil {
 		return models.ListPSCEndpointsResponse{}, wrapGCPError("networking.ListPSCEndpoints", err)
 	}
@@ -371,7 +415,7 @@ func (a *gcpAdapter) ListPSCEndpoints(ctx context.Context, req models.ListPSCEnd
 	if endpoints == nil {
 		endpoints = []models.PSCEndpointSummary{}
 	}
-	return models.ListPSCEndpointsResponse{Endpoints: endpoints}, nil
+	return models.ListPSCEndpointsResponse{Endpoints: endpoints, Truncated: truncated}, nil
 }
 
 func pscEndpointToSummary(fr *compute.ForwardingRule, region string) models.PSCEndpointSummary {

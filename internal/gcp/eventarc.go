@@ -18,25 +18,25 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 		return models.ListTriggersResponse{}, err
 	}
 
-	regions, err := a.discoverRegions(ctx, req.ProjectID)
-	if err != nil {
-		return models.ListTriggersResponse{}, err
-	}
-
+	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceEventarc)
+	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
+		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var triggers []models.TriggerSummary
-	var errs []models.ToolError
+	truncated := false
+	errs := discoveryToolError(discovery, "eventarc.projects.locations.list")
+	perRegionLimit := regionalInventoryLimit(len(regions))
 
 	for _, r := range regions {
 		r := r
 		g.Go(func() error {
-			items, rerr := a.listTriggersForRegion(gctx, req.ProjectID, r)
+			items, regionTruncated, rerr := a.listTriggersForRegion(gctx, req.ProjectID, r, perRegionLimit)
 			mu.Lock()
 			defer mu.Unlock()
 			if rerr != nil {
@@ -48,6 +48,10 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 				return nil
 			}
 			triggers = append(triggers, items...)
+			if regionTruncated {
+				truncated = true
+				errs = append(errs, models.ToolError{FailingAPI: "eventarc.projects.locations.triggers.list", Message: fmt.Sprintf("region %s truncated at %d items", r, perRegionLimit)})
+			}
 			return nil
 		})
 	}
@@ -63,30 +67,33 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 		return triggers[i].Name < triggers[j].Name
 	})
 	sortToolErrors(errs)
-	return models.ListTriggersResponse{Triggers: triggers, Errors: errs}, nil
+	return models.ListTriggersResponse{Triggers: triggers, Errors: errs, Truncated: truncated}, nil
 }
 
-func (a *gcpAdapter) listTriggersForRegion(ctx context.Context, projectID, region string) ([]models.TriggerSummary, error) {
+func (a *gcpAdapter) listTriggersForRegion(ctx context.Context, projectID, region string, limit int) ([]models.TriggerSummary, bool, error) {
 	if a.eventarcClient == nil {
-		return nil, nil
+		return nil, false, fmt.Errorf("eventarc client is not initialized")
 	}
 	if err := a.rateWait(ctx, "eventarc.listTriggersForRegion"); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, region)
-	it := a.eventarcClient.ListTriggers(ctx, &eventarcpb.ListTriggersRequest{Parent: parent})
+	it := a.eventarcClient.ListTriggers(ctx, &eventarcpb.ListTriggersRequest{Parent: parent, PageSize: int32(limit)})
 
 	var triggers []models.TriggerSummary
 	for {
 		trig, err := it.Next()
 		if err != nil {
 			if isIteratorDone(err) {
-				break
+				return triggers, false, nil
 			}
-			return nil, wrapGCPError("eventarc.listTriggersForRegion", err)
+			return nil, false, wrapGCPError("eventarc.listTriggersForRegion", err)
+		}
+		if len(triggers) >= limit {
+			return triggers, true, nil
 		}
 		_, name := parseEventarcResourceName(trig.Name)
 		lastMod := ""
@@ -123,7 +130,6 @@ func (a *gcpAdapter) listTriggersForRegion(ctx context.Context, projectID, regio
 			LastModified:    lastMod,
 		})
 	}
-	return triggers, nil
 }
 
 func (a *gcpAdapter) GetTrigger(ctx context.Context, req models.GetTriggerRequest) (models.TriggerDetails, error) {

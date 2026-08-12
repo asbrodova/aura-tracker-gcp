@@ -144,6 +144,43 @@ test_lookup_error_does_not_attempt_creation() {
   assert_not_contains "$output" "iam service-accounts create"
 }
 
+test_local_auth_guidance_is_keyless() {
+  local output
+  output="$(run_setup true env)"
+
+	assert_contains "$output" "application-default login"
+	assert_contains "$output" "--impersonate-service-account=aura-tracker-mcp@test-project.iam.gserviceaccount.com"
+	assert_contains "$output" "services enable iamcredentials.googleapis.com"
+	assert_contains "$output" "LOCAL_IMPERSONATION_PRINCIPAL=user:YOUR_EMAIL"
+	assert_not_contains "$output" "service-accounts keys create"
+	assert_not_contains "$output" "sa-key.json"
+}
+
+test_local_impersonation_principal_reconciles_token_creator() {
+	local output
+	output="$(run_setup true env LOCAL_IMPERSONATION_PRINCIPAL=user:developer@example.com)"
+
+	assert_contains "$output" "services enable iamcredentials.googleapis.com"
+	assert_contains "$output" "service-accounts add-iam-policy-binding"
+	assert_contains "$output" "--member=user:developer@example.com"
+	assert_contains "$output" "--role=roles/iam.serviceAccountTokenCreator"
+	assert_contains "$output" "Token Creator was reconciled"
+}
+
+test_invalid_local_impersonation_principal_is_rejected() {
+	local output
+	local status
+
+	set +e
+	output="$(run_setup true env LOCAL_IMPERSONATION_PRINCIPAL=developer@example.com 2>&1)"
+	status=$?
+	set -e
+
+	[[ "$status" -eq 2 ]] || fail "expected invalid principal to exit 2, got ${status}"
+	assert_contains "$output" "must start with user:, group:, or serviceAccount:"
+	assert_not_contains "$output" "GCLOUD"
+}
+
 test_existing_account_reconciles_service_health
 test_missing_account_is_created
 test_optional_flags_work_for_existing_account
@@ -151,5 +188,8 @@ test_security_audit_setup_is_read_only
 test_security_audit_organization_roles_are_opt_in
 test_invalid_boolean_is_rejected
 test_lookup_error_does_not_attempt_creation
+test_local_auth_guidance_is_keyless
+test_local_impersonation_principal_reconciles_token_creator
+test_invalid_local_impersonation_principal_is_rejected
 
 echo "PASS: setup-iam.sh"

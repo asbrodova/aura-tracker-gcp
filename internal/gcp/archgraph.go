@@ -548,7 +548,7 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 		return nil
 	})
 	b1.Go(func() error {
-		r, err := a.ListServiceAccounts(b1ctx, models.ListServiceAccountsRequest{ProjectID: req.ProjectID})
+		r, err := a.ListServiceAccounts(b1ctx, models.ListServiceAccountsRequest{ProjectID: req.ProjectID, PageSize: maxInventoryPageSize})
 		if err != nil {
 			collectErr("iam.serviceAccounts.list", err)
 			return nil
@@ -558,6 +558,9 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 				ID:   graphURN("iam", "-", req.ProjectID, models.KindIAMServiceAccount, sa.Email),
 				Kind: models.KindIAMServiceAccount, Name: sa.Email, ProjectID: req.ProjectID,
 			})
+		}
+		if r.Truncated {
+			collectErr("iam.serviceAccounts.list", fmt.Errorf("result truncated at %d service accounts", maxInventoryPageSize))
 		}
 		return nil
 	})

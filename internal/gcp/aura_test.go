@@ -1,6 +1,7 @@
 package gcp
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -215,6 +216,192 @@ func TestCalculateAura_CloudRun_Critical(t *testing.T) {
 	}
 	if report.Score >= 50 {
 		t.Errorf("expected score < 50, got %d", report.Score)
+	}
+}
+
+func TestCalculateAura_DoesNotTreatMissingTelemetryAsHealthyZero(t *testing.T) {
+	noData := metricHealthSignal("error_rate", 0, errAuraMetricNoData, func(value float64) (int, string) {
+		return cloudRunSignalScore("error_rate", value)
+	})
+	if noData.Availability != "no_data" || noData.Score != 0 || noData.Label != "No data" {
+		t.Fatalf("no-data signal = %+v", noData)
+	}
+	signals := []models.AuraHealthSignal{
+		noData,
+		{Name: "cpu_util", Availability: "no_data", Label: "No data", Message: "no points"},
+		{Name: "latency_p99", Availability: "error", Label: "Unavailable", Message: "permission denied"},
+		{Name: "request_count_total", Availability: "no_data", Label: "No data", Message: "no points"},
+	}
+	report := calculateAura(models.ResourceKindCloudRun, "api", "us-central1", signals)
+	if report.CoverageStatus != "unavailable" || report.SignalsObserved != 0 || report.SignalsExpected != 4 {
+		t.Fatalf("coverage = %+v", report)
+	}
+	if report.Band != models.AuraBandUnavailable {
+		t.Fatalf("unavailable telemetry band = %q", report.Band)
+	}
+	if report.Display != "⚪ Cloud Run: api | Aura: N/A (telemetry unavailable)" || len(report.Warnings) != 4 {
+		t.Fatalf("unavailable report = %+v", report)
+	}
+}
+
+func TestRatioMetricValue(t *testing.T) {
+	permissionErr := errors.New("permission denied")
+	tests := []struct {
+		name           string
+		numerator      float64
+		numeratorErr   error
+		denominator    float64
+		denominatorErr error
+		want           float64
+		wantErr        error
+	}{
+		{
+			name:         "no numerator series means zero errors when total is observed",
+			numeratorErr: errAuraMetricNoData,
+			denominator:  200,
+			want:         0,
+		},
+		{
+			name:        "observed ratio",
+			numerator:   5,
+			denominator: 200,
+			want:        0.025,
+		},
+		{
+			name:        "zero denominator remains unavailable",
+			denominator: 0,
+			wantErr:     errAuraMetricNoData,
+		},
+		{
+			name:         "real numerator error is preserved",
+			numeratorErr: permissionErr,
+			denominator:  200,
+			wantErr:      permissionErr,
+		},
+		{
+			name:           "denominator error takes precedence",
+			numeratorErr:   errAuraMetricNoData,
+			denominatorErr: permissionErr,
+			wantErr:        permissionErr,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ratioMetricValue(test.numerator, test.numeratorErr, test.denominator, test.denominatorErr)
+			if test.wantErr != nil {
+				if !errors.Is(err, test.wantErr) {
+					t.Fatalf("error = %v, want %v", err, test.wantErr)
+				}
+				return
+			}
+			if err != nil || got != test.want {
+				t.Fatalf("ratioMetricValue() = (%v, %v), want (%v, nil)", got, err, test.want)
+			}
+		})
+	}
+}
+
+func TestCalculateAura_PartialTelemetryUsesOnlyObservedSignals(t *testing.T) {
+	report := calculateAura(models.ResourceKindCloudSQL, "database", "us-central1", []models.AuraHealthSignal{
+		{Name: "cpu_util", Availability: "no_data", Label: "No data", Message: "no points"},
+		{Name: "memory_util", Value: 0.5, Score: 100, Label: "OK", Availability: "observed"},
+		{Name: "disk_util", Value: 0.3, Score: 100, Label: "OK", Availability: "observed"},
+	})
+	if report.CoverageStatus != "partial" || report.SignalsObserved != 2 || report.SignalsExpected != 3 {
+		t.Fatalf("partial coverage = %+v", report)
+	}
+	if report.HealthScore != 100 || report.EfficiencyScore != 90 {
+		t.Fatalf("missing CPU was treated as a zero value: health=%d efficiency=%d", report.HealthScore, report.EfficiencyScore)
+	}
+	if !strings.Contains(report.Display, "[PARTIAL: 2/3 signals]") || len(report.Warnings) != 1 {
+		t.Fatalf("partial warning missing: %+v", report)
+	}
+}
+
+func TestPartialTelemetryDoesNotInventZeroValueDiagnoses(t *testing.T) {
+	tests := []struct {
+		name       string
+		kind       models.ResourceKind
+		signals    []models.AuraHealthSignal
+		forbidden  []string
+		labelAvoid string
+	}{
+		{
+			name: "cloud run missing cpu",
+			kind: models.ResourceKindCloudRun,
+			signals: []models.AuraHealthSignal{
+				{Name: "error_rate", Value: 0, Score: 100, Label: "OK", Availability: "observed"},
+				{Name: "request_count_total", Value: 10, Score: 100, Label: "info", Availability: "observed"},
+				{Name: "latency_p99", Value: 100, Score: 100, Label: "OK", Availability: "observed"},
+			},
+			forbidden:  []string{"CPU at 0%"},
+			labelAvoid: "Healthy, Over-provisioned",
+		},
+		{
+			name: "cloud sql missing cpu",
+			kind: models.ResourceKindCloudSQL,
+			signals: []models.AuraHealthSignal{
+				{Name: "memory_util", Value: 0.5, Score: 100, Label: "OK", Availability: "observed"},
+				{Name: "disk_util", Value: 0.3, Score: 100, Label: "OK", Availability: "observed"},
+			},
+			forbidden:  []string{"CPU at 0%"},
+			labelAvoid: "Idle, Consider Downsize",
+		},
+		{
+			name: "bigquery missing slot metric",
+			kind: models.ResourceKindBigQuery,
+			signals: []models.AuraHealthSignal{
+				{Name: "job_failure_rate", Value: 0, Score: 100, Label: "OK", Availability: "observed"},
+				{Name: "storage_bytes", Value: 1024, Score: 100, Label: "OK", Availability: "observed"},
+			},
+			forbidden: []string{"Slot utilization near zero"},
+		},
+		{
+			name: "gke missing control plane and utilization",
+			kind: models.ResourceKindGKE,
+			signals: []models.AuraHealthSignal{
+				{Name: "pod_restart_rate", Value: 0, Score: 100, Label: "OK", Availability: "observed"},
+			},
+			forbidden:  []string{"Control plane", "cluster is idle"},
+			labelAvoid: "Control Plane Error",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reasons := strings.Join(buildReasons(test.kind, test.signals), "\n")
+			for _, forbidden := range test.forbidden {
+				if strings.Contains(reasons, forbidden) {
+					t.Fatalf("invented diagnosis %q from missing signal: %s", forbidden, reasons)
+				}
+			}
+			if label := auraLabel(85, test.signals, test.kind); test.labelAvoid != "" && label == test.labelAvoid {
+				t.Fatalf("invented label %q from missing signal", label)
+			}
+		})
+	}
+}
+
+func TestValidateAuraRequestRejectsFilterInjectionCharacters(t *testing.T) {
+	valid := models.GetAuraScoreRequest{
+		ProjectID: "valid-project-123", ResourceKind: models.ResourceKindCloudRun,
+		ResourceName: "api-service", Region: "us-central1",
+	}
+	if err := validateAuraRequest(valid); err != nil {
+		t.Fatalf("valid request rejected: %v", err)
+	}
+	invalid := []models.GetAuraScoreRequest{
+		{ProjectID: `valid-project-123" OR resource.type="gce_instance`, ResourceName: "api-service", Region: "us-central1"},
+		{ProjectID: "valid-project-123", ResourceName: `api" OR true`, Region: "us-central1"},
+		{ProjectID: "valid-project-123", ResourceName: "api-service", Region: `us-central1" OR true`},
+	}
+	for _, request := range invalid {
+		if err := validateAuraRequest(request); err == nil {
+			t.Fatalf("invalid Aura request accepted: %+v", request)
+		}
+	}
+	if got := escapeMonitoringString(`a"b\\c`); got != `a\"b\\\\c` {
+		t.Fatalf("escaped monitoring value = %q", got)
 	}
 }
 
