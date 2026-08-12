@@ -61,10 +61,14 @@ func (c *GCPCollector) collectGKEWorkloads(ctx context.Context, req CollectionRe
 				result.Resources = append(result.Resources, kubernetesResource("gke_workloads", "gke.workload."+workload.Kind, cluster, workload.Name, workload.Namespace, workload.Kind, workload))
 				continue
 			}
-			result.Resources = append(result.Resources, kubernetesResource("gke_workloads", "gke.workload."+workload.Kind, cluster, workload.Name, workload.Namespace, workload.Kind, details))
+			result.Resources = append(result.Resources, kubernetesResource("gke_workloads", "gke.workload."+workload.Kind, cluster, workload.Name, workload.Namespace, workload.Kind, workloadDriftConfig(details)))
 		}
 		partial, warnings := toolErrors(workloads.Errors)
 		mergePartial(&result, partial, warnings)
+		if workloads.Truncated {
+			result.Partial = true
+			result.Warnings = append(result.Warnings, fmt.Sprintf("cluster %s workload limit reached; additional pages were not compared", cluster.Name))
+		}
 
 		services, serviceErr := c.source.ListGKEServices(ctx, models.ListGKEServicesRequest{ProjectID: req.ProjectID, Location: cluster.Location, ClusterName: cluster.Name})
 		if serviceErr != nil {
@@ -111,6 +115,36 @@ func (c *GCPCollector) collectGKEWorkloads(ctx context.Context, req CollectionRe
 	return result, nil
 }
 
+// workloadDriftConfig adds non-serialized literal fingerprints to the private
+// comparison snapshot. The comparison response redacts fingerprint values, so
+// callers learn only that a literal changed, never its value or hash.
+func workloadDriftConfig(details models.GKEWorkloadDetails) map[string]any {
+	config := configMap(details)
+	if len(details.OmittedAnnotationFingerprints) > 0 {
+		fingerprints := make([]any, len(details.OmittedAnnotationFingerprints))
+		for index, fingerprint := range details.OmittedAnnotationFingerprints {
+			fingerprints[index] = fingerprint
+		}
+		config["omitted_annotation_fingerprints"] = fingerprints
+	}
+	containers, _ := config["containers"].([]any)
+	for containerIndex, container := range details.Containers {
+		if containerIndex >= len(containers) {
+			break
+		}
+		containerConfig, _ := containers[containerIndex].(map[string]any)
+		envConfigs, _ := containerConfig["env_vars"].([]any)
+		for envIndex, env := range container.EnvVars {
+			if env.ValueFingerprint == "" || envIndex >= len(envConfigs) {
+				continue
+			}
+			envConfig, _ := envConfigs[envIndex].(map[string]any)
+			envConfig["literal_value_fingerprint"] = env.ValueFingerprint
+		}
+	}
+	return config
+}
+
 func includeKubernetesResource(req CollectionRequest, name, namespace string) bool {
 	if len(req.ResourceNames) > 0 && !containsFold(req.ResourceNames, name) {
 		return false
@@ -138,6 +172,7 @@ func (c *GCPCollector) collectNetworking(ctx context.Context, req CollectionRequ
 				result.Resources = append(result.Resources, resource("networking", "compute.load_balancer", value.Name, value.Region, value.Scope, value))
 			}
 		}
+		markInventoryTruncated(&result, loadBalancers.Truncated, "load balancer")
 	}
 	urlMaps, err := c.source.ListURLMaps(ctx, models.ListURLMapsRequest{ProjectID: req.ProjectID})
 	if err != nil {
@@ -149,6 +184,7 @@ func (c *GCPCollector) collectNetworking(ctx context.Context, req CollectionRequ
 				result.Resources = append(result.Resources, resource("networking", "compute.url_map", value.Name, value.Region, value.Scope, value))
 			}
 		}
+		markInventoryTruncated(&result, urlMaps.Truncated, "URL map")
 	}
 	negs, err := c.source.ListNEGs(ctx, models.ListNEGsRequest{ProjectID: req.ProjectID})
 	if err != nil {
@@ -164,6 +200,7 @@ func (c *GCPCollector) collectNetworking(ctx context.Context, req CollectionRequ
 				result.Resources = append(result.Resources, resource("networking", "compute.neg", value.Name, location, value.NetworkEndpointType, value))
 			}
 		}
+		markInventoryTruncated(&result, negs.Truncated, "network endpoint group")
 	}
 	gateways, err := c.source.ListAPIGateways(ctx, models.ListAPIGatewaysRequest{ProjectID: req.ProjectID})
 	if err != nil {
@@ -175,6 +212,7 @@ func (c *GCPCollector) collectNetworking(ctx context.Context, req CollectionRequ
 				result.Resources = append(result.Resources, resource("networking", "apigateway.gateway", value.Name, value.Location, "", value))
 			}
 		}
+		markInventoryTruncated(&result, gateways.Truncated, "API gateway")
 	}
 	networks, err := c.source.ListVPCNetworks(ctx, models.ListVPCNetworksRequest{ProjectID: req.ProjectID})
 	if err != nil {
@@ -186,6 +224,7 @@ func (c *GCPCollector) collectNetworking(ctx context.Context, req CollectionRequ
 				result.Resources = append(result.Resources, resource("networking", "compute.network", value.Name, "", "", value))
 			}
 		}
+		markInventoryTruncated(&result, networks.Truncated, "VPC network")
 	}
 	subnets, err := c.source.ListVPCSubnets(ctx, models.ListVPCSubnetsRequest{ProjectID: req.ProjectID})
 	if err != nil {
@@ -197,6 +236,7 @@ func (c *GCPCollector) collectNetworking(ctx context.Context, req CollectionRequ
 				result.Resources = append(result.Resources, resource("networking", "compute.subnet", value.Name, value.Region, "", value))
 			}
 		}
+		markInventoryTruncated(&result, subnets.Truncated, "VPC subnet")
 	}
 	psc, err := c.source.ListPSCEndpoints(ctx, models.ListPSCEndpointsRequest{ProjectID: req.ProjectID})
 	if err != nil {
@@ -208,6 +248,7 @@ func (c *GCPCollector) collectNetworking(ctx context.Context, req CollectionRequ
 				result.Resources = append(result.Resources, resource("networking", "compute.psc_endpoint", value.Name, value.Region, "", value))
 			}
 		}
+		markInventoryTruncated(&result, psc.Truncated, "Private Service Connect endpoint")
 	}
 	return result, nil
 }

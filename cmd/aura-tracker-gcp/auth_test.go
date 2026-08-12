@@ -117,6 +117,30 @@ func TestLoadSSEAuthConfigRequiresHTTPSOffLoopback(t *testing.T) {
 	}
 }
 
+func TestLoadSSEAuthConfigRequiresExplicitPublicAuthorizationPolicy(t *testing.T) {
+	if _, err := loadSSEAuthConfig("https://service.example", func(string) string { return "" }); err == nil ||
+		!strings.Contains(err.Error(), "MCP_AUTH_ALLOWED_EMAILS") {
+		t.Fatalf("public SSE without an authorization policy error = %v", err)
+	}
+
+	values := map[string]string{"MCP_AUTH_ALLOWED_EMAILS": "caller@example.com"}
+	cfg, err := loadSSEAuthConfig("https://service.example", func(name string) string { return values[name] })
+	if err != nil || len(cfg.AllowedEmails) != 1 || cfg.AllowAnyValidToken {
+		t.Fatalf("allowlisted config = %+v, %v", cfg, err)
+	}
+
+	values = map[string]string{"MCP_AUTH_ALLOW_ANY_VALID_TOKEN": "true"}
+	cfg, err = loadSSEAuthConfig("https://service.example", func(name string) string { return values[name] })
+	if err != nil || !cfg.AllowAnyValidToken {
+		t.Fatalf("explicit allow-any config = %+v, %v", cfg, err)
+	}
+
+	values["MCP_AUTH_ALLOW_ANY_VALID_TOKEN"] = "yes"
+	if _, err := loadSSEAuthConfig("https://service.example", func(name string) string { return values[name] }); err == nil {
+		t.Fatal("ambiguous MCP_AUTH_ALLOW_ANY_VALID_TOKEN value was accepted")
+	}
+}
+
 func TestValidSessionID(t *testing.T) {
 	if !validSessionID("session-1234") {
 		t.Fatal("valid session ID rejected")

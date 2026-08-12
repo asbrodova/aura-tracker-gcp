@@ -11,6 +11,7 @@ import (
 // cached graph and preserves referential integrity between nodes, edges, and
 // groups. Collection-affecting options belong in archGraphCacheKey instead.
 func applyArchitectureGraphView(graph models.ServerlessGraph, req models.ExportArchitectureGraphRequest) models.ServerlessGraph {
+	graph = cloneServerlessGraph(graph)
 	regionSet := make(map[string]bool, len(req.Regions))
 	for _, region := range req.Regions {
 		if region != "" && region != "-" {
@@ -67,6 +68,40 @@ func applyArchitectureGraphView(graph models.ServerlessGraph, req models.ExportA
 		sort.Strings(graph.RegionsScanned)
 	}
 	return graph
+}
+
+func cloneServerlessGraph(graph models.ServerlessGraph) models.ServerlessGraph {
+	graph.Nodes = append([]models.GraphNode(nil), graph.Nodes...)
+	for index := range graph.Nodes {
+		graph.Nodes[index].Labels = cloneStringMap(graph.Nodes[index].Labels)
+		graph.Nodes[index].Attributes = cloneStringMap(graph.Nodes[index].Attributes)
+		if graph.Nodes[index].Observability != nil {
+			observability := *graph.Nodes[index].Observability
+			graph.Nodes[index].Observability = &observability
+		}
+	}
+	graph.Edges = append([]models.GraphEdge(nil), graph.Edges...)
+	for index := range graph.Edges {
+		graph.Edges[index].Metadata = cloneStringMap(graph.Edges[index].Metadata)
+	}
+	graph.Groups = append([]models.GraphGroup(nil), graph.Groups...)
+	for index := range graph.Groups {
+		graph.Groups[index].Members = append([]string(nil), graph.Groups[index].Members...)
+	}
+	graph.Errors = append([]models.ToolError(nil), graph.Errors...)
+	graph.RegionsScanned = append([]string(nil), graph.RegionsScanned...)
+	return graph
+}
+
+func cloneStringMap(value map[string]string) map[string]string {
+	if value == nil {
+		return nil
+	}
+	clone := make(map[string]string, len(value))
+	for key, item := range value {
+		clone[key] = item
+	}
+	return clone
 }
 
 func nodeIDSet(nodes []models.GraphNode) map[string]bool {

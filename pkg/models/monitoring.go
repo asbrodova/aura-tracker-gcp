@@ -71,11 +71,15 @@ type MetricDescriptorSummary struct {
 type ListMetricDescriptorsRequest struct {
 	ProjectID string `json:"project_id"`
 	Filter    string `json:"filter,omitempty"` // optional prefix filter, e.g. "metric.type = starts_with(\"custom.\")"
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
 }
 
 // ListMetricDescriptorsResponse holds the list result.
 type ListMetricDescriptorsResponse struct {
-	Descriptors []MetricDescriptorSummary `json:"descriptors"`
+	Descriptors   []MetricDescriptorSummary `json:"descriptors"`
+	NextPageToken string                    `json:"next_page_token,omitempty"`
+	Truncated     bool                      `json:"truncated,omitempty"`
 }
 
 // --- Alert Policies ---
@@ -91,10 +95,14 @@ type AlertPolicySummary struct {
 type ListAlertPoliciesRequest struct {
 	ProjectID string `json:"project_id"`
 	Filter    string `json:"filter,omitempty"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
 }
 
 type ListAlertPoliciesResponse struct {
-	Policies []AlertPolicySummary `json:"policies"`
+	Policies      []AlertPolicySummary `json:"policies"`
+	NextPageToken string               `json:"next_page_token,omitempty"`
+	Truncated     bool                 `json:"truncated,omitempty"`
 }
 
 // --- Uptime Checks ---
@@ -179,10 +187,14 @@ type TraceService struct {
 // ListTraceServicesRequest lists services that have sent traces.
 type ListTraceServicesRequest struct {
 	ProjectID string `json:"project_id"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
 }
 
 // ListTraceServicesResponse holds the list result.
 type ListTraceServicesResponse struct {
-	Services []TraceService `json:"services"`
-	Backend  string         `json:"backend"` // "trace" or "monitoring"
+	Services      []TraceService `json:"services"`
+	Backend       string         `json:"backend"` // "trace" or "monitoring"
+	NextPageToken string         `json:"next_page_token,omitempty"`
+	Truncated     bool           `json:"truncated,omitempty"`
 }

@@ -20,19 +20,18 @@ func (a *gcpAdapter) ListVPCConnectors(ctx context.Context, req models.ListVPCCo
 		return models.ListVPCConnectorsResponse{Connectors: []models.VPCConnectorSummary{}}, nil
 	}
 
-	regions, err := a.discoverRegions(ctx, req.ProjectID)
-	if err != nil {
-		return models.ListVPCConnectorsResponse{}, err
-	}
+	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceVPCAccess)
+	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
+		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var connectors []models.VPCConnectorSummary
-	var errs []models.ToolError
+	errs := discoveryToolError(discovery, "vpcaccess.projects.locations.list")
 
 	for _, r := range regions {
 		r := r

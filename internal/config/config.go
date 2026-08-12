@@ -2,6 +2,8 @@
 package config
 
 import (
+	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -80,5 +82,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	var cfg Config
-	return cfg, yaml.Unmarshal(data, &cfg)
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&cfg); err != nil {
+		return Config{}, fmt.Errorf("parse %s: %w", filepath.Join(home, ".aura-tracker.yaml"), err)
+	}
+	return cfg, nil
 }

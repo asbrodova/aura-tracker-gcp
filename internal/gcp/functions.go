@@ -24,32 +24,40 @@ func (a *gcpAdapter) ListFunctions(ctx context.Context, req models.ListFunctions
 	}
 
 	var funcs []models.FunctionSummary
+	truncated := false
 
 	if gen == "1" || gen == "both" {
-		v1List, err := a.listFunctionsV1(ctx, req.ProjectID, req.Region)
+		v1List, v1Truncated, err := a.listFunctionsV1(ctx, req.ProjectID, req.Region, maxUnpagedInventoryItems)
 		if err != nil {
 			return models.ListFunctionsResponse{}, err
 		}
 		funcs = append(funcs, v1List...)
+		truncated = v1Truncated
 	}
 
-	if gen == "2" || gen == "both" {
-		v2List, err := a.listFunctionsV2(ctx, req.ProjectID, req.Region)
+	if !truncated && len(funcs) < maxUnpagedInventoryItems && (gen == "2" || gen == "both") {
+		v2List, v2Truncated, err := a.listFunctionsV2(ctx, req.ProjectID, req.Region, maxUnpagedInventoryItems-len(funcs))
 		if err != nil {
 			return models.ListFunctionsResponse{}, err
 		}
 		funcs = append(funcs, v2List...)
+		truncated = v2Truncated
+	}
+	if gen == "both" && len(funcs) >= maxUnpagedInventoryItems {
+		// The shared response budget leaves no room to inspect the other
+		// generation, so completeness cannot be claimed.
+		truncated = true
 	}
 
 	if funcs == nil {
 		funcs = []models.FunctionSummary{}
 	}
-	return models.ListFunctionsResponse{Functions: funcs}, nil
+	return models.ListFunctionsResponse{Functions: funcs, Truncated: truncated}, nil
 }
 
-func (a *gcpAdapter) listFunctionsV1(ctx context.Context, projectID, region string) ([]models.FunctionSummary, error) {
+func (a *gcpAdapter) listFunctionsV1(ctx context.Context, projectID, region string, limit int) ([]models.FunctionSummary, bool, error) {
 	if a.fnGen1 == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
@@ -61,13 +69,16 @@ func (a *gcpAdapter) listFunctionsV1(ctx context.Context, projectID, region stri
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, loc)
 
 	var funcs []models.FunctionSummary
-	call := a.fnGen1.Projects.Locations.Functions.List(parent)
+	call := a.fnGen1.Projects.Locations.Functions.List(parent).PageSize(int64(limit))
 	if err := call.Pages(ctx, func(page *cloudfunctions.ListFunctionsResponse) error {
 		for _, fn := range page.Functions {
 			r, name := parseFnV1ResourceName(fn.Name)
 			url := ""
 			if fn.HttpsTrigger != nil {
 				url = fn.HttpsTrigger.Url
+			}
+			if len(funcs) >= limit {
+				return errInventoryLimitReached
 			}
 			funcs = append(funcs, models.FunctionSummary{
 				Name:       name,
@@ -81,14 +92,18 @@ func (a *gcpAdapter) listFunctionsV1(ctx context.Context, projectID, region stri
 		}
 		return nil
 	}); err != nil {
-		return nil, wrapGCPError("functions.ListFunctionsV1", err)
+		truncated, remaining := inventoryLimitResult(err)
+		if remaining != nil {
+			return nil, false, wrapGCPError("functions.ListFunctionsV1", remaining)
+		}
+		return funcs, truncated, nil
 	}
-	return funcs, nil
+	return funcs, false, nil
 }
 
-func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region string) ([]models.FunctionSummary, error) {
+func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region string, limit int) ([]models.FunctionSummary, bool, error) {
 	if a.runSvc == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
@@ -98,17 +113,22 @@ func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region stri
 		loc = "-"
 	}
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, loc)
-	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent})
+	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent, PageSize: int32(limit)})
 
 	var funcs []models.FunctionSummary
+	seen := 0
 	for {
 		svc, err := it.Next()
 		if err != nil {
 			if isIteratorDone(err) {
-				break
+				return funcs, false, nil
 			}
-			return nil, wrapGCPError("functions.ListFunctionsV2", err)
+			return nil, false, wrapGCPError("functions.ListFunctionsV2", err)
 		}
+		if seen >= limit {
+			return funcs, true, nil
+		}
+		seen++
 		if svc.Labels["goog-managed-by"] != "cloudfunctions" {
 			continue
 		}
@@ -127,7 +147,6 @@ func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region stri
 			Labels:       svc.Labels,
 		})
 	}
-	return funcs, nil
 }
 
 // GetFunctionDetails retrieves full details for a single Cloud Function.

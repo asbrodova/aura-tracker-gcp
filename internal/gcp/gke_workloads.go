@@ -120,6 +120,21 @@ func wrapK8sErr(op string, err error) error {
 }
 
 func (a *gcpAdapter) ListGKEWorkloads(ctx context.Context, req models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error) {
+	canonicalKind, err := canonicalWorkloadKind(req.Kind, true)
+	if err != nil {
+		return models.ListGKEWorkloadsResponse{}, fmt.Errorf("gke.ListGKEWorkloads: %w", err)
+	}
+	req.Kind = canonicalKind
+	pageSize := req.PageSize
+	if pageSize == 0 {
+		pageSize = 500
+	}
+	if pageSize < 1 || pageSize > 1000 {
+		return models.ListGKEWorkloadsResponse{}, fmt.Errorf("gke.ListGKEWorkloads: page_size must be between 1 and 1000")
+	}
+	if _, _, err := decodeWorkloadPageToken(req.PageToken); err != nil {
+		return models.ListGKEWorkloadsResponse{}, err
+	}
 	if err := a.rateWait(ctx, "gke.ListGKEWorkloads"); err != nil {
 		return models.ListGKEWorkloadsResponse{}, err
 	}
@@ -131,14 +146,19 @@ func (a *gcpAdapter) ListGKEWorkloads(ctx context.Context, req models.ListGKEWor
 		return models.ListGKEWorkloadsResponse{}, err
 	}
 
-	workloads, err := k8s.listWorkloads(ctx, req.Namespace, req.Kind)
+	workloads, nextPageToken, err := k8s.listWorkloads(ctx, req.Namespace, req.Kind, pageSize, req.PageToken)
 	if err != nil {
 		return models.ListGKEWorkloadsResponse{}, wrapK8sErr("gke.ListGKEWorkloads", err)
 	}
-	return models.ListGKEWorkloadsResponse{Workloads: workloads}, nil
+	return models.ListGKEWorkloadsResponse{Workloads: workloads, NextPageToken: nextPageToken, Truncated: nextPageToken != ""}, nil
 }
 
 func (a *gcpAdapter) GetGKEWorkloadDetails(ctx context.Context, req models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error) {
+	canonicalKind, err := canonicalWorkloadKind(req.Kind, false)
+	if err != nil {
+		return models.GKEWorkloadDetails{}, fmt.Errorf("gke.GetGKEWorkloadDetails: %w", err)
+	}
+	req.Kind = canonicalKind
 	if err := a.rateWait(ctx, "gke.GetGKEWorkloadDetails"); err != nil {
 		return models.GKEWorkloadDetails{}, err
 	}

@@ -56,6 +56,78 @@ func TestCompareUsesExactEnvironmentNamesAndIsSymmetric(t *testing.T) {
 	}
 }
 
+func TestCompareReportsPlacementAndQualifierDrift(t *testing.T) {
+	collector := &fakeCollector{components: []string{"gke_workloads"}, results: map[string]CollectionResult{
+		"dev/gke_workloads": {Resources: []Resource{{
+			Component: "gke_workloads", ResourceType: "gke.workload.Deployment", Name: "api",
+			Location: "us-central1", Qualifier: "cluster-a/prod/Deployment", Config: map[string]any{"replicas": 3},
+		}}},
+		"prod/gke_workloads": {Resources: []Resource{{
+			Component: "gke_workloads", ResourceType: "gke.workload.Deployment", Name: "api",
+			Location: "europe-west1", Qualifier: "cluster-b/prod/Deployment", Config: map[string]any{"replicas": 3},
+		}}},
+	}}
+	response, err := New(collector, nil).Compare(context.Background(), models.CompareEnvironmentsRequest{
+		EnvironmentA: "dev", EnvironmentB: "prod",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Result != "differences_found" || len(response.Resources) != 1 || response.Resources[0].Status != "different" {
+		t.Fatalf("response = %+v", response)
+	}
+	resource := response.Resources[0]
+	if resource.Location != "us-central1 ↔ europe-west1" || resource.Qualifier != "cluster-a/prod/Deployment ↔ cluster-b/prod/Deployment" {
+		t.Fatalf("placement summary = %+v", resource)
+	}
+	if len(resource.FieldDifferences) != 2 || resource.FieldDifferences[0].Category != "placement" || resource.FieldDifferences[1].Category != "placement" {
+		t.Fatalf("placement differences = %+v", resource.FieldDifferences)
+	}
+	paths := resource.FieldDifferences[0].Path + " " + resource.FieldDifferences[1].Path
+	if !strings.Contains(paths, "/location") || !strings.Contains(paths, "/qualifier") {
+		t.Fatalf("placement paths = %s", paths)
+	}
+}
+
+type blockingCollector struct {
+	release <-chan struct{}
+	done    chan<- struct{}
+}
+
+func (b *blockingCollector) SupportedComponents() []string { return []string{"cloudrun"} }
+
+func (b *blockingCollector) Collect(context.Context, CollectionRequest) (CollectionResult, error) {
+	<-b.release
+	b.done <- struct{}{}
+	return CollectionResult{}, nil
+}
+
+func TestCompareReturnsAtDeadlineWhenCollectorIgnoresCancellation(t *testing.T) {
+	release := make(chan struct{})
+	done := make(chan struct{}, 2)
+	engine := New(&blockingCollector{release: release, done: done}, nil, WithTimeout(25*time.Millisecond))
+	started := time.Now()
+	response, err := engine.Compare(context.Background(), models.CompareEnvironmentsRequest{EnvironmentA: "dev", EnvironmentB: "prod"})
+	elapsed := time.Since(started)
+	close(release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("comparison blocked for %s after its deadline", elapsed)
+	}
+	if response.CoverageStatus != "partial" || response.Result != "no_comparable_resources" || len(response.Warnings) == 0 {
+		t.Fatalf("timeout response = %+v", response)
+	}
+	for range 2 {
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("collector goroutine did not finish after release")
+		}
+	}
+}
+
 func TestCompareNormalizesProjectReferencesAndUnorderedArrays(t *testing.T) {
 	collector := &fakeCollector{components: []string{"cloudrun"}, results: map[string]CollectionResult{
 		"dev-project/cloudrun":  {Resources: []Resource{{Component: "cloudrun", ResourceType: "cloudrun.service", Name: "api", Config: map[string]any{"service_account": "runner@dev-project.iam.gserviceaccount.com", "tags": []any{"blue", "green"}, "update_time": "yesterday"}}}},

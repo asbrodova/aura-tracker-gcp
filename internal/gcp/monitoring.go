@@ -10,6 +10,7 @@ import (
 
 	monitoringpb "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
 	"google.golang.org/api/iterator"
+	metricpb "google.golang.org/genproto/googleapis/api/metric"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -45,6 +46,10 @@ var supportedReducers = map[string]monitoringpb.Aggregation_Reducer{
 }
 
 func (a *gcpAdapter) ListAlertPolicies(ctx context.Context, req models.ListAlertPoliciesRequest) (models.ListAlertPoliciesResponse, error) {
+	pageSize, err := inventoryPageSize(req.PageSize)
+	if err != nil {
+		return models.ListAlertPoliciesResponse{}, fmt.Errorf("monitoring.ListAlertPolicies: %w", err)
+	}
 	if err := a.rateWait(ctx, "monitoring.ListAlertPolicies"); err != nil {
 		return models.ListAlertPoliciesResponse{}, err
 	}
@@ -54,35 +59,29 @@ func (a *gcpAdapter) ListAlertPolicies(ctx context.Context, req models.ListAlert
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	policies := []models.AlertPolicySummary{}
-	for pageToken := ""; ; {
-		call := a.monitoringSvc.Projects.AlertPolicies.List("projects/" + req.ProjectID).Context(ctx)
-		if req.Filter != "" {
-			call = call.Filter(req.Filter)
-		}
-		if pageToken != "" {
-			call = call.PageToken(pageToken)
-		}
-		resp, err := call.Do()
-		if err != nil {
-			return models.ListAlertPoliciesResponse{}, wrapGCPError("monitoring.ListAlertPolicies", err)
-		}
-		for _, p := range resp.AlertPolicies {
-			conditions := make([]string, 0, len(p.Conditions))
-			for _, c := range p.Conditions {
-				conditions = append(conditions, c.DisplayName)
-			}
-			policies = append(policies, models.AlertPolicySummary{
-				Name: p.Name, DisplayName: p.DisplayName, Enabled: p.Enabled,
-				Severity: p.Severity, Conditions: conditions,
-			})
-		}
-		if resp.NextPageToken == "" {
-			break
-		}
-		pageToken = resp.NextPageToken
+	call := a.monitoringSvc.Projects.AlertPolicies.List("projects/" + req.ProjectID).Context(ctx).PageSize(int64(pageSize))
+	if req.Filter != "" {
+		call = call.Filter(req.Filter)
 	}
-	return models.ListAlertPoliciesResponse{Policies: policies}, nil
+	if req.PageToken != "" {
+		call = call.PageToken(req.PageToken)
+	}
+	resp, err := call.Do()
+	if err != nil {
+		return models.ListAlertPoliciesResponse{}, wrapGCPError("monitoring.ListAlertPolicies", err)
+	}
+	policies := make([]models.AlertPolicySummary, 0, len(resp.AlertPolicies))
+	for _, p := range resp.AlertPolicies {
+		conditions := make([]string, 0, len(p.Conditions))
+		for _, c := range p.Conditions {
+			conditions = append(conditions, c.DisplayName)
+		}
+		policies = append(policies, models.AlertPolicySummary{
+			Name: p.Name, DisplayName: p.DisplayName, Enabled: p.Enabled,
+			Severity: p.Severity, Conditions: conditions,
+		})
+	}
+	return models.ListAlertPoliciesResponse{Policies: policies, NextPageToken: resp.NextPageToken, Truncated: resp.NextPageToken != ""}, nil
 }
 
 func (a *gcpAdapter) ListUptimeChecks(ctx context.Context, req models.ListUptimeChecksRequest) (models.ListUptimeChecksResponse, error) {
@@ -218,6 +217,10 @@ func (a *gcpAdapter) ListDashboards(ctx context.Context, req models.ListDashboar
 }
 
 func (a *gcpAdapter) ListMetricDescriptors(ctx context.Context, req models.ListMetricDescriptorsRequest) (models.ListMetricDescriptorsResponse, error) {
+	pageSize, err := inventoryPageSize(req.PageSize)
+	if err != nil {
+		return models.ListMetricDescriptorsResponse{}, fmt.Errorf("monitoring.ListMetricDescriptors: %w", err)
+	}
 	if err := a.rateWait(ctx, "monitoring.ListMetricDescriptors"); err != nil {
 		return models.ListMetricDescriptorsResponse{}, err
 	}
@@ -232,15 +235,13 @@ func (a *gcpAdapter) ListMetricDescriptors(ctx context.Context, req models.ListM
 	}
 
 	it := a.metric.ListMetricDescriptors(ctx, pbReq)
-	var descriptors []models.MetricDescriptorSummary
-	for {
-		md, err := it.Next()
-		if isIteratorDone(err) {
-			break
-		}
-		if err != nil {
-			return models.ListMetricDescriptorsResponse{}, wrapGCPError("monitoring.ListMetricDescriptors", err)
-		}
+	var rawDescriptors []*metricpb.MetricDescriptor
+	nextPageToken, err := iterator.NewPager(it, pageSize, req.PageToken).NextPage(&rawDescriptors)
+	if err != nil {
+		return models.ListMetricDescriptorsResponse{}, wrapGCPError("monitoring.ListMetricDescriptors", err)
+	}
+	descriptors := make([]models.MetricDescriptorSummary, 0, len(rawDescriptors))
+	for _, md := range rawDescriptors {
 		descriptors = append(descriptors, models.MetricDescriptorSummary{
 			Type:        md.Type,
 			DisplayName: md.DisplayName,
@@ -250,13 +251,15 @@ func (a *gcpAdapter) ListMetricDescriptors(ctx context.Context, req models.ListM
 			Unit:        md.Unit,
 		})
 	}
-	if descriptors == nil {
-		descriptors = []models.MetricDescriptorSummary{}
-	}
-	return models.ListMetricDescriptorsResponse{Descriptors: descriptors}, nil
+	return models.ListMetricDescriptorsResponse{Descriptors: descriptors, NextPageToken: nextPageToken, Truncated: nextPageToken != ""}, nil
 }
 
 func (a *gcpAdapter) ListTraceServices(ctx context.Context, req models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error) {
+	pageSize, err := inventoryPageSize(req.PageSize)
+	if err != nil {
+		return models.ListTraceServicesResponse{}, fmt.Errorf("monitoring.ListTraceServices: %w", err)
+	}
+	req.PageSize = pageSize
 	if err := a.rateWait(ctx, "monitoring.ListTraceServices"); err != nil {
 		return models.ListTraceServicesResponse{}, err
 	}
@@ -273,40 +276,34 @@ func (a *gcpAdapter) listTraceServicesViaTrace(ctx context.Context, req models.L
 	startTime := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
 
 	seen := map[string]bool{}
-	pageToken := ""
-	for {
-		call := a.traceClient.Projects.Traces.List(req.ProjectID).
-			StartTime(startTime).
-			PageSize(1000).
-			Context(ctx)
-		if pageToken != "" {
-			call = call.PageToken(pageToken)
-		}
-		resp, err := call.Do()
-		if err != nil {
-			return models.ListTraceServicesResponse{}, wrapGCPError("monitoring.ListTraceServices", err)
-		}
-		for _, t := range resp.Traces {
-			for _, span := range t.Spans {
-				if span.ParentSpanId == 0 {
-					name := span.Name
-					if name != "" && !seen[name] {
-						seen[name] = true
-					}
+	call := a.traceClient.Projects.Traces.List(req.ProjectID).
+		StartTime(startTime).
+		PageSize(int64(req.PageSize)).
+		Context(ctx)
+	if req.PageToken != "" {
+		call = call.PageToken(req.PageToken)
+	}
+	resp, err := call.Do()
+	if err != nil {
+		return models.ListTraceServicesResponse{}, wrapGCPError("monitoring.ListTraceServices", err)
+	}
+	for _, trace := range resp.Traces {
+		for _, span := range trace.Spans {
+			if span.ParentSpanId == 0 {
+				name := span.Name
+				if name != "" && !seen[name] {
+					seen[name] = true
 				}
 			}
 		}
-		if resp.NextPageToken == "" {
-			break
-		}
-		pageToken = resp.NextPageToken
 	}
 
 	services := make([]models.TraceService, 0, len(seen))
 	for name := range seen {
 		services = append(services, models.TraceService{Name: name})
 	}
-	return models.ListTraceServicesResponse{Services: services, Backend: "trace"}, nil
+	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
+	return models.ListTraceServicesResponse{Services: services, Backend: "trace", NextPageToken: resp.NextPageToken, Truncated: resp.NextPageToken != ""}, nil
 }
 
 func (a *gcpAdapter) listTraceServicesViaMonitoring(ctx context.Context, req models.ListTraceServicesRequest) (models.ListTraceServicesResponse, error) {
@@ -330,15 +327,13 @@ func (a *gcpAdapter) listTraceServicesViaMonitoring(ctx context.Context, req mod
 	}
 
 	it := a.metric.ListTimeSeries(ctx, pbReq)
+	var timeSeries []*monitoringpb.TimeSeries
+	nextPageToken, err := iterator.NewPager(it, req.PageSize, req.PageToken).NextPage(&timeSeries)
+	if err != nil {
+		return models.ListTraceServicesResponse{}, wrapGCPError("monitoring.ListTraceServices(monitoring)", err)
+	}
 	seen := map[string]bool{}
-	for {
-		ts, err := it.Next()
-		if isIteratorDone(err) {
-			break
-		}
-		if err != nil {
-			return models.ListTraceServicesResponse{}, wrapGCPError("monitoring.ListTraceServices(monitoring)", err)
-		}
+	for _, ts := range timeSeries {
 		if ts.Resource != nil {
 			if name, ok := ts.Resource.Labels["service_name"]; ok && name != "" {
 				seen[name] = true
@@ -355,7 +350,8 @@ func (a *gcpAdapter) listTraceServicesViaMonitoring(ctx context.Context, req mod
 	for name := range seen {
 		services = append(services, models.TraceService{Name: name})
 	}
-	return models.ListTraceServicesResponse{Services: services, Backend: "monitoring"}, nil
+	sort.Slice(services, func(i, j int) bool { return services[i].Name < services[j].Name })
+	return models.ListTraceServicesResponse{Services: services, Backend: "monitoring", NextPageToken: nextPageToken, Truncated: nextPageToken != ""}, nil
 }
 
 func (a *gcpAdapter) GetMetrics(ctx context.Context, req models.GetMetricsRequest) (models.GetMetricsResponse, error) {

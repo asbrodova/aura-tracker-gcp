@@ -15,7 +15,8 @@ var volatileFields = map[string]bool{
 	"ready": true, "ready_replicas": true, "reconciling": true,
 	"revision_id": true, "self_link": true, "size_bytes": true,
 	"state": true, "status": true, "subscription_count": true,
-	"terminal_condition": true, "unique_id": true,
+	"subscription_count_truncated": true,
+	"terminal_condition":           true, "unique_id": true,
 	"update_time": true, "url": true,
 }
 

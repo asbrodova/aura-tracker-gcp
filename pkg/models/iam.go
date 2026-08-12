@@ -37,6 +37,8 @@ type GetResourceIAMBindingsResponse struct {
 
 type ListServiceAccountsRequest struct {
 	ProjectID string `json:"project_id"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
 }
 
 type ServiceAccountSummary struct {
@@ -50,6 +52,8 @@ type ServiceAccountSummary struct {
 
 type ListServiceAccountsResponse struct {
 	ServiceAccounts []ServiceAccountSummary `json:"service_accounts"`
+	NextPageToken   string                  `json:"next_page_token,omitempty"`
+	Truncated       bool                    `json:"truncated,omitempty"`
 }
 
 // MyPermissionsReport is returned by the gcp://{project}/iam/my-permissions resource.

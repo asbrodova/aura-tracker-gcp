@@ -30,9 +30,11 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 		loc = "-"
 	}
 	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, loc)
-	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent})
+	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent, PageSize: maxUnpagedInventoryItems})
 
 	var services []models.ServiceSummary
+	seen := 0
+	truncated := false
 	for {
 		svc, err := it.Next()
 		if err != nil {
@@ -41,6 +43,11 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 			}
 			return models.ListServicesResponse{}, wrapGCPError("cloudrun.ListServices", err)
 		}
+		if seen >= maxUnpagedInventoryItems {
+			truncated = true
+			break
+		}
+		seen++
 		lastMod := ""
 		if svc.UpdateTime != nil {
 			lastMod = svc.UpdateTime.AsTime().Format("2006-01-02T15:04:05Z")
@@ -62,7 +69,7 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 	if services == nil {
 		services = []models.ServiceSummary{}
 	}
-	return models.ListServicesResponse{Services: services}, nil
+	return models.ListServicesResponse{Services: services, Truncated: truncated}, nil
 }
 
 func (a *gcpAdapter) ListJobs(ctx context.Context, req models.ListJobsRequest) (models.ListJobsResponse, error) {
@@ -77,9 +84,10 @@ func (a *gcpAdapter) ListJobs(ctx context.Context, req models.ListJobsRequest) (
 		loc = "-"
 	}
 	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, loc)
-	it := a.runJobs.ListJobs(ctx, &runpb.ListJobsRequest{Parent: parent})
+	it := a.runJobs.ListJobs(ctx, &runpb.ListJobsRequest{Parent: parent, PageSize: maxUnpagedInventoryItems})
 
 	var jobs []models.JobSummary
+	truncated := false
 	for {
 		job, err := it.Next()
 		if err != nil {
@@ -87,6 +95,10 @@ func (a *gcpAdapter) ListJobs(ctx context.Context, req models.ListJobsRequest) (
 				break
 			}
 			return models.ListJobsResponse{}, wrapGCPError("cloudrun.ListJobs", err)
+		}
+		if len(jobs) >= maxUnpagedInventoryItems {
+			truncated = true
+			break
 		}
 		region, name := parseJobResourceName(job.Name)
 		lastMod := ""
@@ -115,7 +127,7 @@ func (a *gcpAdapter) ListJobs(ctx context.Context, req models.ListJobsRequest) (
 	if jobs == nil {
 		jobs = []models.JobSummary{}
 	}
-	return models.ListJobsResponse{Jobs: jobs}, nil
+	return models.ListJobsResponse{Jobs: jobs, Truncated: truncated}, nil
 }
 
 func (a *gcpAdapter) GetJobDetails(ctx context.Context, req models.GetJobDetailsRequest) (models.JobDetails, error) {

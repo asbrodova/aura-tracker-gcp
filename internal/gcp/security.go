@@ -191,7 +191,11 @@ func (a *gcpAdapter) ListSecretSecurityFacts(ctx context.Context, req models.Sec
 		for i := range result.Secrets {
 			summaries[i] = models.SecretSummary{Name: result.Secrets[i].Name}
 		}
-		summaries = a.enrichSecretsWithReferences(ctx, req.ProjectID, summaries)
+		var referencesTruncated bool
+		summaries, referencesTruncated = a.enrichSecretsWithReferences(ctx, req.ProjectID, summaries)
+		if referencesTruncated {
+			result.Warnings = appendUnique(result.Warnings, "Cloud Run secret-reference discovery was incomplete")
+		}
 		for i := range summaries {
 			result.Secrets[i].ReferencedBy = summaries[i].ReferencedBy
 		}

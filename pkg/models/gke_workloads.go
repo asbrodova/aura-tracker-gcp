@@ -1,12 +1,16 @@
 package models
 
-// GKEEnvVar is a single environment variable on a container.
-// SecretRef is non-empty when the value comes from a Secret (secretKeyRef or
-// envFrom secretRef), allowing the graph layer to mint reads_secret edges.
+// GKEEnvVar is a secret-safe description of one container environment variable.
+// Literal values are never serialized. ValueFingerprint is available only to
+// trusted in-process comparison code and is deliberately excluded from JSON.
 type GKEEnvVar struct {
-	Name      string `json:"name"`
-	Value     string `json:"value,omitempty"`      // literal value; empty for secret/configmap refs
-	SecretRef string `json:"secret_ref,omitempty"` // Secret name if sourced from a Secret
+	Name             string `json:"name"`
+	Source           string `json:"source"` // literal, secret_key_ref, config_map_key_ref, field_ref, resource_field_ref, or unknown
+	HasLiteralValue  bool   `json:"has_literal_value,omitempty"`
+	SecretRef        string `json:"secret_ref,omitempty"`
+	ConfigMapRef     string `json:"config_map_ref,omitempty"`
+	FieldRef         string `json:"field_ref,omitempty"`
+	ValueFingerprint string `json:"-"`
 }
 
 // GKEResourceRequirements holds CPU and memory requests and limits.
@@ -51,14 +55,17 @@ type GKEWorkloadSummary struct {
 	WorkloadAPIFallback          bool              `json:"workload_api_fallback,omitempty"` // true if returned via GKE Workloads API fallback
 }
 
-// GKEWorkloadDetails extends GKEWorkloadSummary with full container specs,
-// probes, volume mounts, and all environment variables.
+// GKEWorkloadDetails extends GKEWorkloadSummary with secret-safe container
+// configuration. Only a small allowlist of non-sensitive annotation values is
+// returned; AnnotationsOmitted reports how many values were withheld.
 type GKEWorkloadDetails struct {
 	GKEWorkloadSummary
-	Containers   []GKEContainerSummary `json:"containers"`
-	NodeSelector map[string]string     `json:"node_selector,omitempty"`
-	Tolerations  []string              `json:"tolerations,omitempty"` // key=value strings
-	Annotations  map[string]string     `json:"annotations,omitempty"`
+	Containers                    []GKEContainerSummary `json:"containers"`
+	NodeSelector                  map[string]string     `json:"node_selector,omitempty"`
+	Tolerations                   []string              `json:"tolerations,omitempty"` // key=value strings
+	Annotations                   map[string]string     `json:"annotations,omitempty"`
+	AnnotationsOmitted            int                   `json:"annotations_omitted,omitempty"`
+	OmittedAnnotationFingerprints []string              `json:"-"`
 }
 
 // ListGKEWorkloadsRequest is the input for gcp_gke_list_workloads.
@@ -68,13 +75,16 @@ type ListGKEWorkloadsRequest struct {
 	ClusterName string `json:"cluster_name"`
 	Namespace   string `json:"namespace,omitempty"` // empty = all namespaces
 	Kind        string `json:"kind,omitempty"`      // filter by kind; empty = all workload kinds
-	PageSize    int    `json:"page_size,omitempty"` // default 500
+	PageSize    int    `json:"page_size,omitempty"` // total result cap; default 500, maximum 1000
+	PageToken   string `json:"page_token,omitempty"`
 }
 
 // ListGKEWorkloadsResponse is the output for gcp_gke_list_workloads.
 type ListGKEWorkloadsResponse struct {
-	Workloads []GKEWorkloadSummary `json:"workloads"`
-	Errors    []ToolError          `json:"errors,omitempty"`
+	Workloads     []GKEWorkloadSummary `json:"workloads"`
+	NextPageToken string               `json:"next_page_token,omitempty"`
+	Truncated     bool                 `json:"truncated,omitempty"`
+	Errors        []ToolError          `json:"errors,omitempty"`
 }
 
 // GetGKEWorkloadDetailsRequest is the input for gcp_gke_get_workload_details.

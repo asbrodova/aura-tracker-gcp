@@ -2,13 +2,18 @@ package gcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/oauth2"
@@ -25,6 +30,8 @@ type k8sClient struct {
 	baseURL    string
 	httpClient *http.Client
 }
+
+const maxK8sResponseBytes = 16 << 20
 
 // tokenRoundTripper injects a fresh GCP bearer token on every request.
 type tokenRoundTripper struct {
@@ -102,7 +109,14 @@ func (c *k8sClient) get(ctx context.Context, path string, out any) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("k8s: GET %s: HTTP %d", path, resp.StatusCode)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxK8sResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("k8s: read response from %s: %w", path, err)
+	}
+	if len(body) > maxK8sResponseBytes {
+		return fmt.Errorf("k8s: response from %s exceeded %d bytes", path, maxK8sResponseBytes)
+	}
+	if err := json.Unmarshal(body, out); err != nil {
 		return fmt.Errorf("k8s: decode response from %s: %w", path, err)
 	}
 	return nil
@@ -123,34 +137,145 @@ func resourcePath(apiBase, ns, resource string) string {
 // listWorkloads returns workload summaries for the given namespace across all
 // standard workload kinds (Deployment, StatefulSet, DaemonSet, CronJob, Job).
 // kind filters to a specific kind when non-empty (e.g. "Deployment").
-func (c *k8sClient) listWorkloads(ctx context.Context, ns, kind string) ([]models.GKEWorkloadSummary, error) {
-	type kindConfig struct {
-		apiBase  string
-		resource string
-		kindName string
-	}
-	kinds := []kindConfig{
-		{"apis/apps/v1", "deployments", "Deployment"},
-		{"apis/apps/v1", "statefulsets", "StatefulSet"},
-		{"apis/apps/v1", "daemonsets", "DaemonSet"},
-		{"apis/batch/v1", "cronjobs", "CronJob"},
-		{"apis/batch/v1", "jobs", "Job"},
-	}
+type workloadListKindConfig struct {
+	apiBase  string
+	resource string
+	kindName string
+}
 
+var workloadListKinds = []workloadListKindConfig{
+	{"apis/apps/v1", "deployments", "Deployment"},
+	{"apis/apps/v1", "statefulsets", "StatefulSet"},
+	{"apis/apps/v1", "daemonsets", "DaemonSet"},
+	{"apis/batch/v1", "cronjobs", "CronJob"},
+	{"apis/batch/v1", "jobs", "Job"},
+}
+
+func canonicalWorkloadKind(kind string, allowEmpty bool) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "":
+		if allowEmpty {
+			return "", nil
+		}
+	case "deployment", strings.ToLower(models.KindGKEDeployment):
+		return "Deployment", nil
+	case "statefulset", strings.ToLower(models.KindGKEStatefulSet):
+		return "StatefulSet", nil
+	case "daemonset", strings.ToLower(models.KindGKEDaemonSet):
+		return "DaemonSet", nil
+	case "cronjob", strings.ToLower(models.KindGKECronJob):
+		return "CronJob", nil
+	case "job", strings.ToLower(models.KindGKEJob):
+		return "Job", nil
+	}
+	return "", fmt.Errorf("k8s: unsupported workload kind %q; expected Deployment, StatefulSet, DaemonSet, CronJob, or Job", kind)
+}
+
+func (c *k8sClient) listWorkloads(ctx context.Context, ns, kind string, pageSize int, pageToken string) ([]models.GKEWorkloadSummary, string, error) {
+	canonicalKind, err := canonicalWorkloadKind(kind, true)
+	if err != nil {
+		return nil, "", err
+	}
+	if pageSize < 1 {
+		return nil, "", fmt.Errorf("k8s: page_size must be positive")
+	}
+	startKind, continueToken, err := decodeWorkloadPageToken(pageToken)
+	if err != nil {
+		return nil, "", err
+	}
+	if startKind != "" {
+		startKind, err = canonicalWorkloadKind(startKind, false)
+		if err != nil {
+			return nil, "", fmt.Errorf("k8s: page token references unsupported workload kind")
+		}
+	}
+	if canonicalKind != "" && startKind != "" && canonicalKind != startKind {
+		return nil, "", fmt.Errorf("k8s: page token belongs to workload kind %q", startKind)
+	}
+	started := startKind == ""
 	var result []models.GKEWorkloadSummary
-	for _, kc := range kinds {
-		if kind != "" && !strings.EqualFold(kind, kc.kindName) {
+	for kindIndex, kc := range workloadListKinds {
+		if canonicalKind != "" && canonicalKind != kc.kindName {
 			continue
 		}
+		if !started {
+			if !strings.EqualFold(startKind, kc.kindName) {
+				continue
+			}
+			started = true
+		}
+		remaining := pageSize - len(result)
+		if remaining <= 0 {
+			return result, encodeWorkloadPageToken(kc.kindName, continueToken), nil
+		}
 		var list k8sWorkloadList
-		if err := c.get(ctx, resourcePath(kc.apiBase, ns, kc.resource), &list); err != nil {
-			return nil, fmt.Errorf("k8s: list %s: %w", kc.kindName, err)
+		path := workloadListPath(resourcePath(kc.apiBase, ns, kc.resource), remaining, continueToken)
+		if err := c.get(ctx, path, &list); err != nil {
+			return nil, "", fmt.Errorf("k8s: list %s: %w", kc.kindName, err)
+		}
+		if len(list.Items) > remaining {
+			return nil, "", fmt.Errorf("k8s: list %s returned %d items for a limit of %d", kc.kindName, len(list.Items), remaining)
 		}
 		for _, w := range list.Items {
 			result = append(result, toWorkloadSummary(w, kc.kindName))
 		}
+		if list.Metadata.Continue != "" {
+			return result, encodeWorkloadPageToken(kc.kindName, list.Metadata.Continue), nil
+		}
+		continueToken = ""
+		if len(result) >= pageSize {
+			if nextKind := nextSelectedWorkloadKind(workloadListKinds, kindIndex+1, canonicalKind); nextKind != "" {
+				return result, encodeWorkloadPageToken(nextKind, ""), nil
+			}
+			return result, "", nil
+		}
 	}
-	return result, nil
+	if !started {
+		return nil, "", fmt.Errorf("k8s: page token references unsupported workload kind %q", startKind)
+	}
+	return result, "", nil
+}
+
+type workloadPageToken struct {
+	Kind     string `json:"kind"`
+	Continue string `json:"continue,omitempty"`
+}
+
+func encodeWorkloadPageToken(kind, continueToken string) string {
+	encoded, _ := json.Marshal(workloadPageToken{Kind: kind, Continue: continueToken})
+	return base64.RawURLEncoding.EncodeToString(encoded)
+}
+
+func decodeWorkloadPageToken(token string) (string, string, error) {
+	if token == "" {
+		return "", "", nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return "", "", fmt.Errorf("k8s: invalid page token")
+	}
+	var value workloadPageToken
+	if err := json.Unmarshal(decoded, &value); err != nil || value.Kind == "" {
+		return "", "", fmt.Errorf("k8s: invalid page token")
+	}
+	return value.Kind, value.Continue, nil
+}
+
+func workloadListPath(path string, limit int, continueToken string) string {
+	query := url.Values{"limit": []string{strconv.Itoa(limit)}}
+	if continueToken != "" {
+		query.Set("continue", continueToken)
+	}
+	return path + "?" + query.Encode()
+}
+
+func nextSelectedWorkloadKind(kinds []workloadListKindConfig, start int, filter string) string {
+	for _, candidate := range kinds[start:] {
+		if filter == "" || strings.EqualFold(filter, candidate.kindName) {
+			return candidate.kindName
+		}
+	}
+	return ""
 }
 
 // getWorkload fetches a single workload's full spec and returns WorkloadDetails.
@@ -173,19 +298,23 @@ type k8sKindConfig struct {
 }
 
 func kindConfig(kind string) (k8sKindConfig, error) {
-	switch strings.ToLower(kind) {
-	case "deployment":
+	canonicalKind, err := canonicalWorkloadKind(kind, false)
+	if err != nil {
+		return k8sKindConfig{}, err
+	}
+	switch canonicalKind {
+	case "Deployment":
 		return k8sKindConfig{"apis/apps/v1", "deployments"}, nil
-	case "statefulset":
+	case "StatefulSet":
 		return k8sKindConfig{"apis/apps/v1", "statefulsets"}, nil
-	case "daemonset":
+	case "DaemonSet":
 		return k8sKindConfig{"apis/apps/v1", "daemonsets"}, nil
-	case "cronjob":
+	case "CronJob":
 		return k8sKindConfig{"apis/batch/v1", "cronjobs"}, nil
-	case "job":
+	case "Job":
 		return k8sKindConfig{"apis/batch/v1", "jobs"}, nil
 	default:
-		return k8sKindConfig{}, fmt.Errorf("k8s: unsupported workload kind %q", kind)
+		return k8sKindConfig{}, fmt.Errorf("k8s: unsupported workload kind %q", canonicalKind)
 	}
 }
 
@@ -384,11 +513,7 @@ func toWorkloadDetails(w k8sWorkload, kind string) models.GKEWorkloadDetails {
 		}
 		envVars := make([]models.GKEEnvVar, 0, len(c.Env))
 		for _, e := range c.Env {
-			ev := models.GKEEnvVar{Name: e.Name, Value: e.Value}
-			if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
-				ev.SecretRef = e.ValueFrom.SecretKeyRef.Name
-				ev.Value = ""
-			}
+			ev := safeGKEEnvVar(e)
 			envVars = append(envVars, ev)
 		}
 		containers = append(containers, models.GKEContainerSummary{
@@ -411,13 +536,86 @@ func toWorkloadDetails(w k8sWorkload, kind string) models.GKEWorkloadDetails {
 		tolerations = append(tolerations, t.Key+"="+t.Value)
 	}
 
+	annotations, annotationsOmitted, omittedAnnotationFingerprints := safeWorkloadAnnotations(w.Metadata.Annotations)
 	return models.GKEWorkloadDetails{
-		GKEWorkloadSummary: summary,
-		Containers:         containers,
-		NodeSelector:       podSpec.NodeSelector,
-		Tolerations:        tolerations,
-		Annotations:        w.Metadata.Annotations,
+		GKEWorkloadSummary:            summary,
+		Containers:                    containers,
+		NodeSelector:                  podSpec.NodeSelector,
+		Tolerations:                   tolerations,
+		Annotations:                   annotations,
+		AnnotationsOmitted:            annotationsOmitted,
+		OmittedAnnotationFingerprints: omittedAnnotationFingerprints,
 	}
+}
+
+func safeGKEEnvVar(env k8sEnvVar) models.GKEEnvVar {
+	result := models.GKEEnvVar{Name: env.Name, Source: "unknown"}
+	if env.ValueFrom == nil {
+		result.Source = "literal"
+		result.HasLiteralValue = env.Value != ""
+		if env.Value != "" {
+			digest := sha256.Sum256([]byte("gke-env-v1\x00" + env.Value))
+			result.ValueFingerprint = fmt.Sprintf("sha256:%x", digest)
+		}
+		return result
+	}
+	if env.ValueFrom.SecretKeyRef != nil {
+		result.Source = "secret_key_ref"
+		result.SecretRef = env.ValueFrom.SecretKeyRef.Name
+		return result
+	}
+	if env.ValueFrom.ConfigMapKeyRef != nil {
+		result.Source = "config_map_key_ref"
+		result.ConfigMapRef = env.ValueFrom.ConfigMapKeyRef.Name
+		return result
+	}
+	if env.ValueFrom.FieldRef != nil {
+		result.Source = "field_ref"
+		result.FieldRef = env.ValueFrom.FieldRef.FieldPath
+		return result
+	}
+	if env.ValueFrom.ResourceFieldRef != nil {
+		result.Source = "resource_field_ref"
+		result.FieldRef = env.ValueFrom.ResourceFieldRef.Resource
+	}
+	return result
+}
+
+var safeBooleanWorkloadAnnotations = map[string]bool{
+	"sidecar.opentelemetry.io/inject":                true,
+	"instrumentation.opentelemetry.io/inject-java":   true,
+	"instrumentation.opentelemetry.io/inject-nodejs": true,
+	"instrumentation.opentelemetry.io/inject-python": true,
+	"instrumentation.opentelemetry.io/inject-dotnet": true,
+	"instrumentation.opentelemetry.io/inject-go":     true,
+	"prometheus.io/scrape":                           true,
+}
+
+func safeWorkloadAnnotations(annotations map[string]string) (map[string]string, int, []string) {
+	if len(annotations) == 0 {
+		return nil, 0, nil
+	}
+	safe := make(map[string]string)
+	omittedFingerprints := make([]string, 0, len(annotations))
+	for key, value := range annotations {
+		if safeBooleanWorkloadAnnotations[key] {
+			switch strings.ToLower(strings.TrimSpace(value)) {
+			case "true":
+				safe[key] = "true"
+				continue
+			case "false":
+				safe[key] = "false"
+				continue
+			}
+		}
+		digest := sha256.Sum256([]byte("gke-annotation-v1\x00" + key + "\x00" + value))
+		omittedFingerprints = append(omittedFingerprints, fmt.Sprintf("sha256:%x", digest))
+	}
+	if len(safe) == 0 {
+		safe = nil
+	}
+	sort.Strings(omittedFingerprints)
+	return safe, len(omittedFingerprints), omittedFingerprints
 }
 
 func toServiceSummary(s k8sService) models.GKEServiceSummary {

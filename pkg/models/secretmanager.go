@@ -21,5 +21,7 @@ type ListSecretsRequest struct {
 
 // ListSecretsResponse holds the list result.
 type ListSecretsResponse struct {
-	Secrets []SecretSummary `json:"secrets"`
+	Secrets             []SecretSummary `json:"secrets"`
+	Truncated           bool            `json:"truncated,omitempty"`
+	ReferencesTruncated bool            `json:"references_truncated,omitempty"`
 }

@@ -34,6 +34,7 @@ type ListFunctionsRequest struct {
 // ListFunctionsResponse holds the list result.
 type ListFunctionsResponse struct {
 	Functions []FunctionSummary `json:"functions"`
+	Truncated bool              `json:"truncated,omitempty"`
 }
 
 // GetFunctionDetailsRequest fetches full details for a single function.

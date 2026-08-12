@@ -22,12 +22,14 @@ func (a *gcpAdapter) ListSecrets(ctx context.Context, req models.ListSecretsRequ
 	defer cancel()
 
 	listReq := &secretmanagerpb.ListSecretsRequest{
-		Parent: fmt.Sprintf("projects/%s", req.ProjectID),
-		Filter: req.Filter,
+		Parent:   fmt.Sprintf("projects/%s", req.ProjectID),
+		Filter:   req.Filter,
+		PageSize: maxUnpagedInventoryItems,
 	}
 	it := a.secretMgrClient.ListSecrets(ctx, listReq)
 
 	var secrets []models.SecretSummary
+	truncated := false
 	for {
 		s, err := it.Next()
 		if err != nil {
@@ -35,6 +37,10 @@ func (a *gcpAdapter) ListSecrets(ctx context.Context, req models.ListSecretsRequ
 				break
 			}
 			return models.ListSecretsResponse{}, wrapGCPError("secretmanager.ListSecrets", err)
+		}
+		if len(secrets) >= maxUnpagedInventoryItems {
+			truncated = true
+			break
 		}
 		name := parseSecretResourceName(s.Name)
 		createTime := ""
@@ -56,18 +62,19 @@ func (a *gcpAdapter) ListSecrets(ctx context.Context, req models.ListSecretsRequ
 		secrets = []models.SecretSummary{}
 	}
 
+	referencesTruncated := false
 	if req.IncludeReferences {
-		secrets = a.enrichSecretsWithReferences(ctx, req.ProjectID, secrets)
+		secrets, referencesTruncated = a.enrichSecretsWithReferences(ctx, req.ProjectID, secrets)
 	}
 
-	return models.ListSecretsResponse{Secrets: secrets}, nil
+	return models.ListSecretsResponse{Secrets: secrets, Truncated: truncated, ReferencesTruncated: referencesTruncated}, nil
 }
 
 // enrichSecretsWithReferences scans all Cloud Run services for secretKeyRef
 // references and populates SecretSummary.ReferencedBy with the service names.
-func (a *gcpAdapter) enrichSecretsWithReferences(ctx context.Context, projectID string, secrets []models.SecretSummary) []models.SecretSummary {
+func (a *gcpAdapter) enrichSecretsWithReferences(ctx context.Context, projectID string, secrets []models.SecretSummary) ([]models.SecretSummary, bool) {
 	if a.runSvc == nil {
-		return secrets
+		return secrets, true
 	}
 
 	// Build a lookup map: bare secret name → index in secrets slice.
@@ -85,12 +92,16 @@ func (a *gcpAdapter) enrichSecretsWithReferences(ctx context.Context, projectID 
 	defer cancel()
 
 	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{
-		Parent: fmt.Sprintf("projects/%s/locations/-", projectID),
+		Parent:   fmt.Sprintf("projects/%s/locations/-", projectID),
+		PageSize: maxUnpagedInventoryItems,
 	})
-	for {
+	for scanned := 0; ; scanned++ {
 		svc, err := it.Next()
 		if err != nil {
-			break
+			return secrets, !isIteratorDone(err)
+		}
+		if scanned >= maxUnpagedInventoryItems {
+			return secrets, true
 		}
 		if svc.Labels["goog-managed-by"] == "cloudfunctions" {
 			continue
@@ -114,7 +125,6 @@ func (a *gcpAdapter) enrichSecretsWithReferences(ctx context.Context, projectID 
 			}
 		}
 	}
-	return secrets
 }
 
 func appendUnique(slice []string, val string) []string {

@@ -81,6 +81,8 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 		subNodes, subEdges, err := a.findPushSubscriptions(gctx, req.Project, svc.Uri, rootID)
 		if err != nil {
 			mu.Lock()
+			nodes = append(nodes, subNodes...)
+			edges = append(edges, subEdges...)
 			warns = append(warns, "pubsub push scan: "+err.Error())
 			mu.Unlock()
 			return nil // non-fatal: insufficient permissions should not fail the whole call
@@ -293,16 +295,19 @@ func (a *gcpAdapter) findPushSubscriptions(ctx context.Context, project, service
 	var edges []models.TopologyEdge
 
 	it := a.pubsub.SubscriptionAdminClient.ListSubscriptions(ctx, &pubsubpb.ListSubscriptionsRequest{
-		Project: "projects/" + project,
+		Project: "projects/" + project, PageSize: maxUnpagedInventoryItems,
 	})
 
-	for {
+	for scanned := 0; ; scanned++ {
 		sub, err := it.Next()
 		if isIteratorDone(err) {
 			break
 		}
 		if err != nil {
 			return nil, nil, err
+		}
+		if scanned >= maxUnpagedInventoryItems {
+			return nodes, edges, fmt.Errorf("%w at %d subscriptions", errInventoryLimitReached, maxUnpagedInventoryItems)
 		}
 		if sub.PushConfig == nil || sub.PushConfig.PushEndpoint == "" {
 			continue

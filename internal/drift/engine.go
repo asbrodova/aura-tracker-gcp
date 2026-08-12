@@ -113,12 +113,33 @@ func (e *Engine) Compare(ctx context.Context, req models.CompareEnvironmentsRequ
 	}
 
 	byComponent := make(map[string]map[string]collected, len(components))
-	for range len(components) * 2 {
-		result := <-results
+	expectedResults := len(components) * 2
+	receivedResults := 0
+collectionLoop:
+	for receivedResults < expectedResults {
+		var result collected
+		select {
+		case result = <-results:
+			receivedResults++
+		case <-ctx.Done():
+			break collectionLoop
+		}
 		if byComponent[result.component] == nil {
 			byComponent[result.component] = make(map[string]collected)
 		}
 		byComponent[result.component][result.projectID] = result
+	}
+	if receivedResults < expectedResults {
+		for _, component := range components {
+			if byComponent[component] == nil {
+				byComponent[component] = make(map[string]collected)
+			}
+			for _, projectID := range []string{req.EnvironmentA, req.EnvironmentB} {
+				if _, ok := byComponent[component][projectID]; !ok {
+					byComponent[component][projectID] = collected{component: component, projectID: projectID, err: ctx.Err()}
+				}
+			}
+		}
 	}
 
 	for _, component := range components {

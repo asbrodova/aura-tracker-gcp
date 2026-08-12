@@ -18,25 +18,25 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 		return models.ListSchedulerJobsResponse{}, err
 	}
 
-	regions, err := a.discoverRegions(ctx, req.ProjectID)
-	if err != nil {
-		return models.ListSchedulerJobsResponse{}, err
-	}
-
+	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceScheduler)
+	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
+		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var jobs []models.SchedulerJobSummary
-	var errs []models.ToolError
+	truncated := false
+	errs := discoveryToolError(discovery, "cloudscheduler.projects.locations.list")
+	perRegionLimit := regionalInventoryLimit(len(regions))
 
 	for _, r := range regions {
 		r := r
 		g.Go(func() error {
-			items, rerr := a.listSchedulerJobsForRegion(gctx, req.ProjectID, r)
+			items, regionTruncated, rerr := a.listSchedulerJobsForRegion(gctx, req.ProjectID, r, perRegionLimit)
 			mu.Lock()
 			defer mu.Unlock()
 			if rerr != nil {
@@ -48,6 +48,10 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 				return nil
 			}
 			jobs = append(jobs, items...)
+			if regionTruncated {
+				truncated = true
+				errs = append(errs, models.ToolError{FailingAPI: "cloudscheduler.projects.locations.jobs.list", Message: fmt.Sprintf("region %s truncated at %d items", r, perRegionLimit)})
+			}
 			return nil
 		})
 	}
@@ -63,30 +67,33 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 		return jobs[i].Name < jobs[j].Name
 	})
 	sortToolErrors(errs)
-	return models.ListSchedulerJobsResponse{Jobs: jobs, Errors: errs}, nil
+	return models.ListSchedulerJobsResponse{Jobs: jobs, Errors: errs, Truncated: truncated}, nil
 }
 
-func (a *gcpAdapter) listSchedulerJobsForRegion(ctx context.Context, projectID, region string) ([]models.SchedulerJobSummary, error) {
+func (a *gcpAdapter) listSchedulerJobsForRegion(ctx context.Context, projectID, region string, limit int) ([]models.SchedulerJobSummary, bool, error) {
 	if a.schedulerClient == nil {
-		return nil, nil
+		return nil, false, fmt.Errorf("cloud scheduler client is not initialized")
 	}
 	if err := a.rateWait(ctx, "scheduler.listJobsForRegion"); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, region)
-	it := a.schedulerClient.ListJobs(ctx, &schedulerpb.ListJobsRequest{Parent: parent})
+	it := a.schedulerClient.ListJobs(ctx, &schedulerpb.ListJobsRequest{Parent: parent, PageSize: int32(limit)})
 
 	var jobs []models.SchedulerJobSummary
 	for {
 		job, err := it.Next()
 		if err != nil {
 			if isIteratorDone(err) {
-				break
+				return jobs, false, nil
 			}
-			return nil, wrapGCPError("scheduler.listJobsForRegion", err)
+			return nil, false, wrapGCPError("scheduler.listJobsForRegion", err)
+		}
+		if len(jobs) >= limit {
+			return jobs, true, nil
 		}
 		_, name := parseSchedulerResourceName(job.Name)
 		targetKind, targetRef := resolveSchedulerTarget(job)
@@ -101,7 +108,6 @@ func (a *gcpAdapter) listSchedulerJobsForRegion(ctx context.Context, projectID, 
 			Description: job.Description,
 		})
 	}
-	return jobs, nil
 }
 
 func resolveSchedulerTarget(job *schedulerpb.Job) (kind, ref string) {

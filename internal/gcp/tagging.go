@@ -22,6 +22,7 @@ func (a *gcpAdapter) ListTaggedResources(ctx context.Context, req models.ListTag
 
 	var resources []models.TaggedResourceSummary
 	pageToken := ""
+	truncated := false
 	for {
 		call := a.crmV3Svc.TagBindings.List().
 			Parent(parent).
@@ -38,11 +39,17 @@ func (a *gcpAdapter) ListTaggedResources(ctx context.Context, req models.ListTag
 			if !matchesTagFilter(b.TagValueNamespacedName, req.TagKey, req.TagValue) {
 				continue
 			}
-			resources = append(resources, models.TaggedResourceSummary{
+			if !appendInventoryBounded(&resources, models.TaggedResourceSummary{
 				ResourceName: b.Parent,
 				TagValue:     b.TagValue,
 				TagNamespace: b.TagValueNamespacedName,
-			})
+			}) {
+				truncated = true
+				break
+			}
+		}
+		if truncated {
+			break
 		}
 		if resp.NextPageToken == "" {
 			break
@@ -55,6 +62,7 @@ func (a *gcpAdapter) ListTaggedResources(ctx context.Context, req models.ListTag
 		TagKey:    req.TagKey,
 		TagValue:  req.TagValue,
 		Resources: resources,
+		Truncated: truncated,
 	}, nil
 }
 

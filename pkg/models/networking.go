@@ -21,6 +21,7 @@ type ListLoadBalancersRequest struct {
 
 type ListLoadBalancersResponse struct {
 	LoadBalancers []LoadBalancerSummary `json:"load_balancers"`
+	Truncated     bool                  `json:"truncated,omitempty"`
 }
 
 // --- URL Maps ---
@@ -39,7 +40,8 @@ type ListURLMapsRequest struct {
 }
 
 type ListURLMapsResponse struct {
-	URLMaps []URLMapSummary `json:"url_maps"`
+	URLMaps   []URLMapSummary `json:"url_maps"`
+	Truncated bool            `json:"truncated,omitempty"`
 }
 
 // --- Network Endpoint Groups ---
@@ -61,7 +63,8 @@ type ListNEGsRequest struct {
 }
 
 type ListNEGsResponse struct {
-	NEGs []NEGSummary `json:"negs"`
+	NEGs      []NEGSummary `json:"negs"`
+	Truncated bool         `json:"truncated,omitempty"`
 }
 
 // --- API Gateway ---
@@ -81,7 +84,8 @@ type ListAPIGatewaysRequest struct {
 }
 
 type ListAPIGatewaysResponse struct {
-	Gateways []APIGatewaySummary `json:"gateways"`
+	Gateways  []APIGatewaySummary `json:"gateways"`
+	Truncated bool                `json:"truncated,omitempty"`
 }
 
 // --- VPC Networks ---
@@ -100,7 +104,8 @@ type ListVPCNetworksRequest struct {
 }
 
 type ListVPCNetworksResponse struct {
-	Networks []VPCNetworkSummary `json:"networks"`
+	Networks  []VPCNetworkSummary `json:"networks"`
+	Truncated bool                `json:"truncated,omitempty"`
 }
 
 // --- VPC Subnets ---
@@ -122,7 +127,8 @@ type ListVPCSubnetsRequest struct {
 }
 
 type ListVPCSubnetsResponse struct {
-	Subnets []VPCSubnetSummary `json:"subnets"`
+	Subnets   []VPCSubnetSummary `json:"subnets"`
+	Truncated bool               `json:"truncated,omitempty"`
 }
 
 // --- PSC Endpoints ---
@@ -143,4 +149,5 @@ type ListPSCEndpointsRequest struct {
 
 type ListPSCEndpointsResponse struct {
 	Endpoints []PSCEndpointSummary `json:"endpoints"`
+	Truncated bool                 `json:"truncated,omitempty"`
 }

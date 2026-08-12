@@ -13,6 +13,7 @@ func (c *GCPCollector) collectCloudRun(ctx context.Context, req CollectionReques
 		return CollectionResult{}, err
 	}
 	result := CollectionResult{Resources: []Resource{}}
+	markInventoryTruncated(&result, services.Truncated, "Cloud Run service")
 	for _, service := range services.Services {
 		if !includeResource(req, service.Name, service.Region) {
 			continue
@@ -65,6 +66,7 @@ func (c *GCPCollector) collectCloudRun(ctx context.Context, req CollectionReques
 		}
 		result.Resources = append(result.Resources, resource("cloudrun", "cloudrun.job", job.Name, job.Region, "", details))
 	}
+	markInventoryTruncated(&result, jobs.Truncated, "Cloud Run job")
 	return result, nil
 }
 
@@ -92,6 +94,7 @@ func (c *GCPCollector) collectFunctions(ctx context.Context, req CollectionReque
 		return CollectionResult{}, err
 	}
 	result := CollectionResult{Resources: []Resource{}}
+	markInventoryTruncated(&result, response.Truncated, "Cloud Functions")
 	for _, function := range response.Functions {
 		if !includeResource(req, function.Name, function.Region) {
 			continue
@@ -123,6 +126,7 @@ func (c *GCPCollector) collectEventarc(ctx context.Context, req CollectionReques
 	}
 	partial, warnings := toolErrors(response.Errors)
 	mergePartial(&result, partial, warnings)
+	markInventoryTruncated(&result, response.Truncated, "Eventarc trigger")
 	return result, nil
 }
 
@@ -139,6 +143,7 @@ func (c *GCPCollector) collectScheduler(ctx context.Context, req CollectionReque
 	}
 	partial, warnings := toolErrors(response.Errors)
 	mergePartial(&result, partial, warnings)
+	markInventoryTruncated(&result, response.Truncated, "Cloud Scheduler job")
 	return result, nil
 }
 
@@ -155,6 +160,7 @@ func (c *GCPCollector) collectWorkflows(ctx context.Context, req CollectionReque
 	}
 	partial, warnings := toolErrors(response.Errors)
 	mergePartial(&result, partial, warnings)
+	markInventoryTruncated(&result, response.Truncated, "Cloud Workflow")
 	return result, nil
 }
 
@@ -171,6 +177,7 @@ func (c *GCPCollector) collectTasks(ctx context.Context, req CollectionRequest) 
 	}
 	partial, warnings := toolErrors(response.Errors)
 	mergePartial(&result, partial, warnings)
+	markInventoryTruncated(&result, response.Truncated, "Cloud Tasks queue")
 	return result, nil
 }
 
@@ -180,6 +187,7 @@ func (c *GCPCollector) collectSecrets(ctx context.Context, req CollectionRequest
 		return CollectionResult{}, err
 	}
 	result := CollectionResult{Resources: []Resource{}}
+	markInventoryTruncated(&result, response.Truncated, "Secret Manager")
 	for _, secret := range response.Secrets {
 		if includeResource(req, secret.Name, "") {
 			result.Resources = append(result.Resources, resource("secretmanager", "secretmanager.secret", secret.Name, "", "", secret))

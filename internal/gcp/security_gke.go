@@ -82,8 +82,11 @@ func (a *gcpAdapter) collectClusterExposure(parent context.Context, projectID st
 	}
 	result.coverage = append(result.coverage, securityCoverageUnit("kubernetes_access", "cluster", resource, "complete", 1, accessMode))
 
-	workloads, workloadErr := k8s.listWorkloads(ctx, "", "")
+	workloads, workloadPageToken, workloadErr := k8s.listWorkloads(ctx, "", "", a.securityResourceLimit(), "")
 	workloads, workloadStatus, workloadMessage := boundedSecurityResources(workloads, workloadErr, a.securityResourceLimit())
+	if workloadErr == nil && workloadPageToken != "" {
+		workloadStatus, workloadMessage = "truncated", fmt.Sprintf("resource safety cap reached: inspected %d workloads", len(workloads))
+	}
 	result.coverage = append(result.coverage, securityCoverageUnit("gke_workloads", "cluster", resource, workloadStatus, len(workloads), workloadMessage))
 
 	services, serviceErr := k8s.listServices(ctx, "")
@@ -431,8 +434,11 @@ func (a *gcpAdapter) collectClusterWorkloadIdentity(parent context.Context, proj
 		}
 	}
 
-	workloads, workloadErr := k8s.listWorkloads(ctx, "", "")
+	workloads, workloadPageToken, workloadErr := k8s.listWorkloads(ctx, "", "", a.securityResourceLimit(), "")
 	workloads, workloadStatus, workloadMessage := boundedSecurityResources(workloads, workloadErr, a.securityResourceLimit())
+	if workloadErr == nil && workloadPageToken != "" {
+		workloadStatus, workloadMessage = "truncated", fmt.Sprintf("resource safety cap reached: inspected %d workloads", len(workloads))
+	}
 	coverage = append(coverage, securityCoverageUnit("kubernetes_workload_identities", "cluster", resource, workloadStatus, len(workloads), workloadMessage))
 	if workloadErr == nil {
 		for _, workload := range workloads {

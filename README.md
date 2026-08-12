@@ -11,7 +11,7 @@
 
 **Give your LLM the full aura of your GCP infrastructure — and the confidence to act on it safely.**
 
-`aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with mandatory human approval before any infrastructure change.
+`aura-tracker-gcp` is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. It connects Claude (or any MCP-compatible LLM) to live Google Cloud Platform state — error rates, memory pressure, IAM gaps, cross-service dependency graphs, cost anomalies, and composite health scores — all queryable in plain English, with a two-step preview/confirmation protocol before infrastructure changes when safety is enabled.
 
 **73 Tools (+1 opt-in cost reasoning) · 10 Resources · 3 Prompts · 30 Modules**
 
@@ -36,18 +36,18 @@ Cost-bearing integrations and sensitive-data features have explicit controls:
 | Recommender BigQuery export tool | `RECOMMENDER_BQ_EXPORT_ENABLED` | off |
 | Cost reasoning over detailed billing export | `COST_REASONING_ENABLED` | off |
 | PII / credential scrubbing | `ANONYMIZE_ENABLED` | off |
-| HITL mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
+| Two-step mutation confirmation | `SAFETY_ENABLED` | **on** — the one default that is on by design |
 
-Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. Cost reasoning is off by default because it runs chargeable BigQuery queries. Two base tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); the optional BigQuery recommendation export is also a mutation. All mutations require explicit opt-in at every call through a mandatory two-step flow.
+Cloud Recommender is on by default and can be disabled with `RECOMMENDER_ENABLED=false`; its API and IAM access still require explicit project setup. Cost reasoning is off by default because it runs chargeable BigQuery queries. Two base tools mutate GCP state (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`); the optional BigQuery recommendation export is also a mutation. With safety enabled, all mutations require a preview and a second call containing the generated plan ID.
 
-### Human-in-the-Loop for Every Mutation
+### Two-Step Confirmation for Mutations
 
 No GCP resource can be modified without first generating a preview plan, then explicitly confirming it:
 
 1. Call with `dry_run: true` → receive a `plan_id` and a before/after preview. The plan expires in **10 minutes** and is **single-use**.
 2. Call again with `confirm_plan_id: <plan_id>` → the change executes using the exact parameters locked at dry-run time.
 
-Calling a mutation tool without a plan returns a `confirmation required` error with step-by-step instructions. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`). This protocol is enforced in `internal/safety/` at the port boundary — it cannot be bypassed by the LLM.
+Calling a mutation tool without a plan returns a `confirmation required` error with step-by-step instructions. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`). The service enforces this two-call protocol at the port boundary when safety is enabled, but it does not independently prove that a distinct human approved the second call; mandatory human review depends on the MCP client or deployment policy.
 
 > **Local development override:** Set `SAFETY_ENABLED=false` to skip the plan/confirm flow over stdio. The server refuses this override with the SSE transport.
 
@@ -131,7 +131,7 @@ aura-tracker-gcp: no GCP credentials found.
 
 Run:  gcloud auth application-default login
 
-Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.
+For automation, use an attached service account, Workload Identity, or service-account impersonation.
 ```
 
 ### Step 3 — Wire it into Claude Desktop
@@ -245,7 +245,9 @@ Each snippet below is a minimal `mcpServers` config for that service. Paste it i
 > "Give me a deep Aura Score for my-cluster — include per-node-pool autoscaling audit."  
 > "Scale the default-pool node pool in my-cluster to 5 nodes — show me a plan first."
 
-The last prompt triggers the two-step HITL flow: the LLM calls `gcp_gke_scale_deployment` with `dry_run: true` first, shows you a plan, then waits for your confirmation before executing.
+The last prompt triggers the two-step confirmation flow: the client calls `gcp_gke_scale_deployment` with `dry_run: true` first and receives a single-use plan. A client that requires human review can show that plan before sending the confirmation call.
+
+Workload listing is paginated with `page_size` (default 500, maximum 1,000) and an opaque `next_page_token`. Workload details never serialize literal environment-variable values or their internal comparison fingerprints. Secret and ConfigMap references expose names only; arbitrary annotation values are withheld and counted in `annotations_omitted`.
 
 ---
 
@@ -815,6 +817,10 @@ The idempotent `scripts/setup-iam.sh` script creates or updates the `aura-tracke
 ```bash
 PROJECT_ID=my-project bash scripts/setup-iam.sh
 
+# Also authorize a developer for keyless local service-account impersonation
+PROJECT_ID=my-project LOCAL_IMPERSONATION_PRINCIPAL=user:developer@example.com \
+  bash scripts/setup-iam.sh
+
 # Reconcile mutation roles (node pool scale, traffic split)
 PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 
@@ -832,7 +838,7 @@ PROJECT_ID=my-project COST_REASONING_ENABLED=true \
   BILLING_EXPORT_DATASET=cloud_billing bash scripts/setup-iam.sh
 ```
 
-Re-running the script is safe: it keeps an existing service account and reconciles the requested roles and optional APIs. Setup flags are additive—setting a flag to `false` or omitting it does not disable an API or revoke a previously granted role. Run it as a team admin with permission to change project IAM; API-enabling options also require permission to enable services.
+Re-running the script is safe: it keeps an existing service account and reconciles the requested roles and optional APIs. It always enables the IAM Service Account Credentials API so its printed impersonated-ADC command works. `LOCAL_IMPERSONATION_PRINCIPAL` optionally grants `roles/iam.serviceAccountTokenCreator` on this service account only; it accepts `user:`, `group:`, and `serviceAccount:` principals. Setup flags are additive—setting a flag to `false` or omitting it does not disable an API or revoke a previously granted role. Run it as a team admin with permission to change project IAM; API-enabling options also require permission to enable services.
 
 → Full per-module IAM role table: [Getting Started — IAM Setup](https://github.com/asbrodova/aura-tracker-gcp/wiki/Getting-Started#iam-setup)
 
@@ -842,7 +848,7 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 |----------|----------|-------------|
 | `GCP_PROJECT_ID` | Yes* | Legacy single-project configuration. Can be omitted when `project_id`, `environments`, or `GCP_ENVIRONMENTS_JSON` is configured. |
 | `GCP_ENVIRONMENTS_JSON` | No | JSON array of `{project_id, alias, default}` entries for container/Cloud Run multi-environment deployments. Cannot be combined with `GCP_PROJECT_ID` or YAML project settings. |
-| `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON key (optional if ADC is configured via `gcloud`) |
+| `GOOGLE_APPLICATION_CREDENTIALS` | No | Path to an external ADC credential file when keyless discovery is unavailable. Prefer attached service accounts, Workload Identity, or impersonation; never store credential files in the repository. |
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 | `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask an unaliased project ID as `[GCP_PROJECT_ID]`. Aliased projects are always returned as their aliases regardless of this setting. |
@@ -857,7 +863,7 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `COST_REASONING_TIMEZONE` | No | IANA timezone used for complete calendar-day windows. Default: `UTC`. |
 | `COST_REASONING_HISTORY_DAYS` | No | History queried for freshness, trends, and first-seen classification; `14`–`366`. Default: `90`. |
 | `COST_QUERY_MAX_BYTES` | No | Positive per-statement BigQuery maximum bytes billed. Default: `5368709120` (5 GiB). |
-| `SAFETY_ENABLED` | No | Set `false` to bypass the two-step HITL confirmation protocol for local stdio development. Rejected when `MCP_TRANSPORT=sse`. Safety is on by default. |
+| `SAFETY_ENABLED` | No | Set `false` to bypass the two-step confirmation protocol for local stdio development. Rejected when `MCP_TRANSPORT=sse`. Safety is on by default; the protocol itself does not prove a distinct human approved the second call. |
 | `TRACE_BACKEND` | No | Backend for `gcp_trace_list_services`: `trace` (Cloud Trace v1 REST, default) or `monitoring` (Monitoring metric proxy). Use `monitoring` if Cloud Trace API is disabled but OpenCensus/OpenTelemetry metrics exist. |
 | `GRAPH_TIMEOUT_SECONDS` | No | Outer context timeout in seconds for graph exports and diagram discovery. Default: `120`. Individual sub-calls still use `callTimeout` (30 s). |
 | `GRAPHVIZ_DOT_PATH` | No | Path to Graphviz `dot` for SVG diagram generation. Auto-discovered on `PATH`; set to `/usr/bin/dot` in the official container. Mermaid and Graphviz DOT source do not require it. |
@@ -866,7 +872,8 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Non-loopback URLs must use HTTPS. Defaults to `http://localhost:PORT` for local testing. |
 | `MCP_AUTH_MODE` | No | SSE authentication mode: `required` (default) or `disabled`. Disabled mode is accepted only for a loopback base URL and binds the listener to loopback. |
 | `MCP_AUTH_AUDIENCE` | No | Expected Google ID-token audience. Defaults to `MCP_BASE_URL` without a trailing slash. |
-| `MCP_AUTH_ALLOWED_EMAILS` | No | Optional comma-separated allowlist of verified email claims. When omitted, any valid Google identity token with the configured audience is accepted. |
+| `MCP_AUTH_ALLOWED_EMAILS` | No | Comma-separated allowlist of verified email claims. Required for a public SSE endpoint unless the broad-access override below is explicitly enabled. |
+| `MCP_AUTH_ALLOW_ANY_VALID_TOKEN` | No | Set `true` to explicitly allow any valid Google identity token for the configured audience on a public SSE endpoint. Defaults to `false`. |
 
 ## User Config File
 
@@ -917,7 +924,7 @@ security_audit:
       expires_at: "2026-12-01T00:00:00Z"
 ```
 
-The legacy `GCP_PROJECT_ID` environment variable takes precedence over the legacy YAML `project_id`. The new `environments` list cannot be combined with either legacy setting, so ambiguous configuration fails at startup.
+The legacy `GCP_PROJECT_ID` environment variable takes precedence over the legacy YAML `project_id`. The new `environments` list cannot be combined with either legacy setting, so ambiguous configuration fails at startup. Unknown YAML fields and invalid anonymization modes or boolean environment values are rejected rather than silently ignored.
 
 Container deployments can provide the same list as JSON:
 
@@ -935,6 +942,10 @@ Security suppression resources support `*` and `?` wildcards. Matches are exclud
 ```bash
 # Create the account or reconcile its core roles (team admin only)
 PROJECT_ID=my-project bash scripts/setup-iam.sh
+
+# Reconcile the narrow role required for keyless local impersonated ADC
+PROJECT_ID=my-project LOCAL_IMPERSONATION_PRINCIPAL=user:developer@example.com \
+  bash scripts/setup-iam.sh
 
 # Reconcile mutation roles (gcp_gke_scale_deployment, gcp_cloudrun_update_traffic)
 PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
@@ -956,11 +967,11 @@ PROJECT_ID=my-project COST_REASONING_ENABLED=true \
   bash scripts/setup-iam.sh
 ```
 
-The optional flags can be combined in one invocation and also work when the service account already exists. `SECURITY_AUDIT_ENABLED=true` enables the project-security and Connect Gateway APIs and grants read-only Cloud Asset, IAM service-account, Secret Manager, Compute, Functions, Recommender IAM, Service Usage, GKE Hub Viewer, and Gateway Reader access. Set `SECURITY_AUDIT_FLEET_PROJECT_ID` when the fleet host differs; set `SECURITY_AUDIT_ORGANIZATION_ID` to let an organization admin add the read-only ancestor IAM/deny roles. Kubernetes object collection also needs the RBAC template in `deploy/security-audit-rbac.yaml.tmpl`. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. `COST_REASONING_ENABLED=true` enables BigQuery and Cloud Asset Inventory, grants BigQuery Job User on the query project, grants Cloud Asset Viewer on the workload project, and grants BigQuery Data Viewer on the export project. The script uses a project-wide Data Viewer binding for idempotent setup; prefer a dataset-level binding in tightly scoped production environments. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
+The optional flags can be combined in one invocation and also work when the service account already exists. The script always enables `iamcredentials.googleapis.com`; when `LOCAL_IMPERSONATION_PRINCIPAL` is set, it grants that principal Service Account Token Creator on this service account only so `gcloud auth application-default login --impersonate-service-account=...` can succeed without a key file. `SECURITY_AUDIT_ENABLED=true` enables the project-security and Connect Gateway APIs and grants read-only Cloud Asset, IAM service-account, Secret Manager, Compute, Functions, Recommender IAM, Service Usage, GKE Hub Viewer, and Gateway Reader access. Set `SECURITY_AUDIT_FLEET_PROJECT_ID` when the fleet host differs; set `SECURITY_AUDIT_ORGANIZATION_ID` to let an organization admin add the read-only ancestor IAM/deny roles. Kubernetes object collection also needs the RBAC template in `deploy/security-audit-rbac.yaml.tmpl`. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. `COST_REASONING_ENABLED=true` enables BigQuery and Cloud Asset Inventory, grants BigQuery Job User on the query project, grants Cloud Asset Viewer on the workload project, and grants BigQuery Data Viewer on the export project. The script uses a project-wide Data Viewer binding for idempotent setup; prefer a dataset-level binding in tightly scoped production environments. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
 
-**For developers joining the team:** you do not need to run the admin setup unless you are responsible for changing the account's project roles or optional APIs. Ask your admin for credentials, or use `gcloud auth application-default login` with your own account if it already has the required roles.
+**For developers joining the team:** you do not need to run the admin setup. Ask an admin to set `LOCAL_IMPERSONATION_PRINCIPAL=user:YOUR_EMAIL` when running it, then use the printed impersonated-ADC command. Direct user ADC also works if your own account already has every required project role.
 
-**Why not `roles/owner`?** Primitive roles grant write access to every GCP service in the project — a compromised MCP session could delete databases, modify firewall rules, or exfiltrate secrets. The read-only set grants only `list`/`get` on the specific services this server calls. Mutation roles (`roles/container.admin`, `roles/run.admin`) are opt-in and always gated by the two-step HITL confirmation protocol.
+**Why not `roles/owner`?** Primitive roles grant write access to every GCP service in the project — a compromised MCP session could delete databases, modify firewall rules, or exfiltrate secrets. The read-only set grants only `list`/`get` on the specific services this server calls. Mutation roles (`roles/container.admin`, `roles/run.admin`) are opt-in and gated by the two-step confirmation protocol when safety is enabled.
 
 **Audit granted roles:**
 
@@ -979,9 +990,9 @@ The server runs under a specific service account (Application Default Credential
 
 - **Permission-denied errors** are surfaced to the LLM as tool errors with clear remediation guidance, not server crashes
 - **Rate limiting** is applied at the port boundary: 10 requests/second, burst 20 — configurable at startup
-- **Two-step HITL confirmation** for mutation tools: no GCP resource can be changed without first generating a preview plan (`dry_run: true` → `plan_id`) and then confirming it (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use — replay attacks are prevented at the store level. Every confirmed execution is audit-logged to Cloud Logging (`jsonPayload.msg="safety: mutation confirmed"`)
+- **Two-step mutation confirmation**: when safety is enabled, mutations require a preview plan (`dry_run: true` → `plan_id`) followed by a confirmation call (`confirm_plan_id: <id>`). Plans expire after 10 minutes and are single-use, and confirmed execution is audit-logged. The server does not independently verify that the second call came from a distinct human; `SAFETY_ENABLED=false` also remains available for local stdio development.
 - **Idempotency**: scaling to the current replica count returns `no_change_needed: true` without generating a plan or issuing an API call
-- **Read-only guarantees**: all 70 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) require the two-step HITL confirmation flow described above.
+- **Read-only guarantees**: all 70 default non-mutation tools—and the opt-in cost-reasoning tool—are strictly read-only and never modify resource state. The two base mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) and the opt-in recommendation export use the two-step confirmation flow when safety is enabled.
 - **Secret Manager safety**: `gcp_secretmanager_list` returns secret *metadata only* (name, labels, create time, replication). The `secretmanager.projects.secrets.versions.access` API is **never called** — secret values cannot be read or returned by any tool in this server. The required role (`roles/secretmanager.viewer`) does not grant `secretAccessor` permissions.
 - **MCP annotations**: all registered tools (73 by default, 74 with cost reasoning) carry standard `readOnlyHint` / `destructiveHint` / `idempotentHint` annotations—clients like Claude Desktop use these to decide whether to present a confirmation UI before calling a tool
 - **PII anonymization** (opt-in): set `ANONYMIZE_ENABLED=true` to scrub IPs, emails, service account names, and GCP API keys from every tool result before the LLM sees it — see [PII Anonymization](#pii-anonymization) for full configuration options
@@ -1140,10 +1151,10 @@ aura-tracker-gcp: no GCP credentials found.
 
 Run:  gcloud auth application-default login
 
-Or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file.
+For automation, use an attached service account, Workload Identity, or service-account impersonation.
 ```
 
-For Cloud Run deployments (`MCP_TRANSPORT=sse`): ensure [Workload Identity](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) is configured on the service account, or set `GOOGLE_APPLICATION_CREDENTIALS` to a mounted service account key.
+For Cloud Run deployments (`MCP_TRANSPORT=sse`), attach a least-privilege runtime service account. For GKE-hosted deployments, use Workload Identity Federation for GKE. Avoid long-lived service-account keys.
 
 ---
 
@@ -1182,7 +1193,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
                               │ implements ▼
 ┌─────────────────────────────▼───────────────────────────────────┐
 │              internal/safety/   (Safety Decorator)               │
-│   decorator.go — two-step HITL confirmation for mutations        │
+│   decorator.go — two-step confirmation for mutations             │
 │   store.go     — TTL plan store, single-use UUID plan IDs        │
 │   (read-only methods pass through unchanged)                     │
 └─────────────────────────────┬───────────────────────────────────┘
@@ -1233,6 +1244,6 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
 
 ## Project Layout
 
-The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident correlation; `internal/costreasoning` owns complete-day windows and deterministic cost attribution; `internal/diagram` owns environment scoping and deterministic Mermaid, Graphviz, and SVG rendering; `internal/drift` owns configuration collection, normalization, matching, comparison, and coverage reporting. None imports MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce HITL confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
+The repository follows hexagonal architecture: `internal/mcp` (MCP protocol layer) and `internal/gcp` (GCP SDK adapter) remain decoupled. `internal/diagnostics` owns incident correlation; `internal/costreasoning` owns complete-day windows and deterministic cost attribution; `internal/diagram` owns environment scoping and deterministic Mermaid, Graphviz, and SVG rendering; `internal/drift` owns configuration collection, normalization, matching, comparison, and coverage reporting. None imports MCP or the GCP SDK. `internal/safety` wraps the adapter at the port boundary to enforce two-step mutation confirmation. `pkg/models` holds all input/output structs with zero GCP dependencies.
 
 → Full annotated project layout and contributor guide: [Architecture & Contributing](https://github.com/asbrodova/aura-tracker-gcp/wiki/Architecture-and-Contributing)

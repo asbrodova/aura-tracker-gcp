@@ -120,6 +120,8 @@ func (t *IAMTools) ListServiceAccounts() server.ServerTool {
 				"disabled status, and unique numeric ID.",
 		),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
+		mcp.WithNumber("page_size", mcp.Description("Maximum service accounts to return (1–1000). Default: 250."), mcp.Min(1), mcp.Max(1000)),
+		mcp.WithString("page_token", mcp.Description("Opaque next_page_token from a previous call.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Service Accounts",
 			ReadOnlyHint:    boolPtr(true),
@@ -132,8 +134,12 @@ func (t *IAMTools) ListServiceAccounts() server.ServerTool {
 		Tool: tool,
 		Handler: mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args struct {
 			ProjectID string `json:"project_id"`
+			PageSize  int    `json:"page_size,omitempty"`
+			PageToken string `json:"page_token,omitempty"`
 		}) (*mcp.CallToolResult, error) {
-			resp, err := t.svc.ListServiceAccounts(ctx, models.ListServiceAccountsRequest{ProjectID: args.ProjectID})
+			resp, err := t.svc.ListServiceAccounts(ctx, models.ListServiceAccountsRequest{
+				ProjectID: args.ProjectID, PageSize: args.PageSize, PageToken: args.PageToken,
+			})
 			if err != nil {
 				return handleServiceError("gcp_iam_list_service_accounts", err)
 			}

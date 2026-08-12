@@ -21,4 +21,5 @@ type ListTaggedResourcesResponse struct {
 	TagKey    string                  `json:"tag_key"`
 	TagValue  string                  `json:"tag_value,omitempty"`
 	Resources []TaggedResourceSummary `json:"resources"`
+	Truncated bool                    `json:"truncated,omitempty"`
 }

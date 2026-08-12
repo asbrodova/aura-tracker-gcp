@@ -30,6 +30,7 @@ Emoji rules by Aura Score:
 - 🟢 80–100 (Healthy)
 - 🟡 50–79 (Warning / Over-provisioned)
 - 🔴 0–49 (Critical / Idle)
+- ⚪ N/A (Telemetry unavailable; do not classify as healthy or critical)
 `
 
 func auraEmoji(band models.AuraBand) string {
@@ -38,6 +39,8 @@ func auraEmoji(band models.AuraBand) string {
 		return "🟢"
 	case models.AuraBandYellow:
 		return "🟡"
+	case models.AuraBandUnavailable:
+		return "⚪"
 	default:
 		return "🔴"
 	}
@@ -70,6 +73,8 @@ func auraStatusLabel(band models.AuraBand, reasons []string) string {
 			s += " — " + reasons[0]
 		}
 		return s
+	case models.AuraBandUnavailable:
+		return "Unavailable"
 	default:
 		s := "Critical"
 		if len(reasons) > 0 {
@@ -77,6 +82,17 @@ func auraStatusLabel(band models.AuraBand, reasons []string) string {
 		}
 		return s
 	}
+}
+
+func auraSummaryPresentation(report models.AuraReport) (string, string) {
+	if report.CoverageStatus == "unavailable" {
+		status := "Unavailable"
+		if len(report.Reasons) > 0 {
+			status += " — " + report.Reasons[0]
+		}
+		return "⚪ N/A", status
+	}
+	return fmt.Sprintf("%s %d", auraEmoji(report.Band), report.Score), auraStatusLabel(report.Band, report.Reasons)
 }
 
 func appendAuraInstruction(r *mcp.CallToolResult) *mcp.CallToolResult {
@@ -199,16 +215,20 @@ func (t *AuraTools) projectAuraSummaryHandler(ctx context.Context, _ mcp.CallToo
 	sb.WriteString("| Resource | Type | Aura | Status |\n")
 	sb.WriteString("|----------|------|------|--------|\n")
 	for _, r := range summary.Resources {
-		fmt.Fprintf(&sb, "| %s | %s | %s %d | %s |\n",
+		aura, status := auraSummaryPresentation(r)
+		fmt.Fprintf(&sb, "| %s | %s | %s | %s |\n",
 			r.ResourceName,
 			auraKindLabel(r.ResourceKind),
-			auraEmoji(r.Band), r.Score,
-			auraStatusLabel(r.Band, r.Reasons),
+			aura,
+			status,
 		)
 	}
-	fmt.Fprintf(&sb, "\nTotal: %d  🔴 Critical: %d  🟡 Warning: %d  🟢 Healthy: %d",
-		summary.TotalCount, summary.CriticalCount, summary.WarningCount, summary.HealthyCount,
+	fmt.Fprintf(&sb, "\nTotal: %d  🔴 Critical: %d  🟡 Warning: %d  🟢 Healthy: %d  ⚪ Unavailable: %d",
+		summary.TotalCount, summary.CriticalCount, summary.WarningCount, summary.HealthyCount, summary.UnavailableCount,
 	)
+	for _, warning := range summary.Warnings {
+		fmt.Fprintf(&sb, "\n\n⚠️ %s", warning)
+	}
 	result := mcp.NewToolResultText(sb.String())
 	// Surface the first quota note found across all resource reports (global quota, one message suffices).
 	for _, r := range summary.Resources {

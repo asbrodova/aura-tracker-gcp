@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"golang.org/x/oauth2"
@@ -126,7 +127,7 @@ func TestListWorkloads_Deployment(t *testing.T) {
 	mux.HandleFunc("/apis/batch/v1/jobs", serveJSON(t, k8sWorkloadList{}))
 
 	client := newTestK8sServer(t, mux.ServeHTTP)
-	workloads, err := client.listWorkloads(context.Background(), "", "")
+	workloads, _, err := client.listWorkloads(context.Background(), "", "", 500, "")
 	if err != nil {
 		t.Fatalf("listWorkloads: %v", err)
 	}
@@ -171,7 +172,7 @@ func TestListWorkloads_KindFilter(t *testing.T) {
 	mux.HandleFunc("/apis/apps/v1/statefulsets", serveJSON(t, fixture))
 
 	client := newTestK8sServer(t, mux.ServeHTTP)
-	workloads, err := client.listWorkloads(context.Background(), "", "StatefulSet")
+	workloads, _, err := client.listWorkloads(context.Background(), "", "StatefulSet", 500, "")
 	if err != nil {
 		t.Fatalf("listWorkloads: %v", err)
 	}
@@ -180,6 +181,174 @@ func TestListWorkloads_KindFilter(t *testing.T) {
 	}
 	if workloads[0].Kind != models.KindGKEStatefulSet {
 		t.Errorf("kind = %q", workloads[0].Kind)
+	}
+}
+
+func TestListWorkloads_PaginatesWithOpaqueTokens(t *testing.T) {
+	requests := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/apis/apps/v1/deployments", func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Query().Get("limit") != "1" {
+			t.Errorf("limit = %q, want 1", r.URL.Query().Get("limit"))
+		}
+		fixture := k8sWorkloadList{Items: []k8sWorkload{{
+			Metadata: k8sMeta{Name: "first", Namespace: "default"},
+			Spec: k8sWorkloadSpec{Template: k8sPodTemplate{Spec: k8sPodSpec{
+				Containers: []k8sContainer{{Name: "app", Image: "image:v1"}},
+			}}},
+		}}}
+		if requests == 1 {
+			if got := r.URL.Query().Get("continue"); got != "" {
+				t.Errorf("first continue = %q, want empty", got)
+			}
+			fixture.Metadata.Continue = "native-k8s-token"
+		} else {
+			if got := r.URL.Query().Get("continue"); got != "native-k8s-token" {
+				t.Errorf("second continue = %q, want native token", got)
+			}
+			fixture.Items[0].Metadata.Name = "second"
+		}
+		_ = json.NewEncoder(w).Encode(fixture)
+	})
+
+	client := newTestK8sServer(t, mux.ServeHTTP)
+	first, next, err := client.listWorkloads(context.Background(), "", "Deployment", 1, "")
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first) != 1 || first[0].Name != "first" || next == "" || strings.Contains(next, "native-k8s-token") {
+		t.Fatalf("first page = %+v next=%q", first, next)
+	}
+	second, finalToken, err := client.listWorkloads(context.Background(), "", "Deployment", 1, next)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(second) != 1 || second[0].Name != "second" || finalToken != "" || requests != 2 {
+		t.Fatalf("second page = %+v next=%q requests=%d", second, finalToken, requests)
+	}
+}
+
+func TestListWorkloads_RejectsInvalidPageToken(t *testing.T) {
+	client := &k8sClient{}
+	if _, _, err := client.listWorkloads(context.Background(), "", "Deployment", 1, "not-base64!"); err == nil {
+		t.Fatal("invalid page token was accepted")
+	}
+}
+
+func TestListWorkloadsRejectsUnsupportedKindBeforeRequest(t *testing.T) {
+	client := &k8sClient{}
+	if _, _, err := client.listWorkloads(context.Background(), "", "ReplicaSet", 10, ""); err == nil || !strings.Contains(err.Error(), "unsupported workload kind") {
+		t.Fatalf("unsupported kind error = %v", err)
+	}
+	unsupportedToken := encodeWorkloadPageToken("ReplicaSet", "native-token")
+	if _, _, err := client.listWorkloads(context.Background(), "", "", 10, unsupportedToken); err == nil || !strings.Contains(err.Error(), "page token references unsupported") {
+		t.Fatalf("unsupported token kind error = %v", err)
+	}
+}
+
+func TestCanonicalWorkloadKindAcceptsSummaryConstants(t *testing.T) {
+	canonical, err := canonicalWorkloadKind(models.KindGKEDeployment, false)
+	if err != nil || canonical != "Deployment" {
+		t.Fatalf("canonical kind = %q, %v", canonical, err)
+	}
+	config, err := kindConfig(models.KindGKEDeployment)
+	if err != nil || config.resource != "deployments" {
+		t.Fatalf("kind config = %+v, %v", config, err)
+	}
+}
+
+func TestListWorkloads_RejectsPageLargerThanRequestedLimit(t *testing.T) {
+	fixture := k8sWorkloadList{Items: []k8sWorkload{{}, {}}}
+	client := newTestK8sServer(t, serveJSON(t, fixture))
+	if _, _, err := client.listWorkloads(context.Background(), "", "Deployment", 1, ""); err == nil || !strings.Contains(err.Error(), "returned 2 items") {
+		t.Fatalf("oversized page error = %v", err)
+	}
+}
+
+func TestK8sGetRejectsOversizedResponse(t *testing.T) {
+	client := newTestK8sServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(strings.Repeat("x", maxK8sResponseBytes+1)))
+	})
+	var response any
+	if err := client.get(context.Background(), "/oversized", &response); err == nil || !strings.Contains(err.Error(), "exceeded") {
+		t.Fatalf("oversized response error = %v", err)
+	}
+}
+
+func TestWorkloadDetailsNeverSerializeLiteralEnvValuesOrArbitraryAnnotations(t *testing.T) {
+	details := toWorkloadDetails(k8sWorkload{
+		Metadata: k8sMeta{
+			Name: "api", Namespace: "prod",
+			Annotations: map[string]string{
+				"sidecar.opentelemetry.io/inject": "true",
+				"example.com/access-token":        "annotation-secret",
+				"prometheus.io/scrape":            "not-a-boolean",
+			},
+		},
+		Spec: k8sWorkloadSpec{Template: k8sPodTemplate{Spec: k8sPodSpec{
+			Containers: []k8sContainer{{Name: "app", Env: []k8sEnvVar{
+				{Name: "API_TOKEN", Value: "literal-secret"},
+				{Name: "DB_PASSWORD", ValueFrom: &k8sEnvVarSource{SecretKeyRef: &k8sSecretKeySelector{Name: "db-secret", Key: "password"}}},
+			}}},
+		}}},
+	}, "Deployment")
+
+	if details.Containers[0].EnvVars[0].ValueFingerprint == "" {
+		t.Fatal("literal fingerprint missing from private in-process model")
+	}
+	encoded, err := json.Marshal(details)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(encoded)
+	for _, forbidden := range []string{"literal-secret", "annotation-secret", "ValueFingerprint", "sha256:"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("sensitive workload data leaked in JSON: %s", output)
+		}
+	}
+	if !strings.Contains(output, `"source":"literal"`) || !strings.Contains(output, `"has_literal_value":true`) ||
+		!strings.Contains(output, `"secret_ref":"db-secret"`) {
+		t.Fatalf("safe env metadata missing: %s", output)
+	}
+	if details.AnnotationsOmitted != 2 || details.Annotations["sidecar.opentelemetry.io/inject"] != "true" {
+		t.Fatalf("safe annotations = %#v omitted=%d", details.Annotations, details.AnnotationsOmitted)
+	}
+	if len(details.OmittedAnnotationFingerprints) != 2 || details.OmittedAnnotationFingerprints[0] == details.OmittedAnnotationFingerprints[1] {
+		t.Fatalf("omitted annotation fingerprints = %#v", details.OmittedAnnotationFingerprints)
+	}
+}
+
+func TestOmittedAnnotationFingerprintsDetectChangesWithoutSerialization(t *testing.T) {
+	first := toWorkloadDetails(k8sWorkload{Metadata: k8sMeta{Annotations: map[string]string{"example.com/config": "alpha"}}}, "Deployment")
+	second := toWorkloadDetails(k8sWorkload{Metadata: k8sMeta{Annotations: map[string]string{"example.com/config": "omega"}}}, "Deployment")
+	if len(first.OmittedAnnotationFingerprints) != 1 || len(second.OmittedAnnotationFingerprints) != 1 ||
+		first.OmittedAnnotationFingerprints[0] == second.OmittedAnnotationFingerprints[0] {
+		t.Fatalf("annotation changes were not fingerprinted: %#v %#v", first.OmittedAnnotationFingerprints, second.OmittedAnnotationFingerprints)
+	}
+	encoded, err := json.Marshal([]models.GKEWorkloadDetails{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"alpha", "omega", "sha256:"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("annotation value or fingerprint serialized: %s", encoded)
+		}
+	}
+}
+
+func TestLiteralEnvFingerprintsDetectChangesWithoutSerialization(t *testing.T) {
+	first := safeGKEEnvVar(k8sEnvVar{Name: "TOKEN", Value: "alpha"})
+	second := safeGKEEnvVar(k8sEnvVar{Name: "TOKEN", Value: "omega"})
+	if first.ValueFingerprint == "" || first.ValueFingerprint == second.ValueFingerprint {
+		t.Fatalf("fingerprints did not distinguish literal changes: %q %q", first.ValueFingerprint, second.ValueFingerprint)
+	}
+	encoded, err := json.Marshal([]models.GKEEnvVar{first, second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "alpha") || strings.Contains(string(encoded), "omega") || strings.Contains(string(encoded), "sha256:") {
+		t.Fatalf("fingerprint or literal serialized: %s", encoded)
 	}
 }
 

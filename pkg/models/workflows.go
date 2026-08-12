@@ -29,6 +29,7 @@ type ListWorkflowsRequest struct {
 type ListWorkflowsResponse struct {
 	Workflows []WorkflowSummary `json:"workflows"`
 	Errors    []ToolError       `json:"errors,omitempty"`
+	Truncated bool              `json:"truncated,omitempty"`
 }
 
 // ListWorkflowExecutionsRequest lists executions for a workflow.

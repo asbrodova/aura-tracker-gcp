@@ -64,6 +64,42 @@ func TestApplyArchitectureGraphViewCapsNodesDeterministically(t *testing.T) {
 	}
 }
 
+func TestApplyArchitectureGraphViewDoesNotMutateCachedBackingData(t *testing.T) {
+	errorsWithSpareCapacity := make([]models.ToolError, 1, 2)
+	errorsWithSpareCapacity[0] = models.ToolError{Message: "existing"}
+	graph := models.ServerlessGraph{
+		ProjectID: "project",
+		Nodes: []models.GraphNode{
+			{ID: "c", Labels: map[string]string{"env": "prod"}, Attributes: map[string]string{"owner": "platform"}},
+			{ID: "a", Labels: map[string]string{"env": "prod"}, Attributes: map[string]string{"owner": "platform"}},
+			{ID: "b", Labels: map[string]string{"env": "prod"}},
+		},
+		Edges:          []models.GraphEdge{{Source: "a", Target: "b", Metadata: map[string]string{"method": "GET"}}},
+		Errors:         errorsWithSpareCapacity,
+		RegionsScanned: []string{"us-central1"},
+	}
+	originalErrorBacking := graph.Errors[:2]
+
+	got := applyArchitectureGraphView(graph, models.ExportArchitectureGraphRequest{ProjectID: "project", MaxNodes: 2})
+	got.Nodes[0].Labels["env"] = "changed"
+	got.Nodes[0].Attributes["new"] = "value"
+	got.Edges[0].Metadata["method"] = "POST"
+	got.RegionsScanned[0] = "changed"
+
+	if graph.Nodes[0].ID != "c" || graph.Nodes[1].ID != "a" || graph.Nodes[1].Labels["env"] != "prod" {
+		t.Fatalf("cached nodes mutated: %+v", graph.Nodes)
+	}
+	if _, exists := graph.Nodes[1].Attributes["new"]; exists {
+		t.Fatalf("cached attributes mutated: %+v", graph.Nodes[1].Attributes)
+	}
+	if graph.Edges[0].Metadata["method"] != "GET" || graph.RegionsScanned[0] != "us-central1" {
+		t.Fatalf("cached edge or regions mutated: edges=%+v regions=%+v", graph.Edges, graph.RegionsScanned)
+	}
+	if len(graph.Errors) != 1 || originalErrorBacking[1].Message != "" {
+		t.Fatalf("truncation error reused cached backing array: len=%d backing=%+v", len(graph.Errors), originalErrorBacking)
+	}
+}
+
 func TestArchGraphCacheKeyIncludesCollectionOptionsOnly(t *testing.T) {
 	base := models.ExportArchitectureGraphRequest{ProjectID: "project", LookbackHours: 24}
 	withViewOptions := base

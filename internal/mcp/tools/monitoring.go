@@ -120,6 +120,8 @@ func (t *MonitoringTools) ListMetricDescriptors() server.ServerTool {
 		mcp.WithDescription("List Cloud Monitoring metric descriptors for a project, optionally filtered by a prefix"),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("filter", mcp.Description(`Optional filter expression, e.g. metric.type = starts_with("custom.")`)),
+		mcp.WithNumber("page_size", mcp.Description("Maximum descriptors to return (1–1000). Default: 250."), mcp.Min(1), mcp.Max(1000)),
+		mcp.WithString("page_token", mcp.Description("Opaque next_page_token from a previous call.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Metric Descriptors",
 			ReadOnlyHint:    boolPtr(true),
@@ -151,6 +153,8 @@ func (t *MonitoringTools) ListTraceServices() server.ServerTool {
 	tool := mcp.NewTool("gcp_trace_list_services",
 		mcp.WithDescription("List services that have sent traces to Cloud Trace. Uses the Cloud Trace API by default; set TRACE_BACKEND=monitoring to use the Monitoring metric proxy instead."),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
+		mcp.WithNumber("page_size", mcp.Description("Maximum trace records or time series to inspect (1–1000). Default: 250."), mcp.Min(1), mcp.Max(1000)),
+		mcp.WithString("page_token", mcp.Description("Opaque next_page_token from a previous call.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Trace Services",
 			ReadOnlyHint:    boolPtr(true),
@@ -187,6 +191,8 @@ func (t *MonitoringTools) ListAlertPolicies() server.ServerTool {
 		),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("filter", mcp.Description("Optional filter expression")),
+		mcp.WithNumber("page_size", mcp.Description("Maximum policies to return (1–1000). Default: 250."), mcp.Min(1), mcp.Max(1000)),
+		mcp.WithString("page_token", mcp.Description("Opaque next_page_token from a previous call.")),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "List Alert Policies",
 			ReadOnlyHint:    boolPtr(true),
