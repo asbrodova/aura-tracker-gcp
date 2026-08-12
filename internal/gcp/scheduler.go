@@ -72,7 +72,7 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 
 func (a *gcpAdapter) listSchedulerJobsForRegion(ctx context.Context, projectID, region string, limit int) ([]models.SchedulerJobSummary, bool, error) {
 	if a.schedulerClient == nil {
-		return nil, false, fmt.Errorf("Cloud Scheduler client is not initialized")
+		return nil, false, fmt.Errorf("cloud scheduler client is not initialized")
 	}
 	if err := a.rateWait(ctx, "scheduler.listJobsForRegion"); err != nil {
 		return nil, false, err

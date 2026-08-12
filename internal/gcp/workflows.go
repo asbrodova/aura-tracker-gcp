@@ -72,7 +72,7 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 
 func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, region string, limit int) ([]models.WorkflowSummary, bool, error) {
 	if a.workflowsClient == nil {
-		return nil, false, fmt.Errorf("Workflows client is not initialized")
+		return nil, false, fmt.Errorf("workflows client is not initialized")
 	}
 	if err := a.rateWait(ctx, "workflows.listForRegion"); err != nil {
 		return nil, false, err

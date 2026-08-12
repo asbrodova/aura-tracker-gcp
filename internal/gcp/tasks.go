@@ -71,7 +71,7 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 
 func (a *gcpAdapter) listTaskQueuesForRegion(ctx context.Context, projectID, region string, limit int) ([]models.TaskQueueSummary, bool, error) {
 	if a.tasksClient == nil {
-		return nil, false, fmt.Errorf("Cloud Tasks client is not initialized")
+		return nil, false, fmt.Errorf("cloud tasks client is not initialized")
 	}
 	if err := a.rateWait(ctx, "tasks.listQueuesForRegion"); err != nil {
 		return nil, false, err

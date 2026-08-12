@@ -111,15 +111,6 @@ func validateAuraRequest(req models.GetAuraScoreRequest) error {
 	return nil
 }
 
-func firstError(values ...error) error {
-	for _, err := range values {
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // ratioMetricValue combines independently fetched numerator and denominator
 // metrics without treating an absent zero-valued numerator as missing telemetry.
 // Monitoring commonly returns no series for zero errors, while still returning
