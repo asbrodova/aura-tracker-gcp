@@ -12,6 +12,7 @@ import (
 	protocol "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/anonymize"
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
@@ -488,6 +489,49 @@ func TestIncidentPromptIsHiddenWhenModuleDisabled(t *testing.T) {
 	}
 }
 
+func TestBigQueryOptimizationPromptRequiresMonitoringModule(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test", WithModules(map[string]bool{}))
+	msg := json.RawMessage(`{"jsonrpc":"2.0","id":10,"method":"prompts/list","params":{}}`)
+	raw, _ := json.Marshal(s.HandleMessage(context.Background(), msg))
+	if strings.Contains(string(raw), "optimize-bigquery-costs") {
+		t.Fatalf("monitoring-dependent prompt was registered without monitoring: %s", raw)
+	}
+
+	s = New(&mockSvc{}, slog.Default(), "test", WithModules(map[string]bool{ModuleMonitoring: true}))
+	raw, _ = json.Marshal(s.HandleMessage(context.Background(), msg))
+	if !strings.Contains(string(raw), "optimize-bigquery-costs") {
+		t.Fatalf("optimization prompt missing with monitoring enabled: %s", raw)
+	}
+}
+
+func TestProtocolErrorsDoNotReflectCallerControlledIdentifiers(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test")
+	const sentinel = "admin@example.com"
+	tests := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admin@example.com","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"prompts/get","params":{"name":"admin@example.com","arguments":{}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"unknown://admin@example.com"}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"admin@example.com","params":{}}`,
+	}
+	for _, request := range tests {
+		response := handleJSON(t, s, request)
+		if strings.Contains(response, sentinel) {
+			t.Fatalf("protocol error reflected caller input: %s", response)
+		}
+		if !strings.Contains(response, `"error"`) {
+			t.Fatalf("guarded request did not return an error: %s", response)
+		}
+	}
+}
+
+func TestProtocolGuardAllowsRegisteredResourceTemplates(t *testing.T) {
+	s := New(&mockSvc{}, slog.Default(), "test", WithDefaultProjectID("test-project"))
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"gcp://test-project/storage/example-bucket"}}`)
+	if strings.Contains(response, "requested resource is unavailable") {
+		t.Fatalf("registered resource template was blocked: %s", response)
+	}
+}
+
 func TestNoneModulesRegistersZeroTools(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test",
 		WithModules(map[string]bool{}),
@@ -507,6 +551,21 @@ func TestPromptHandlerRequiresProjectID(t *testing.T) {
 	raw, _ := json.Marshal(resp)
 	if !strings.Contains(string(raw), "error") {
 		t.Errorf("expected error for missing project_id, got: %s", string(raw))
+	}
+}
+
+func TestPromptDescriptionCannotBypassAnonymizer(t *testing.T) {
+	scrubber, err := anonymize.NewLocalScrubber(anonymize.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(&mockSvc{}, slog.Default(), "test", WithAnonymizer(scrubber))
+	response := handleJSON(t, s, `{"jsonrpc":"2.0","id":5,"method":"prompts/get","params":{"name":"audit-security-posture","arguments":{"project_id":"test-project","focus":"admin@example.com"}}}`)
+	if strings.Contains(response, "admin@example.com") {
+		t.Fatalf("prompt description bypassed anonymizer: %s", response)
+	}
+	if !strings.Contains(response, "EMAIL") {
+		t.Fatalf("scrub token missing from prompt response: %s", response)
 	}
 }
 func (m *mockSvc) ListArtifactRegistryRepos(_ context.Context, _ models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error) {

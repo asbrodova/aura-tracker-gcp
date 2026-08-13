@@ -35,22 +35,23 @@ type AuraHealthSignal struct {
 
 // AuraReport is the complete Aura Score for a single GCP resource.
 type AuraReport struct {
-	ResourceKind    ResourceKind       `json:"resource_kind"`
-	ResourceName    string             `json:"resource_name"`
-	Region          string             `json:"region"`
-	Score           int                `json:"score"`            // 0-100 composite
-	Band            AuraBand           `json:"band"`             // green/yellow/red/unavailable
-	Display         string             `json:"display"`          // "🟢 Cloud Run: svc | Aura: 98 (Healthy & Scaled)"
-	HealthScore     int                `json:"health_score"`     // weighted health sub-score
-	EfficiencyScore int                `json:"efficiency_score"` // utilization efficiency sub-score
-	HealthSignals   []AuraHealthSignal `json:"health_signals"`
-	Reasons         []string           `json:"reasons"`                    // actionable improvement hints for the LLM
-	CachedAt        time.Time          `json:"cached_at"`                  // zero if not from cache
-	RecommenderNote string             `json:"recommender_note,omitempty"` // set when daily quota is exhausted
-	CoverageStatus  string             `json:"coverage_status"`            // complete, partial, or unavailable
-	SignalsObserved int                `json:"signals_observed"`
-	SignalsExpected int                `json:"signals_expected"`
-	Warnings        []string           `json:"warnings,omitempty"`
+	ResourceKind       ResourceKind       `json:"resource_kind"`
+	ResourceName       string             `json:"resource_name"`
+	Region             string             `json:"region"`
+	Score              int                `json:"score"`            // 0-100 composite
+	Band               AuraBand           `json:"band"`             // green/yellow/red/unavailable
+	Display            string             `json:"display"`          // "🟢 Cloud Run: svc | Aura: 98 (Healthy & Scaled)"
+	HealthScore        int                `json:"health_score"`     // weighted health sub-score
+	EfficiencyScore    int                `json:"efficiency_score"` // utilization efficiency sub-score
+	HealthSignals      []AuraHealthSignal `json:"health_signals"`
+	Reasons            []string           `json:"reasons"`                                 // actionable improvement hints for the LLM
+	CachedAt           time.Time          `json:"cached_at"`                               // zero if not from cache
+	RecommenderNote    string             `json:"recommender_note,omitempty"`              // set when a Recommender quota window is exhausted
+	RecommenderRetryAt time.Time          `json:"recommender_retry_at,omitempty,omitzero"` // earliest safe time to refresh missing Recommender signals
+	CoverageStatus     string             `json:"coverage_status"`                         // complete, partial, or unavailable
+	SignalsObserved    int                `json:"signals_observed"`
+	SignalsExpected    int                `json:"signals_expected"`
+	Warnings           []string           `json:"warnings,omitempty"`
 }
 
 // GetAuraScoreRequest is the input for the gcp_get_aura_score tool.

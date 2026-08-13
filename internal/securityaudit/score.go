@@ -114,8 +114,19 @@ func buildCoverage(facts collectedFacts) []models.SecurityCoverageCheck {
 		Status: "complete", ItemsScanned: len(facts.recommendations.Recommendations),
 	}
 	if facts.recommendationErr != nil {
-		recommendations.Status = "error"
-		recommendations.Message = facts.recommendationErr.Error()
+		if quotaErr, quotaExhausted := recommenderQuotaError(facts.recommendationErr); quotaExhausted {
+			recommendations.Status = "partial"
+			recommendations.Message = "Cloud Recommender quota exhausted"
+			if quotaErr.Window != "" {
+				recommendations.Message += fmt.Sprintf(" (%s window)", quotaErr.Window)
+			}
+			if !quotaErr.RetryAt.IsZero() {
+				recommendations.Message = fmt.Sprintf("%s; retry after %s", recommendations.Message, quotaErr.RetryAt.UTC().Format(time.RFC3339))
+			}
+		} else {
+			recommendations.Status = "error"
+			recommendations.Message = facts.recommendationErr.Error()
+		}
 	} else if !facts.recommendations.Enabled {
 		recommendations.Status = "skipped"
 		recommendations.Message = "Cloud Recommender integration is disabled"

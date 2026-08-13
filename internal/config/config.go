@@ -3,7 +3,9 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -72,10 +74,19 @@ type Config struct {
 func Load() (Config, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return Config{}, err
+		// The user-level file is optional. Headless/container runtimes may have
+		// neither HOME nor a passwd entry, which must not make environment-only
+		// configuration fail at startup.
+		return Config{}, nil
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".aura-tracker.yaml"))
+	path := filepath.Join(home, ".aura-tracker.yaml")
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		return Config{}, nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		// An implicitly discovered optional config is not a hard dependency.
+		// Explicit runtime configuration still comes from validated flags/env.
 		return Config{}, nil
 	}
 	if err != nil {
@@ -85,7 +96,7 @@ func Load() (Config, error) {
 	decoder := yaml.NewDecoder(bytes.NewReader(data))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {
-		return Config{}, fmt.Errorf("parse %s: %w", filepath.Join(home, ".aura-tracker.yaml"), err)
+		return Config{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return cfg, nil
 }

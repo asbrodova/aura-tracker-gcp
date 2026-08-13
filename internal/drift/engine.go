@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -18,10 +19,17 @@ import (
 
 const (
 	engineVersion     = "environment-drift-v1"
-	normalizerVersion = "configuration-normalizer-v1"
+	normalizerVersion = "configuration-normalizer-v2"
 	defaultTimeout    = 90 * time.Second
 	defaultMaxChanges = 250
 	maxAllowedChanges = 1000
+)
+
+var (
+	diagnosticAuthorizationRe = regexp.MustCompile(`(?i)\b(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+`)
+	diagnosticCredentialRe    = regexp.MustCompile(`(?i)\b(password|passwd|pwd|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|client[_-]?secret|credentials?|private[_-]?key|cookie|signature)\s*[:=]\s*[^\s,;]+`)
+	diagnosticJWTRe           = regexp.MustCompile(`\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b`)
+	diagnosticPrivateKeyRe    = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----`)
 )
 
 type Option func(*Engine)
@@ -160,6 +168,7 @@ collectionLoop:
 		resp.Warnings = append(resp.Warnings, "The comparison reached its time budget; results include only completed collectors.")
 	}
 	finalizeResponse(&resp, req)
+	sanitizeDriftResponse(&resp)
 	e.log.InfoContext(ctx, "environment drift comparison completed",
 		"comparison_id", resp.ComparisonID, "environment_a", req.EnvironmentA,
 		"environment_b", req.EnvironmentB, "components", len(components),
@@ -167,6 +176,92 @@ collectionLoop:
 		"differences", resp.Summary.DifferentResources+resp.Summary.OnlyInEnvironmentA+resp.Summary.OnlyInEnvironmentB,
 	)
 	return resp, nil
+}
+
+func sanitizeDriftResponse(resp *models.CompareEnvironmentsResponse) {
+	for i := range resp.Highlights {
+		sanitizeResourceDrift(&resp.Highlights[i])
+	}
+	for i := range resp.Resources {
+		sanitizeResourceDrift(&resp.Resources[i])
+	}
+	for i := range resp.Coverage {
+		resp.Coverage[i].Message = sanitizeDiagnosticText(resp.Coverage[i].Message)
+	}
+	for i := range resp.Warnings {
+		resp.Warnings[i] = sanitizeDiagnosticText(resp.Warnings[i])
+	}
+}
+
+func sanitizeResourceDrift(resource *models.ResourceDrift) {
+	resource.Name = sanitizeDiagnosticText(resource.Name)
+	resource.Location = sanitizeDiagnosticText(resource.Location)
+	resource.Qualifier = sanitizeDiagnosticText(resource.Qualifier)
+	resource.Summary = sanitizeDiagnosticText(resource.Summary)
+	for i := range resource.FieldDifferences {
+		difference := &resource.FieldDifferences[i]
+		privatePath := difference.Path
+		for j := range difference.Values {
+			difference.Values[j].Value = safeDifferenceValue(privatePath, difference.Values[j].Value, difference.Values[j].Present)
+		}
+		difference.Path = safeDriftPath(privatePath)
+		if len(difference.Values) >= 2 {
+			difference.Summary = fieldSummary(
+				difference.Path,
+				difference.Values[0].Environment,
+				difference.Values[1].Environment,
+				difference.Values[0].Present,
+				difference.Values[1].Present,
+			)
+		} else {
+			difference.Summary = sanitizeDiagnosticText(difference.Summary)
+		}
+	}
+}
+
+func safeDriftPath(path string) string {
+	segments := driftPathSegments(path)
+	for i, segment := range segments {
+		candidate := "/" + strings.Join(segments[:i+1], "/")
+		if isSensitiveDriftPath(candidate) {
+			segments[i] = "[REDACTED]"
+			segments = segments[:i+1]
+			break
+		}
+		if key, _, ok := strings.Cut(segment, "="); ok {
+			// Semantic-array matching uses a private identity value. It is useful
+			// for alignment but must not be copied into a public JSON pointer.
+			segment = key + "=[IDENTITY]"
+		}
+		segments[i] = escapePointer(segment)
+	}
+	return "/" + strings.Join(segments, "/")
+}
+
+func sanitizeDiagnosticText(value string) string {
+	value = diagnosticPrivateKeyRe.ReplaceAllString(value, "[REDACTED]")
+	fields := strings.Fields(value)
+	for i, field := range fields {
+		trimmed := strings.Trim(field, "\"'(){}<>,;")
+		if !strings.Contains(trimmed, "://") {
+			continue
+		}
+		safe := safeDriftURL(trimmed)
+		if safe != trimmed {
+			fields[i] = strings.Replace(field, trimmed, safe, 1)
+		}
+	}
+	value = strings.Join(fields, " ")
+	value = diagnosticAuthorizationRe.ReplaceAllString(value, "${1}[REDACTED]")
+	value = diagnosticCredentialRe.ReplaceAllStringFunc(value, func(match string) string {
+		separator := strings.IndexAny(match, ":=")
+		if separator < 0 {
+			return "[REDACTED]"
+		}
+		return match[:separator+1] + "[REDACTED]"
+	})
+	value = diagnosticJWTRe.ReplaceAllString(value, "[REDACTED]")
+	return value
 }
 
 func (e *Engine) normalizeRequest(req *models.CompareEnvironmentsRequest) ([]string, error) {

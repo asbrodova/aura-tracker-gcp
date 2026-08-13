@@ -20,6 +20,9 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 	}
 
 	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceWorkflows)
+	if err := ctx.Err(); err != nil {
+		return models.ListWorkflowsResponse{}, fmt.Errorf("workflows.ListWorkflows: %w", err)
+	}
 	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
@@ -55,7 +58,12 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return models.ListWorkflowsResponse{}, fmt.Errorf("workflows.ListWorkflows: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return models.ListWorkflowsResponse{}, fmt.Errorf("workflows.ListWorkflows: %w", err)
+	}
 
 	if workflows == nil {
 		workflows = []models.WorkflowSummary{}

@@ -19,6 +19,9 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 	}
 
 	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceScheduler)
+	if err := ctx.Err(); err != nil {
+		return models.ListSchedulerJobsResponse{}, fmt.Errorf("scheduler.ListSchedulerJobs: %w", err)
+	}
 	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
@@ -55,7 +58,12 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return models.ListSchedulerJobsResponse{}, fmt.Errorf("scheduler.ListSchedulerJobs: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return models.ListSchedulerJobsResponse{}, fmt.Errorf("scheduler.ListSchedulerJobs: %w", err)
+	}
 
 	if jobs == nil {
 		jobs = []models.SchedulerJobSummary{}

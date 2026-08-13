@@ -19,6 +19,12 @@ import (
 
 var monitoringLabelKeyRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+const (
+	defaultMetricLookbackMinutes = 60
+	maxMetricLookbackMinutes     = 1440
+	maxMonitoringLabels          = 20
+)
+
 var supportedAligners = map[string]monitoringpb.Aggregation_Aligner{
 	"ALIGN_NONE":          monitoringpb.Aggregation_ALIGN_NONE,
 	"ALIGN_MEAN":          monitoringpb.Aggregation_ALIGN_MEAN,
@@ -279,6 +285,7 @@ func (a *gcpAdapter) listTraceServicesViaTrace(ctx context.Context, req models.L
 	call := a.traceClient.Projects.Traces.List(req.ProjectID).
 		StartTime(startTime).
 		PageSize(int64(req.PageSize)).
+		View("ROOTSPAN").
 		Context(ctx)
 	if req.PageToken != "" {
 		call = call.PageToken(req.PageToken)
@@ -290,7 +297,7 @@ func (a *gcpAdapter) listTraceServicesViaTrace(ctx context.Context, req models.L
 	for _, trace := range resp.Traces {
 		for _, span := range trace.Spans {
 			if span.ParentSpanId == 0 {
-				name := span.Name
+				name := serviceNameFromSpan(span.Name, span.Labels)
 				if name != "" && !seen[name] {
 					seen[name] = true
 				}
@@ -361,23 +368,32 @@ func (a *gcpAdapter) GetMetrics(ctx context.Context, req models.GetMetricsReques
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	if req.LookbackMinutes <= 0 {
-		req.LookbackMinutes = 60
+	hasExplicitInterval := strings.TrimSpace(req.StartTime) != "" || strings.TrimSpace(req.EndTime) != ""
+	if !hasExplicitInterval {
+		if req.LookbackMinutes == 0 {
+			req.LookbackMinutes = defaultMetricLookbackMinutes
+		}
+		if req.LookbackMinutes < 1 || req.LookbackMinutes > maxMetricLookbackMinutes {
+			return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: lookback_minutes must be between 1 and %d", maxMetricLookbackMinutes)
+		}
 	}
-	if req.LookbackMinutes > 1440 {
-		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: lookback_minutes must be at most 1440")
-	}
-	if req.AlignmentPeriodSeconds <= 0 {
+	if req.AlignmentPeriodSeconds == 0 {
 		req.AlignmentPeriodSeconds = 60
 	}
 	if req.AlignmentPeriodSeconds < 10 || req.AlignmentPeriodSeconds > 86400 {
 		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: alignment_period_seconds must be between 10 and 86400")
 	}
-	if req.MaxTimeSeries <= 0 {
+	if req.MaxTimeSeries == 0 {
 		req.MaxTimeSeries = 100
 	}
-	if req.MaxTimeSeries > 1000 {
-		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: max_time_series must be at most 1000")
+	if req.MaxTimeSeries < 1 || req.MaxTimeSeries > 1000 {
+		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: max_time_series must be between 1 and 1000")
+	}
+	if len(req.ResourceLabels) > maxMonitoringLabels || len(req.MetricLabels) > maxMonitoringLabels {
+		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: resource_labels and metric_labels are limited to %d entries each", maxMonitoringLabels)
+	}
+	if len(req.GroupByFields) > maxMonitoringLabels {
+		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: group_by_fields is limited to %d entries", maxMonitoringLabels)
 	}
 
 	alignerName := strings.ToUpper(strings.TrimSpace(req.PerSeriesAligner))
@@ -401,21 +417,9 @@ func (a *gcpAdapter) GetMetrics(ctx context.Context, req models.GetMetricsReques
 		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: cross-series reduction requires a non-NONE per-series aligner")
 	}
 
-	now := time.Now().UTC()
-	startTime := now.Add(-time.Duration(req.LookbackMinutes) * time.Minute)
-	if req.StartTime != "" || req.EndTime != "" {
-		if req.StartTime == "" || req.EndTime == "" {
-			return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: start_time and end_time must be provided together")
-		}
-		var err error
-		startTime, err = time.Parse(time.RFC3339, req.StartTime)
-		if err != nil {
-			return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: invalid start_time: %w", err)
-		}
-		now, err = time.Parse(time.RFC3339, req.EndTime)
-		if err != nil || !startTime.Before(now) {
-			return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: invalid end_time")
-		}
+	startTime, endTime, err := metricInterval(req, time.Now().UTC())
+	if err != nil {
+		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: %w", err)
 	}
 
 	filter, err := buildMetricFilter(req)
@@ -428,7 +432,7 @@ func (a *gcpAdapter) GetMetrics(ctx context.Context, req models.GetMetricsReques
 		Filter: filter,
 		Interval: &monitoringpb.TimeInterval{
 			StartTime: timestamppb.New(startTime),
-			EndTime:   timestamppb.New(now),
+			EndTime:   timestamppb.New(endTime),
 		},
 		View: monitoringpb.ListTimeSeriesRequest_FULL,
 	}
@@ -484,6 +488,32 @@ func (a *gcpAdapter) GetMetrics(ctx context.Context, req models.GetMetricsReques
 		NoData:             len(series) == 0,
 		Truncated:          truncated,
 	}, nil
+}
+
+func metricInterval(req models.GetMetricsRequest, now time.Time) (time.Time, time.Time, error) {
+	startValue := strings.TrimSpace(req.StartTime)
+	endValue := strings.TrimSpace(req.EndTime)
+	if startValue == "" && endValue == "" {
+		return now.Add(-time.Duration(req.LookbackMinutes) * time.Minute), now, nil
+	}
+	if startValue == "" || endValue == "" {
+		return time.Time{}, time.Time{}, fmt.Errorf("start_time and end_time must be provided together")
+	}
+	start, err := time.Parse(time.RFC3339, startValue)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid start_time: %w", err)
+	}
+	end, err := time.Parse(time.RFC3339, endValue)
+	if err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("invalid end_time: %w", err)
+	}
+	if !start.Before(end) {
+		return time.Time{}, time.Time{}, fmt.Errorf("start_time must be before end_time")
+	}
+	if end.Sub(start) > time.Duration(maxMetricLookbackMinutes)*time.Minute {
+		return time.Time{}, time.Time{}, fmt.Errorf("explicit interval must not exceed %d minutes", maxMetricLookbackMinutes)
+	}
+	return start, end, nil
 }
 
 func buildMetricFilter(req models.GetMetricsRequest) (string, error) {

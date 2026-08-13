@@ -1,11 +1,13 @@
 package gcp
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
 
 	"golang.org/x/time/rate"
+	"google.golang.org/api/option"
 )
 
 func TestAdapterCloseIsIdempotent(t *testing.T) {
@@ -15,6 +17,25 @@ func TestAdapterCloseIsIdempotent(t *testing.T) {
 	}
 	if err := adapter.Close(); err != nil {
 		t.Fatalf("second Close() error = %v", err)
+	}
+}
+
+func TestNewInitializesHTTPAndGRPCClientsWithSharedTransportLimits(t *testing.T) {
+	adapter, err := New(context.Background(), "valid-project",
+		WithModules(map[string]bool{}),
+		WithClientOptions(option.WithoutAuthentication(), option.WithEndpoint("localhost:1")),
+	)
+	if err != nil {
+		t.Fatalf("New() with local no-auth endpoint: %v", err)
+	}
+	defer func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("Close() error: %v", err)
+		}
+	}()
+	if adapter.crm == nil || adapter.bq == nil || adapter.gcs == nil || adapter.runSvc == nil || adapter.runRevisions == nil {
+		t.Fatalf("always-on clients were not initialized: crm=%v bq=%v gcs=%v run=%v revisions=%v",
+			adapter.crm != nil, adapter.bq != nil, adapter.gcs != nil, adapter.runSvc != nil, adapter.runRevisions != nil)
 	}
 }
 

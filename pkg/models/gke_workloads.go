@@ -141,8 +141,9 @@ type ListGKEServicesRequest struct {
 
 // ListGKEServicesResponse is the output for gcp_gke_list_services.
 type ListGKEServicesResponse struct {
-	Services []GKEServiceSummary `json:"services"`
-	Errors   []ToolError         `json:"errors,omitempty"`
+	Services  []GKEServiceSummary `json:"services"`
+	Truncated bool                `json:"truncated,omitempty"`
+	Errors    []ToolError         `json:"errors,omitempty"`
 }
 
 // --- Ingresses ---
@@ -195,6 +196,7 @@ type ListGKEIngressesRequest struct {
 // ListGKEIngressesResponse is the output for gcp_gke_list_ingresses.
 type ListGKEIngressesResponse struct {
 	Ingresses []GKEIngressSummary `json:"ingresses"`
+	Truncated bool                `json:"truncated,omitempty"`
 	Errors    []ToolError         `json:"errors,omitempty"`
 }
 
@@ -223,8 +225,9 @@ type ListGKENetworkPoliciesRequest struct {
 
 // ListGKENetworkPoliciesResponse is the output for gcp_gke_list_network_policies.
 type ListGKENetworkPoliciesResponse struct {
-	Policies []GKENetworkPolicySummary `json:"policies"`
-	Errors   []ToolError               `json:"errors,omitempty"`
+	Policies  []GKENetworkPolicySummary `json:"policies"`
+	Truncated bool                      `json:"truncated,omitempty"`
+	Errors    []ToolError               `json:"errors,omitempty"`
 }
 
 // --- Mesh topology ---

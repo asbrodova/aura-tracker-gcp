@@ -1,8 +1,11 @@
 package gcp
 
 import (
+	"context"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const defaultCacheMaxEntries = 1024
@@ -28,19 +31,33 @@ func newTTLCache[V any](ttl time.Duration) *ttlCache[V] {
 }
 
 func (c *ttlCache[V]) get(key string) (V, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	now := time.Now()
+	c.mu.RLock()
 	e, ok := c.entries[key]
 	if !ok {
+		c.mu.RUnlock()
 		var zero V
 		return zero, false
 	}
-	if time.Now().After(e.expiresAt) {
+	if now.Before(e.expiresAt) {
+		c.mu.RUnlock()
+		return e.value, true
+	}
+	c.mu.RUnlock()
+
+	// Expiry cleanup needs the write lock. Re-read after acquiring it so a
+	// concurrent refresh cannot be deleted based on the stale entry above.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok = c.entries[key]
+	if ok && time.Now().Before(e.expiresAt) {
+		return e.value, true
+	}
+	if ok {
 		delete(c.entries, key)
-		var zero V
-		return zero, false
 	}
-	return e.value, true
+	var zero V
+	return zero, false
 }
 
 func (c *ttlCache[V]) set(key string, v V) {
@@ -64,4 +81,23 @@ func (c *ttlCache[V]) set(key string, v V) {
 		delete(c.entries, oldestKey)
 	}
 	c.entries[key] = ttlEntry[V]{value: v, expiresAt: now.Add(c.ttl)}
+}
+
+// doSharedCall coalesces identical work while allowing each waiter to honor its
+// own cancellation. The first caller's values are retained for tracing and
+// logging, but its cancellation and deadline are detached; callers must bound
+// fn itself (architecture collection does so with graphTimeout).
+func doSharedCall(ctx context.Context, group *singleflight.Group, key string, fn func(context.Context) (any, error)) (any, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	resultCh := group.DoChan(key, func() (any, error) {
+		return fn(context.WithoutCancel(ctx))
+	})
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case result := <-resultCh:
+		return result.Val, result.Err
+	}
 }

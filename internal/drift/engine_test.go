@@ -248,6 +248,152 @@ func TestSensitiveConfigurationValuesAreComparedButNeverReturned(t *testing.T) {
 	}
 }
 
+func TestSensitiveKeyVariantsAndContainersAreRedacted(t *testing.T) {
+	paths := []string{
+		"/client_secret", "/access-token", "/apiKey", "/authorization", "/passwordHash",
+		"/credentials/value", "/auth/privateKey", "/annotations/example.com~1innocuous",
+		"/connection.string", "/nested/refresh_token", "/nested/cookie",
+	}
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
+			value := map[string]any{"nested": []any{"drift-secret"}}
+			if got := safeDifferenceValue(path, value, true); got != "[REDACTED]" {
+				t.Fatalf("safeDifferenceValue(%q) = %#v, want redaction", path, got)
+			}
+		})
+	}
+}
+
+func TestSafeDriftURLPreservesRoutingAndRemovesCredentials(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		want      string
+		forbidden []string
+	}{
+		{
+			name:      "absolute URL",
+			raw:       "https://alice:p%40ss@example.com:8443/path?token=query-secret&mode=full#fragment-secret",
+			want:      "https://example.com:8443/path?mode=%5BREDACTED%5D&token=%5BREDACTED%5D",
+			forbidden: []string{"alice", "p%40ss", "query-secret", "fragment-secret"},
+		},
+		{
+			name:      "signed URL",
+			raw:       "https://storage.googleapis.com/bucket/object?X-Goog-Credential=credential-secret&X-Goog-Signature=signature-secret",
+			want:      "https://storage.googleapis.com/bucket/object?X-Goog-Credential=%5BREDACTED%5D&X-Goog-Signature=%5BREDACTED%5D",
+			forbidden: []string{"credential-secret", "signature-secret"},
+		},
+		{
+			name:      "relative target",
+			raw:       "/tasks/run?code=oauth-secret#fragment-secret",
+			want:      "/tasks/run?code=%5BREDACTED%5D",
+			forbidden: []string{"oauth-secret", "fragment-secret"},
+		},
+		{
+			name:      "artifact reference",
+			raw:       "us-docker.pkg.dev/project/repository/image?tag=sensitive-tag",
+			want:      "us-docker.pkg.dev/project/repository/image?tag=%5BREDACTED%5D",
+			forbidden: []string{"sensitive-tag"},
+		},
+		{
+			name:      "opaque DSN",
+			raw:       "Server=db;User ID=alice;Password=dsn-secret",
+			want:      "[REDACTED]",
+			forbidden: []string{"alice", "dsn-secret"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := safeDriftURL(tt.raw)
+			if got != tt.want {
+				t.Fatalf("safeDriftURL() = %q, want %q", got, tt.want)
+			}
+			for _, forbidden := range tt.forbidden {
+				if strings.Contains(got, forbidden) {
+					t.Fatalf("credential %q leaked in %q", forbidden, got)
+				}
+			}
+			if safeDriftURL(got) != got && got != "[REDACTED]" {
+				t.Fatalf("URL sanitizer is not idempotent: first=%q second=%q", got, safeDriftURL(got))
+			}
+		})
+	}
+}
+
+func TestDriftResponseSanitizesValuesPathsAndDiagnostics(t *testing.T) {
+	collector := &fakeCollector{components: []string{"scheduler"}, results: map[string]CollectionResult{
+		"env-a/scheduler": {
+			Resources: []Resource{{
+				Component: "scheduler", ResourceType: "scheduler.job", Name: "nightly", Config: map[string]any{
+					"target_ref":  "https://left-user:left-password@example.com/task?token=left-query-secret#left-fragment-secret",
+					"annotations": map[string]any{"example.com/owner": "annotation-left-secret"},
+					"clients":     []any{map[string]any{"name": "semantic-left-secret", "enabled": true}},
+				},
+			}},
+			Partial: true,
+			Warnings: []string{
+				"request https://warning-user:warning-password@example.com/path?signature=warning-query-secret#warning-fragment-secret failed; Authorization: Bearer warning-bearer-secret",
+			},
+		},
+		"env-b/scheduler": {
+			Resources: []Resource{{
+				Component: "scheduler", ResourceType: "scheduler.job", Name: "nightly", Config: map[string]any{
+					"target_ref":  "https://right-user:right-password@example.com/task?token=right-query-secret#right-fragment-secret",
+					"annotations": map[string]any{"example.com/owner": "annotation-right-secret"},
+					"clients":     []any{map[string]any{"name": "semantic-right-secret", "enabled": false}},
+				},
+			}},
+		},
+	}}
+	response, err := New(collector, nil).Compare(context.Background(), models.CompareEnvironmentsRequest{
+		EnvironmentA: "env-a", EnvironmentB: "env-b", DetailLevel: "detailed",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := string(encoded)
+	for _, forbidden := range []string{
+		"left-user", "left-password", "left-query-secret", "left-fragment-secret",
+		"right-user", "right-password", "right-query-secret", "right-fragment-secret",
+		"annotation-left-secret", "annotation-right-secret",
+		"semantic-left-secret", "semantic-right-secret",
+		"warning-user", "warning-password", "warning-query-secret", "warning-fragment-secret", "warning-bearer-secret",
+	} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("sensitive sentinel %q leaked: %s", forbidden, output)
+		}
+	}
+	if !strings.Contains(output, "example.com/task") || !strings.Contains(output, "[REDACTED]") {
+		t.Fatalf("safe diagnostic structure or redaction marker missing: %s", output)
+	}
+	if response.Summary.FieldDifferences == 0 || response.CoverageStatus != "partial" {
+		t.Fatalf("comparison semantics lost: %+v", response)
+	}
+}
+
+func TestDriftCollectorErrorDiagnosticsAreSanitized(t *testing.T) {
+	collector := &fakeCollector{components: []string{"cloudrun"}, results: map[string]CollectionResult{
+		"dev/cloudrun":  {Resources: []Resource{}},
+		"prod/cloudrun": {Resources: []Resource{}},
+	}, errors: map[string]error{
+		"dev/cloudrun": errors.New("GET https://error-user:error-password@example.com/path?api_key=error-query-secret#fragment Authorization: Bearer error-bearer-secret"),
+	}}
+	response, err := New(collector, nil).Compare(context.Background(), models.CompareEnvironmentsRequest{EnvironmentA: "dev", EnvironmentB: "prod"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(response)
+	for _, forbidden := range []string{"error-user", "error-password", "error-query-secret", "error-bearer-secret", "#fragment"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("collector error leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
 func TestArrayComparisonMatchesNamedObjectsAndSetMembers(t *testing.T) {
 	collector := &fakeCollector{components: []string{"gke"}, results: map[string]CollectionResult{
 		"dev/gke": {Resources: []Resource{{
@@ -274,7 +420,7 @@ func TestArrayComparisonMatchesNamedObjectsAndSetMembers(t *testing.T) {
 	}
 	paths := []string{response.Resources[0].FieldDifferences[0].Path, response.Resources[0].FieldDifferences[1].Path}
 	joined := strings.Join(paths, " ")
-	if !strings.Contains(joined, "/node_pools/name=primary/max_nodes") || !strings.Contains(joined, "/tags/0") {
+	if !strings.Contains(joined, "/node_pools/name=[IDENTITY]/max_nodes") || !strings.Contains(joined, "/tags/0") {
 		t.Fatalf("paths = %#v", paths)
 	}
 	for _, difference := range response.Resources[0].FieldDifferences {

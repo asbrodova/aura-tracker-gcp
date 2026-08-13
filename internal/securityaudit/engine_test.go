@@ -11,6 +11,7 @@ import (
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/testutil"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 func TestAuditBuildsSeverityRankedReportAndScore(t *testing.T) {
@@ -117,6 +118,57 @@ func TestAuditCacheAndRefresh(t *testing.T) {
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("IAM collector calls = %d, want 2", got)
+	}
+}
+
+func TestAuditQuotaDegradationIsPartialAndCachedOnlyUntilRetry(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	retryAt := now.Add(2 * time.Minute)
+	var recommendationCalls atomic.Int32
+	fake := &testutil.FakeGCPService{
+		ListSecurityRecommendationsFunc: func(context.Context, models.SecurityFactsRequest) (models.SecurityRecommendationFacts, error) {
+			recommendationCalls.Add(1)
+			return models.SecurityRecommendationFacts{}, &ports.RecommenderQuotaExhaustedError{Op: "security recommendations", RetryAt: retryAt}
+		},
+	}
+	engine := New(fake, slog.Default(), WithClock(func() time.Time { return now }))
+	request := models.SecurityAuditRequest{ProjectID: "test-project"}
+
+	report, err := engine.Audit(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantRetry := retryAt.Format(time.RFC3339)
+	foundPartial := false
+	for _, check := range report.Coverage {
+		if check.Category == models.SecurityCategoryRecommendations && check.Status == "partial" && strings.Contains(check.Message, wantRetry) {
+			foundPartial = true
+		}
+	}
+	if !foundPartial {
+		t.Fatalf("recommendation coverage does not describe quota retry: %+v", report.Coverage)
+	}
+	engine.mu.Lock()
+	entry, ok := engine.cache[request.ProjectID]
+	engine.mu.Unlock()
+	if !ok || !entry.expiresAt.Equal(retryAt) {
+		t.Fatalf("cache entry = %+v, present=%v; want expiry %s", entry, ok, retryAt)
+	}
+
+	now = retryAt.Add(-time.Second)
+	if _, err := engine.Audit(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if calls := recommendationCalls.Load(); calls != 1 {
+		t.Fatalf("recommendation calls before retry = %d, want 1", calls)
+	}
+
+	now = retryAt
+	if _, err := engine.Audit(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if calls := recommendationCalls.Load(); calls != 2 {
+		t.Fatalf("recommendation calls at retry = %d, want 2", calls)
 	}
 }
 

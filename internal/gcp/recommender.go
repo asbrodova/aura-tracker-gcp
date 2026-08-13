@@ -8,11 +8,8 @@ import (
 
 	"cloud.google.com/go/recommender/apiv1/recommenderpb"
 	"google.golang.org/api/iterator"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
-	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 const (
@@ -26,6 +23,68 @@ type recommenderInsight struct {
 	subtype        string // "idle" | "overprovisioned"
 	description    string
 	monthlySavings float64 // USD — positive means money saved
+}
+
+type recommendationIterator interface {
+	Next() (*recommenderpb.Recommendation, error)
+}
+
+type quotaAwareRecommendationIterator struct {
+	adapter       *gcpAdapter
+	inner         recommendationIterator
+	op            string
+	recommenderID string
+	generation    uint64
+}
+
+// activeRecommendations is the only production entry point to
+// Recommender.ListRecommendations. It applies the shared quota gate before the
+// request and maps iterator-time quota failures consistently for every caller.
+func (a *gcpAdapter) activeRecommendations(
+	ctx context.Context,
+	op, projectID, location, recommenderID string,
+	pageSize int32,
+) (*quotaAwareRecommendationIterator, error) {
+	generation, err := a.checkRecommenderQuota(op, recommenderID)
+	if err != nil {
+		return nil, err
+	}
+	parent := fmt.Sprintf("projects/%s/locations/%s/recommenders/%s", projectID, location, recommenderID)
+	inner := a.rec.ListRecommendations(ctx, &recommenderpb.ListRecommendationsRequest{
+		Parent:   parent,
+		Filter:   `stateInfo.state = "ACTIVE"`,
+		PageSize: pageSize,
+	})
+	return &quotaAwareRecommendationIterator{
+		adapter:       a,
+		inner:         inner,
+		op:            op,
+		recommenderID: recommenderID,
+		generation:    generation,
+	}, nil
+}
+
+func (it *quotaAwareRecommendationIterator) Next() (*recommenderpb.Recommendation, error) {
+	// Check before every Next: generated iterators fetch pages lazily, and do
+	// not expose whether the next item is buffered or requires another request.
+	// This conservative gate guarantees a known block never reaches Google.
+	generation, err := it.adapter.checkRecommenderQuota(it.op, it.recommenderID)
+	if err != nil {
+		return nil, err
+	}
+	it.generation = generation
+	recommendation, err := it.inner.Next()
+	if err == nil || err == iterator.Done {
+		// A successful page (including an empty final page) proves that this
+		// request's observed quota generation is usable. Do not clear a newer
+		// block installed concurrently by another iterator.
+		it.adapter.recommenderQuota.succeed(it.recommenderID, it.generation)
+		return recommendation, err
+	}
+	if isRecommenderQuotaError(err) {
+		return nil, it.adapter.tripRecommenderQuota(it.op, it.recommenderID, err)
+	}
+	return nil, wrapGCPError(it.op, err)
 }
 
 // fetchRecommenderInsights returns active recommendations that target a specific resource.
@@ -42,40 +101,31 @@ func (a *gcpAdapter) fetchRecommenderInsights(
 	ctx context.Context,
 	projectID, location, recommenderID, resourceSuffix string,
 ) ([]recommenderInsight, error) {
+	const op = "recommender.fetchInsights"
 	if a.rec == nil {
 		return nil, nil
 	}
 
-	// Fast-path: quota already exhausted this session — skip the API entirely.
-	if a.recommenderQuotaExhausted.Load() {
-		return nil, &ports.RecommenderQuotaExhaustedError{Op: "recommender.fetchInsights"}
-	}
-
 	// Cache hit: return stored results without burning any API quota.
 	cacheKey := projectID + "|" + location + "|" + recommenderID + "|" + resourceSuffix
-	if cached, ok := a.recommenderCache.get(cacheKey); ok {
-		return cached, nil
+	if a.recommenderCache != nil {
+		if cached, ok := a.recommenderCache.get(cacheKey); ok {
+			return cached, nil
+		}
 	}
 
-	parent := fmt.Sprintf("projects/%s/locations/%s/recommenders/%s", projectID, location, recommenderID)
-	req := &recommenderpb.ListRecommendationsRequest{
-		Parent:   parent,
-		Filter:   `stateInfo.state = "ACTIVE"`,
-		PageSize: maxUnpagedInventoryItems,
+	it, err := a.activeRecommendations(ctx, op, projectID, location, recommenderID, maxInventoryPageSize)
+	if err != nil {
+		return nil, err
 	}
 
 	var insights []recommenderInsight
-	it := a.rec.ListRecommendations(ctx, req)
 	for scanned := 0; ; scanned++ {
 		rec, err := it.Next()
 		if err == iterator.Done {
 			break
 		}
 		if err != nil {
-			if status.Code(err) == codes.ResourceExhausted {
-				a.recommenderQuotaExhausted.Store(true)
-				return nil, &ports.RecommenderQuotaExhaustedError{Op: "recommender.fetchInsights"}
-			}
 			return nil, err
 		}
 		if scanned >= maxUnpagedInventoryItems {
@@ -85,13 +135,15 @@ func (a *gcpAdapter) fetchRecommenderInsights(
 			continue
 		}
 		insights = append(insights, recommenderInsight{
-			subtype:        classifyRecommenderID(recommenderID),
+			subtype:        recommendationCategory(rec, recommenderID),
 			description:    rec.Description,
 			monthlySavings: extractMonthlySavings(rec),
 		})
 	}
 
-	a.recommenderCache.set(cacheKey, insights)
+	if a.recommenderCache != nil {
+		a.recommenderCache.set(cacheKey, insights)
+	}
 	return insights, nil
 }
 
@@ -138,19 +190,53 @@ func extractMonthlySavings(rec *recommenderpb.Recommendation) float64 {
 // classifyRecommenderID maps a recommender ID to a human-friendly subtype string
 // used as the signal name suffix (e.g. "idle", "overprovisioned").
 func classifyRecommenderID(id string) string {
-	if strings.Contains(id, "Idle") || strings.Contains(id, "IdentifyIdle") {
+	normalized := strings.ToLower(id)
+	if strings.Contains(normalized, "idle") || strings.Contains(normalized, "identifyidle") {
 		return "idle"
 	}
-	return "overprovisioned"
+	if strings.Contains(normalized, "overprovision") || strings.Contains(normalized, "rightsiz") {
+		return "overprovisioned"
+	}
+	return "other"
+}
+
+// recommendationSubtype preserves the API's recommendation-level subtype.
+// A recommender can emit multiple subtypes, so the recommender ID alone is not
+// a sufficient substitute. The ID-derived value is only a compatibility
+// fallback for older responses that omit recommender_subtype.
+func recommendationSubtype(rec *recommenderpb.Recommendation, recommenderID string) string {
+	if rec != nil {
+		if subtype := strings.TrimSpace(rec.GetRecommenderSubtype()); subtype != "" {
+			return strings.ToLower(subtype)
+		}
+	}
+	return classifyRecommenderID(recommenderID)
+}
+
+func recommendationCategory(rec *recommenderpb.Recommendation, recommenderID string) string {
+	subtype := recommendationSubtype(rec, recommenderID)
+	switch {
+	case strings.Contains(subtype, "idle"), strings.Contains(subtype, "unused"):
+		return "idle"
+	case strings.Contains(subtype, "overprovision"), strings.Contains(subtype, "rightsiz"):
+		return "overprovisioned"
+	default:
+		return classifyRecommenderID(recommenderID)
+	}
 }
 
 // recommenderSignal converts a recommenderInsight into an AuraHealthSignal that can be
 // appended to the signals slice and interpreted by weightedScores / buildReasons.
 // The Value field carries the estimated monthly USD savings.
 func recommenderSignal(ins recommenderInsight) models.AuraHealthSignal {
-	score := 45 // overprovisioned penalty
-	if ins.subtype == "idle" {
+	var score int
+	switch ins.subtype {
+	case "idle":
 		score = 20 // idle = very low efficiency
+	case "other":
+		score = 70
+	default:
+		score = 45 // overprovisioned penalty
 	}
 	return models.AuraHealthSignal{
 		Name:  "recommender_" + ins.subtype,

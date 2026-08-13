@@ -11,8 +11,18 @@ const PlanTTL = 10 * time.Minute
 
 const MaxPendingPlans = 1000
 
+type planKind uint8
+
+const (
+	planKindUnknown planKind = iota
+	planKindScaleDeployment
+	planKindUpdateTraffic
+	planKindExportRecommendations
+)
+
 type planEntry struct {
 	payload   any
+	kind      planKind
 	owner     string
 	target    string
 	expiresAt time.Time
@@ -30,7 +40,10 @@ func NewPlanStore() *PlanStore {
 	return &PlanStore{entries: make(map[string]planEntry)}
 }
 
-func (s *PlanStore) putScoped(id, owner, target string, payload any) error {
+func (s *PlanStore) putScoped(id, owner, target string, kind planKind, payload any) error {
+	if kind == planKindUnknown {
+		return fmt.Errorf("pending mutation plan kind is required")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
@@ -38,28 +51,32 @@ func (s *PlanStore) putScoped(id, owner, target string, payload any) error {
 	if len(s.entries) >= MaxPendingPlans {
 		return fmt.Errorf("pending mutation plan capacity reached (%d)", MaxPendingPlans)
 	}
-	s.entries[id] = planEntry{payload: payload, owner: owner, target: target, expiresAt: now.Add(PlanTTL)}
+	s.entries[id] = planEntry{payload: payload, kind: kind, owner: owner, target: target, expiresAt: now.Add(PlanTTL)}
 	return nil
 }
 
 // take atomically removes and returns a plan — single-use, prevents replay attacks.
 func (s *PlanStore) take(id string) (any, bool) {
-	payload, ok := s.claim(id, "")
-	if ok {
-		s.finish(id, true)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.purgeExpiredLocked(time.Now())
+	entry, ok := s.entries[id]
+	if !ok || entry.inFlight {
+		return nil, false
 	}
-	return payload, ok
+	delete(s.entries, id)
+	return entry.payload, true
 }
 
 // claim atomically leases a plan for execution. A failed execution may release
 // it with finish(id, false); successful execution permanently consumes it.
-func (s *PlanStore) claim(id, owner string) (any, bool) {
+func (s *PlanStore) claim(id, owner string, kind planKind) (any, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now()
 	s.purgeExpiredLocked(now)
 	e, ok := s.entries[id]
-	if !ok || e.inFlight || e.owner != owner {
+	if !ok || e.inFlight || e.owner != owner || e.kind != kind {
 		return nil, false
 	}
 	e.inFlight = true

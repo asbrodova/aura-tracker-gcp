@@ -34,4 +34,5 @@ type ObservabilityCoverageResponse struct {
 	Nodes           []NodeCoverage  `json:"nodes"`
 	Summary         CoverageSummary `json:"summary"`
 	Recommendations []string        `json:"recommendations"`
+	Warnings        []string        `json:"warnings,omitempty"`
 }

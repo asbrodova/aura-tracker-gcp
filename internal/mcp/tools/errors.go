@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -31,6 +32,30 @@ func handleServiceError(op string, err error) (*mcp.CallToolResult, error) {
 				op, permDenied,
 			),
 			Retriable: false,
+		})
+	}
+
+	var quotaExhausted *ports.RecommenderQuotaExhaustedError
+	if errors.As(err, &quotaExhausted) {
+		retryAt := ""
+		retryInstruction := "do not retry until the Recommender quota becomes available"
+		if !quotaExhausted.RetryAt.IsZero() {
+			retryAt = quotaExhausted.RetryAt.UTC().Format(time.RFC3339)
+			retryInstruction = fmt.Sprintf("do not retry before %s", retryAt)
+		}
+		quotaDescription := "Cloud Recommender quota exhausted"
+		if quotaExhausted.Window != "" {
+			quotaDescription += fmt.Sprintf(" (%s window)", quotaExhausted.Window)
+		}
+
+		return toolErrorResult(models.ToolError{
+			FailingAPI: quotaExhausted.Op,
+			Message: fmt.Sprintf(
+				"%s: %s — %s.",
+				op, quotaDescription, retryInstruction,
+			),
+			Retriable: true,
+			RetryAt:   retryAt,
 		})
 	}
 

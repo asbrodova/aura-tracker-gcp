@@ -24,7 +24,7 @@ func (r *BigQueryResources) DatasetList(environment environments.Environment) se
 		),
 		Handler: func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 			r.log.InfoContext(ctx, "resource read", "uri", uri)
-			resp, err := r.svc.ListDatasets(ctx, models.ListDatasetsRequest{ProjectID: environment.ProjectID})
+			resp, err := r.svc.ListDatasets(ctx, models.ListDatasetsRequest{ProjectID: environment.ProjectID, PageSize: 1000})
 			if err != nil {
 				return nil, fmt.Errorf("bigquery datasets: %w", err)
 			}
@@ -56,7 +56,7 @@ func (r *BigQueryResources) TableListTemplate() server.ServerResourceTemplate {
 				return nil, err
 			}
 			r.log.InfoContext(ctx, "resource read", "uri", req.Params.URI)
-			resp, err := r.svc.ListTables(ctx, models.ListTablesRequest{ProjectID: environment.ProjectID, DatasetID: dataset})
+			resp, err := r.svc.ListTables(ctx, models.ListTablesRequest{ProjectID: environment.ProjectID, DatasetID: dataset, PageSize: 1000})
 			if err != nil {
 				return nil, fmt.Errorf("bigquery tables: %w", err)
 			}

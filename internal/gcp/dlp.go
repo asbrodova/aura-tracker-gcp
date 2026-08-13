@@ -31,7 +31,7 @@ func NewDLPAdapter(ctx context.Context, log *slog.Logger) (*dlpAdapter, error) {
 		log:         log,
 	}
 	var err error
-	a.client, err = dlpv2.NewClient(ctx)
+	a.client, err = dlpv2.NewClient(ctx, rateLimitedGRPCOptions(nil, a.limiter)...)
 	if err != nil {
 		return nil, fmt.Errorf("gcp: create dlp client: %w", err)
 	}
@@ -46,8 +46,8 @@ func (a *dlpAdapter) withTimeout(ctx context.Context) (context.Context, context.
 }
 
 func (a *dlpAdapter) rateWait(ctx context.Context, op string) error {
-	if err := a.limiter.Wait(ctx); err != nil {
-		return fmt.Errorf("%s: rate limiter: %w", op, err)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }

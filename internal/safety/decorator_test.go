@@ -410,8 +410,9 @@ func TestUpdateTraffic_Confirm_ExecutesAndClearsPlan(t *testing.T) {
 func TestMutationPlanIsBoundToCallerAndSession(t *testing.T) {
 	inner := &stubService{scaleResp: models.ScaleDeploymentResponse{NodePoolName: "pool-1"}}
 	d := newTestDecorator(inner)
-	ownerContext := requestmeta.WithSessionID(requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Email: "owner@example.com"}), "session-a")
-	otherContext := requestmeta.WithSessionID(requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Email: "other@example.com"}), "session-a")
+	ownerContext := requestmeta.WithSessionID(requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Issuer: "https://accounts.google.com", Subject: "owner-subject", Email: "owner@example.com"}), "session-a")
+	refreshedOwnerContext := requestmeta.WithSessionID(requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Issuer: "https://accounts.google.com", Subject: "owner-subject", Email: "renamed@example.com"}), "session-a")
+	otherContext := requestmeta.WithSessionID(requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Issuer: "https://accounts.google.com", Subject: "other-subject", Email: "owner@example.com"}), "session-a")
 	preview, err := d.ScaleDeployment(ownerContext, models.ScaleDeploymentRequest{NodePoolName: "pool-1", NodeCount: 5, DryRun: true})
 	if err != nil {
 		t.Fatal(err)
@@ -419,9 +420,58 @@ func TestMutationPlanIsBoundToCallerAndSession(t *testing.T) {
 	if _, err := d.ScaleDeployment(otherContext, models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err == nil {
 		t.Fatal("another caller confirmed the plan")
 	}
-	if _, err := d.ScaleDeployment(ownerContext, models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err != nil {
+	if _, err := d.ScaleDeployment(refreshedOwnerContext, models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err != nil {
 		t.Fatalf("owner could not confirm plan: %v", err)
 	}
+}
+
+func TestWrongOperationConfirmationDoesNotConsumePlan(t *testing.T) {
+	t.Run("scale plan", func(t *testing.T) {
+		inner := &stubService{scaleResp: models.ScaleDeploymentResponse{NodePoolName: "pool-1"}}
+		d := newTestDecorator(inner)
+		preview, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{NodePoolName: "pool-1", NodeCount: 5, DryRun: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{ConfirmPlanID: preview.PlanID}); err == nil {
+			t.Fatal("traffic operation accepted a scale plan")
+		}
+		if _, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err != nil {
+			t.Fatalf("scale plan was lost after wrong-operation confirmation: %v", err)
+		}
+	})
+
+	t.Run("traffic plan", func(t *testing.T) {
+		inner := &stubService{trafficResp: models.UpdateTrafficResponse{ServiceName: "service"}}
+		d := newTestDecorator(inner)
+		preview, err := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{
+			ServiceName: "service", Traffic: []models.TrafficTarget{{Revision: "v2", Percent: 100}}, DryRun: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.ExportRecommendationsToBQ(context.Background(), models.ExportRecommendationsToBQRequest{ConfirmPlanID: preview.PlanID}); err == nil {
+			t.Fatal("export operation accepted a traffic plan")
+		}
+		if _, err := d.UpdateTraffic(context.Background(), models.UpdateTrafficRequest{ConfirmPlanID: preview.PlanID}); err != nil {
+			t.Fatalf("traffic plan was lost after wrong-operation confirmation: %v", err)
+		}
+	})
+
+	t.Run("export plan", func(t *testing.T) {
+		inner := &stubService{exportResp: models.ExportRecommendationsToBQResponse{RowsInserted: 4}}
+		d := newTestDecorator(inner)
+		preview, err := d.ExportRecommendationsToBQ(context.Background(), models.ExportRecommendationsToBQRequest{ProjectID: "p", Dataset: "d", DryRun: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.ScaleDeployment(context.Background(), models.ScaleDeploymentRequest{ConfirmPlanID: preview.PlanID}); err == nil {
+			t.Fatal("scale operation accepted an export plan")
+		}
+		if _, err := d.ExportRecommendationsToBQ(context.Background(), models.ExportRecommendationsToBQRequest{ConfirmPlanID: preview.PlanID}); err != nil {
+			t.Fatalf("export plan was lost after wrong-operation confirmation: %v", err)
+		}
+	})
 }
 
 func TestFailedMutationReleasesPlanForRetry(t *testing.T) {

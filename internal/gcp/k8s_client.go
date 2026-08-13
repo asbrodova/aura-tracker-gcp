@@ -18,6 +18,7 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	"golang.org/x/time/rate"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
@@ -32,6 +33,8 @@ type k8sClient struct {
 }
 
 const maxK8sResponseBytes = 16 << 20
+
+const defaultK8sListPageSize = maxInventoryPageSize
 
 // tokenRoundTripper injects a fresh GCP bearer token on every request.
 type tokenRoundTripper struct {
@@ -52,17 +55,17 @@ func (t *tokenRoundTripper) RoundTrip(req *http.Request) (*http.Response, error)
 // dialCluster builds a k8sClient for a GKE cluster, using Application Default
 // Credentials for authentication. caCertBase64 is the base64-encoded PEM CA
 // certificate from Cluster.MasterAuth.ClusterCaCertificate.
-func dialCluster(ctx context.Context, endpoint, caCertBase64 string) (*k8sClient, error) {
+func dialCluster(ctx context.Context, endpoint, caCertBase64 string, limiter *rate.Limiter) (*k8sClient, error) {
 	tokenSrc, err := google.DefaultTokenSource(ctx, "https://www.googleapis.com/auth/cloud-platform")
 	if err != nil {
 		return nil, fmt.Errorf("k8s: get token source: %w", err)
 	}
-	return dialClusterWithTokenSource(endpoint, caCertBase64, tokenSrc)
+	return dialClusterWithTokenSource(endpoint, caCertBase64, tokenSrc, limiter)
 }
 
 // dialClusterWithTokenSource builds a k8sClient with an explicit token source.
 // Used by tests to inject a static token without real ADC.
-func dialClusterWithTokenSource(endpoint, caCertBase64 string, tokenSrc oauth2.TokenSource) (*k8sClient, error) {
+func dialClusterWithTokenSource(endpoint, caCertBase64 string, tokenSrc oauth2.TokenSource, limiters ...*rate.Limiter) (*k8sClient, error) {
 	caPEM, err := base64.StdEncoding.DecodeString(caCertBase64)
 	if err != nil {
 		return nil, fmt.Errorf("k8s: decode CA cert: %w", err)
@@ -71,7 +74,7 @@ func dialClusterWithTokenSource(endpoint, caCertBase64 string, tokenSrc oauth2.T
 	if !pool.AppendCertsFromPEM(caPEM) {
 		return nil, fmt.Errorf("k8s: no valid CA certificates found in cluster CA cert")
 	}
-	transport := &tokenRoundTripper{
+	authTransport := &tokenRoundTripper{
 		base: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: pool},
 		},
@@ -79,17 +82,24 @@ func dialClusterWithTokenSource(endpoint, caCertBase64 string, tokenSrc oauth2.T
 	}
 	return &k8sClient{
 		baseURL:    "https://" + strings.TrimPrefix(endpoint, "https://"),
-		httpClient: &http.Client{Transport: transport},
+		httpClient: &http.Client{Transport: &rateLimitedRoundTripper{base: authTransport, limiter: optionalLimiter(limiters)}},
 	}, nil
 }
 
-func dialGatewayWithTokenSource(endpoint string, tokenSrc oauth2.TokenSource) *k8sClient {
+func dialGatewayWithTokenSource(endpoint string, tokenSrc oauth2.TokenSource, limiters ...*rate.Limiter) *k8sClient {
 	return &k8sClient{
 		baseURL: strings.TrimSuffix(endpoint, "/"),
-		httpClient: &http.Client{Transport: &tokenRoundTripper{
-			base: http.DefaultTransport, tokenSrc: tokenSrc,
+		httpClient: &http.Client{Transport: &rateLimitedRoundTripper{
+			base: &tokenRoundTripper{base: http.DefaultTransport, tokenSrc: tokenSrc}, limiter: optionalLimiter(limiters),
 		}},
 	}
+}
+
+func optionalLimiter(limiters []*rate.Limiter) *rate.Limiter {
+	if len(limiters) > 0 && limiters[0] != nil {
+		return limiters[0]
+	}
+	return rate.NewLimiter(rate.Inf, 1)
 }
 
 // get performs a GET request to the K8s API and decodes the JSON response into out.
@@ -318,73 +328,129 @@ func kindConfig(kind string) (k8sKindConfig, error) {
 	}
 }
 
-// listServices returns Kubernetes Service summaries.
-func (c *k8sClient) listServices(ctx context.Context, ns string) ([]models.GKEServiceSummary, error) {
-	var list k8sServiceList
-	if err := c.get(ctx, resourcePath("api/v1", ns, "services"), &list); err != nil {
-		return nil, err
-	}
-	result := make([]models.GKEServiceSummary, 0, len(list.Items))
-	for _, s := range list.Items {
-		result = append(result, toServiceSummary(s))
-	}
-	return result, nil
+// listServices returns Kubernetes Service summaries, following native
+// Kubernetes continuation tokens until completion or the caller's item cap.
+func (c *k8sClient) listServices(ctx context.Context, ns string) ([]models.GKEServiceSummary, bool, error) {
+	return c.listServicesBounded(ctx, ns, maxUnpagedInventoryItems)
+}
+
+func (c *k8sClient) listServicesBounded(ctx context.Context, ns string, limit int) ([]models.GKEServiceSummary, bool, error) {
+	return listK8sPages(ctx, c, resourcePath("api/v1", ns, "services"), limit,
+		func() *k8sServiceList { return &k8sServiceList{} },
+		func(list *k8sServiceList) ([]k8sService, string) { return list.Items, list.Metadata.Continue },
+		toServiceSummary,
+	)
 }
 
 // listIngresses returns Kubernetes Ingress and Gateway API HTTPRoute summaries.
-func (c *k8sClient) listIngresses(ctx context.Context, ns string) ([]models.GKEIngressSummary, error) {
-	var result []models.GKEIngressSummary
+func (c *k8sClient) listIngresses(ctx context.Context, ns string) ([]models.GKEIngressSummary, bool, error) {
+	return c.listIngressesBounded(ctx, ns, maxUnpagedInventoryItems)
+}
 
-	var iList k8sIngressList
-	if err := c.get(ctx, resourcePath("apis/networking.k8s.io/v1", ns, "ingresses"), &iList); err != nil {
-		return nil, fmt.Errorf("k8s: list ingresses: %w", err)
+func (c *k8sClient) listIngressesBounded(ctx context.Context, ns string, limit int) ([]models.GKEIngressSummary, bool, error) {
+	var result []models.GKEIngressSummary
+	ingresses, ingressTruncated, err := listK8sPages(ctx, c, resourcePath("apis/networking.k8s.io/v1", ns, "ingresses"), limit,
+		func() *k8sIngressList { return &k8sIngressList{} },
+		func(list *k8sIngressList) ([]k8sIngress, string) { return list.Items, list.Metadata.Continue },
+		toIngressSummary,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("k8s: list ingresses: %w", err)
 	}
-	for _, ing := range iList.Items {
-		result = append(result, toIngressSummary(ing))
+	result = append(result, ingresses...)
+	if ingressTruncated || len(result) >= limit {
+		return result, true, nil
 	}
 
 	// Gateway API HTTPRoutes — silently skip if the CRD is not installed (404).
-	var hrList k8sHTTPRouteList
-	if err := c.get(ctx, resourcePath("apis/gateway.networking.k8s.io/v1", ns, "httproutes"), &hrList); err != nil {
+	httpRoutes, routeTruncated, err := listK8sPages(ctx, c, resourcePath("apis/gateway.networking.k8s.io/v1", ns, "httproutes"), limit-len(result),
+		func() *k8sHTTPRouteList { return &k8sHTTPRouteList{} },
+		func(list *k8sHTTPRouteList) ([]k8sHTTPRoute, string) { return list.Items, list.Metadata.Continue },
+		toHTTPRouteSummary,
+	)
+	if err != nil {
 		if !strings.Contains(err.Error(), "HTTP 404") && !strings.Contains(err.Error(), "HTTP 405") {
-			return nil, fmt.Errorf("k8s: list httproutes: %w", err)
+			return nil, false, fmt.Errorf("k8s: list httproutes: %w", err)
 		}
 	} else {
-		for _, hr := range hrList.Items {
-			result = append(result, toHTTPRouteSummary(hr))
-		}
+		result = append(result, httpRoutes...)
 	}
 
-	return result, nil
+	return result, routeTruncated, nil
 }
 
-func (c *k8sClient) listGateways(ctx context.Context, ns string) ([]k8sGateway, error) {
-	var list k8sGatewayList
-	if err := c.get(ctx, resourcePath("apis/gateway.networking.k8s.io/v1", ns, "gateways"), &list); err != nil {
-		return nil, err
-	}
-	return list.Items, nil
+func (c *k8sClient) listGatewaysBounded(ctx context.Context, ns string, limit int) ([]k8sGateway, bool, error) {
+	return listK8sPages(ctx, c, resourcePath("apis/gateway.networking.k8s.io/v1", ns, "gateways"), limit,
+		func() *k8sGatewayList { return &k8sGatewayList{} },
+		func(list *k8sGatewayList) ([]k8sGateway, string) { return list.Items, list.Metadata.Continue },
+		func(item k8sGateway) k8sGateway { return item },
+	)
 }
 
-func (c *k8sClient) listKubernetesServiceAccounts(ctx context.Context, ns string) ([]k8sServiceAccount, error) {
-	var list k8sServiceAccountList
-	if err := c.get(ctx, resourcePath("api/v1", ns, "serviceaccounts"), &list); err != nil {
-		return nil, err
-	}
-	return list.Items, nil
+func (c *k8sClient) listKubernetesServiceAccountsBounded(ctx context.Context, ns string, limit int) ([]k8sServiceAccount, bool, error) {
+	return listK8sPages(ctx, c, resourcePath("api/v1", ns, "serviceaccounts"), limit,
+		func() *k8sServiceAccountList { return &k8sServiceAccountList{} },
+		func(list *k8sServiceAccountList) ([]k8sServiceAccount, string) {
+			return list.Items, list.Metadata.Continue
+		},
+		func(item k8sServiceAccount) k8sServiceAccount { return item },
+	)
 }
 
 // listNetworkPolicies returns Kubernetes NetworkPolicy summaries.
-func (c *k8sClient) listNetworkPolicies(ctx context.Context, ns string) ([]models.GKENetworkPolicySummary, error) {
-	var list k8sNetworkPolicyList
-	if err := c.get(ctx, resourcePath("apis/networking.k8s.io/v1", ns, "networkpolicies"), &list); err != nil {
-		return nil, err
+func (c *k8sClient) listNetworkPolicies(ctx context.Context, ns string) ([]models.GKENetworkPolicySummary, bool, error) {
+	return c.listNetworkPoliciesBounded(ctx, ns, maxUnpagedInventoryItems)
+}
+
+func (c *k8sClient) listNetworkPoliciesBounded(ctx context.Context, ns string, limit int) ([]models.GKENetworkPolicySummary, bool, error) {
+	return listK8sPages(ctx, c, resourcePath("apis/networking.k8s.io/v1", ns, "networkpolicies"), limit,
+		func() *k8sNetworkPolicyList { return &k8sNetworkPolicyList{} },
+		func(list *k8sNetworkPolicyList) ([]k8sNetworkPolicy, string) {
+			return list.Items, list.Metadata.Continue
+		},
+		toNetworkPolicySummary,
+	)
+}
+
+func listK8sPages[List any, Raw any, Result any](
+	ctx context.Context,
+	client *k8sClient,
+	basePath string,
+	limit int,
+	newList func() *List,
+	itemsAndContinue func(*List) ([]Raw, string),
+	convert func(Raw) Result,
+) ([]Result, bool, error) {
+	if limit < 1 {
+		return nil, false, fmt.Errorf("k8s: list limit must be positive")
 	}
-	result := make([]models.GKENetworkPolicySummary, 0, len(list.Items))
-	for _, np := range list.Items {
-		result = append(result, toNetworkPolicySummary(np))
+	result := make([]Result, 0, min(limit, defaultK8sListPageSize))
+	continueToken := ""
+	for {
+		remaining := limit - len(result)
+		if remaining <= 0 {
+			return result, true, nil
+		}
+		pageSize := min(remaining+1, defaultK8sListPageSize)
+		list := newList()
+		if err := client.get(ctx, workloadListPath(basePath, pageSize, continueToken), list); err != nil {
+			return nil, false, err
+		}
+		items, nextToken := itemsAndContinue(list)
+		if len(items) > pageSize {
+			return nil, false, fmt.Errorf("k8s: list returned %d items for a limit of %d", len(items), pageSize)
+		}
+		for _, item := range items {
+			if len(result) >= limit {
+				return result, true, nil
+			}
+			result = append(result, convert(item))
+		}
+		if nextToken == "" {
+			return result, false, nil
+		}
+		continueToken = nextToken
 	}
-	return result, nil
 }
 
 // --- Conversion helpers ---

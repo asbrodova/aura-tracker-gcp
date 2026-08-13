@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -18,9 +19,12 @@ func (a *gcpAdapter) ListFunctions(ctx context.Context, req models.ListFunctions
 		return models.ListFunctionsResponse{}, err
 	}
 
-	gen := strings.ToLower(req.Generation)
+	gen := strings.ToLower(strings.TrimSpace(req.Generation))
 	if gen == "" {
 		gen = "both"
+	}
+	if gen != "1" && gen != "2" && gen != "both" {
+		return models.ListFunctionsResponse{}, fmt.Errorf("functions.ListFunctions: generation must be 1, 2, or both")
 	}
 
 	var funcs []models.FunctionSummary
@@ -57,7 +61,7 @@ func (a *gcpAdapter) ListFunctions(ctx context.Context, req models.ListFunctions
 
 func (a *gcpAdapter) listFunctionsV1(ctx context.Context, projectID, region string, limit int) ([]models.FunctionSummary, bool, error) {
 	if a.fnGen1 == nil {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("functions.ListFunctionsV1: gen1 client not initialized")
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
@@ -103,7 +107,7 @@ func (a *gcpAdapter) listFunctionsV1(ctx context.Context, projectID, region stri
 
 func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region string, limit int) ([]models.FunctionSummary, bool, error) {
 	if a.runSvc == nil {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("functions.ListFunctionsV2: run client not initialized")
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
@@ -113,10 +117,10 @@ func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region stri
 		loc = "-"
 	}
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, loc)
-	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent, PageSize: int32(limit)})
+	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent, PageSize: maxUnpagedInventoryItems})
 
 	var funcs []models.FunctionSummary
-	seen := 0
+	budget := filteredInventoryBudget{resultLimit: limit, scanLimit: maxFilteredInventoryScanItems}
 	for {
 		svc, err := it.Next()
 		if err != nil {
@@ -125,11 +129,11 @@ func (a *gcpAdapter) listFunctionsV2(ctx context.Context, projectID, region stri
 			}
 			return nil, false, wrapGCPError("functions.ListFunctionsV2", err)
 		}
-		if seen >= limit {
+		include, stop := budget.consider(isCloudFunctionRunService(svc))
+		if stop {
 			return funcs, true, nil
 		}
-		seen++
-		if svc.Labels["goog-managed-by"] != "cloudfunctions" {
+		if !include {
 			continue
 		}
 		r, name := parseSvcResourceName(svc.Name)
@@ -155,6 +159,12 @@ func (a *gcpAdapter) GetFunctionDetails(ctx context.Context, req models.GetFunct
 	if err := a.rateWait(ctx, "functions.GetFunctionDetails"); err != nil {
 		return models.FunctionDetails{}, err
 	}
+	if req.Generation != 0 && req.Generation != 1 && req.Generation != 2 {
+		return models.FunctionDetails{}, fmt.Errorf("functions.GetFunctionDetails: generation must be 1 or 2")
+	}
+	if strings.TrimSpace(req.Region) == "" || strings.TrimSpace(req.FunctionName) == "" {
+		return models.FunctionDetails{}, fmt.Errorf("functions.GetFunctionDetails: region and function_name are required")
+	}
 
 	if req.Generation == 2 || req.Generation == 0 {
 		details, err := a.getFunctionDetailsV2(ctx, req)
@@ -164,10 +174,18 @@ func (a *gcpAdapter) GetFunctionDetails(ctx context.Context, req models.GetFunct
 		if req.Generation == 2 {
 			return models.FunctionDetails{}, err
 		}
-		// fall through to Gen 1
+		if !isNotFoundError(err) {
+			return models.FunctionDetails{}, err
+		}
+		// A confirmed Gen 2 miss may be a Gen 1 function with the same name.
 	}
 
 	return a.getFunctionDetailsV1(ctx, req)
+}
+
+func isNotFoundError(err error) bool {
+	var notFound *NotFoundError
+	return errors.As(err, &notFound)
 }
 
 func (a *gcpAdapter) getFunctionDetailsV2(ctx context.Context, req models.GetFunctionDetailsRequest) (models.FunctionDetails, error) {

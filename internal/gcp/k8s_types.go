@@ -140,7 +140,8 @@ type k8sWorkloadStatus struct {
 // --- Services ---
 
 type k8sServiceList struct {
-	Items []k8sService `json:"items"`
+	Metadata k8sListMeta  `json:"metadata"`
+	Items    []k8sService `json:"items"`
 }
 
 type k8sService struct {
@@ -182,7 +183,8 @@ type k8sServicePort struct {
 // --- Ingresses ---
 
 type k8sIngressList struct {
-	Items []k8sIngress `json:"items"`
+	Metadata k8sListMeta  `json:"metadata"`
+	Items    []k8sIngress `json:"items"`
 }
 
 type k8sIngress struct {
@@ -241,7 +243,8 @@ type k8sIngressTLS struct {
 // --- HTTPRoutes (Gateway API) ---
 
 type k8sHTTPRouteList struct {
-	Items []k8sHTTPRoute `json:"items"`
+	Metadata k8sListMeta    `json:"metadata"`
+	Items    []k8sHTTPRoute `json:"items"`
 }
 
 type k8sHTTPRoute struct {
@@ -274,7 +277,8 @@ type k8sHTTPBackendRef struct {
 // --- Gateway API ---
 
 type k8sGatewayList struct {
-	Items []k8sGateway `json:"items"`
+	Metadata k8sListMeta  `json:"metadata"`
+	Items    []k8sGateway `json:"items"`
 }
 
 type k8sGateway struct {
@@ -311,7 +315,8 @@ type k8sGatewayStatus struct {
 // --- Kubernetes ServiceAccounts ---
 
 type k8sServiceAccountList struct {
-	Items []k8sServiceAccount `json:"items"`
+	Metadata k8sListMeta         `json:"metadata"`
+	Items    []k8sServiceAccount `json:"items"`
 }
 
 type k8sServiceAccount struct {
@@ -322,7 +327,8 @@ type k8sServiceAccount struct {
 // --- NetworkPolicies ---
 
 type k8sNetworkPolicyList struct {
-	Items []k8sNetworkPolicy `json:"items"`
+	Metadata k8sListMeta        `json:"metadata"`
+	Items    []k8sNetworkPolicy `json:"items"`
 }
 
 type k8sNetworkPolicy struct {

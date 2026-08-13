@@ -8,4 +8,5 @@ type ToolError struct {
 	MissingIAMPermissions []string `json:"missing_iam_permissions,omitempty"`
 	Message               string   `json:"message"`
 	Retriable             bool     `json:"retriable"`
+	RetryAt               string   `json:"retry_at,omitempty"`
 }

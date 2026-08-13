@@ -3,6 +3,7 @@ package anonymize
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -151,31 +152,21 @@ func (s *LocalScrubber) scrub(_ context.Context, result *mcp.CallToolResult) (*m
 
 	// Deep-copy so the original result is never mutated.
 	out := *result
+	meta, findings, err := s.scrubMeta(result.Meta, reg)
+	if err != nil {
+		return nil, nil, err
+	}
+	out.Meta = meta
+	allFindings = append(allFindings, findings...)
 	out.Content = make([]mcp.Content, len(result.Content))
-	copy(out.Content, result.Content)
 
-	for i, c := range out.Content {
-		switch content := c.(type) {
-		case mcp.TextContent:
-			var findings []Finding
-			if json.Valid([]byte(content.Text)) {
-				content.Text, findings = s.scrubJSON(content.Text, reg, i)
-			} else {
-				content.Text, findings = s.scrubText(content.Text, reg, i, "")
-			}
-			out.Content[i] = content
-			allFindings = append(allFindings, findings...)
-		case mcp.EmbeddedResource:
-			textResource, ok := content.Resource.(mcp.TextResourceContents)
-			if !ok {
-				continue
-			}
-			var findings []Finding
-			textResource.Text, findings = s.scrubText(textResource.Text, reg, i, "resource.text")
-			content.Resource = textResource
-			out.Content[i] = content
-			allFindings = append(allFindings, findings...)
+	for i, content := range result.Content {
+		scrubbed, findings, scrubErr := s.scrubContent(content, reg, i)
+		if scrubErr != nil {
+			return nil, nil, scrubErr
 		}
+		out.Content[i] = scrubbed
+		allFindings = append(allFindings, findings...)
 	}
 
 	// StructuredContent is any — marshal → walk → unmarshal.
@@ -184,7 +175,10 @@ func (s *LocalScrubber) scrub(_ context.Context, result *mcp.CallToolResult) (*m
 		if err != nil {
 			return nil, nil, fmt.Errorf("anonymize: marshal structured content: %w", err)
 		}
-		scrubbedJSON, scFindings := s.scrubJSON(string(b), reg, -1)
+		scrubbedJSON, scFindings, err := s.scrubJSON(string(b), reg, -1)
+		if err != nil {
+			return nil, nil, fmt.Errorf("anonymize: scrub structured content: %w", err)
+		}
 		allFindings = append(allFindings, scFindings...)
 		var sc any
 		if err := json.Unmarshal([]byte(scrubbedJSON), &sc); err != nil {
@@ -195,49 +189,163 @@ func (s *LocalScrubber) scrub(_ context.Context, result *mcp.CallToolResult) (*m
 	return &out, allFindings, nil
 }
 
+// scrubContent masks every serialized, string-bearing field in an MCP content
+// object. Text payloads are handled separately so JSON key whitelisting keeps
+// its documented behavior; the remaining envelope is round-tripped through the
+// protocol's content decoder to cover metadata, annotations, links, MIME types,
+// and embedded resource fields without maintaining a fragile field allowlist.
+func (s *LocalScrubber) scrubContent(content mcp.Content, reg *tokenRegistry, contentIdx int) (mcp.Content, []Finding, error) {
+	if content == nil {
+		return nil, nil, errors.New("anonymize: nil MCP content withheld")
+	}
+	var err error
+	content, err = prepareScrubbableContent(content)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var payload string
+	var hasPayload bool
+	switch typed := content.(type) {
+	case mcp.TextContent:
+		payload = typed.Text
+		hasPayload = true
+		typed.Text = ""
+		content = typed
+	case mcp.EmbeddedResource:
+		if resource, ok := typed.Resource.(mcp.TextResourceContents); ok {
+			payload = resource.Text
+			hasPayload = true
+			resource.Text = "__ANONYMIZE_TEXT_PAYLOAD__"
+			typed.Resource = resource
+			content = typed
+		}
+	}
+
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: marshal MCP content: %w", err)
+	}
+	scrubbedJSON, findings, err := s.scrubJSON(string(encoded), reg, contentIdx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: scrub MCP content: %w", err)
+	}
+	scrubbed, err := parseScrubbedContent([]byte(scrubbedJSON))
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: decode scrubbed MCP content: %w", err)
+	}
+
+	if !hasPayload {
+		return scrubbed, findings, nil
+	}
+	var payloadFindings []Finding
+	if json.Valid([]byte(payload)) {
+		payload, payloadFindings, err = s.scrubJSON(payload, reg, contentIdx)
+	} else {
+		payload, payloadFindings = s.scrubText(payload, reg, contentIdx, "content.payload")
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: scrub MCP payload: %w", err)
+	}
+	findings = append(findings, payloadFindings...)
+
+	switch typed := scrubbed.(type) {
+	case mcp.TextContent:
+		typed.Text = payload
+		return typed, findings, nil
+	case mcp.EmbeddedResource:
+		resource, ok := typed.Resource.(mcp.TextResourceContents)
+		if !ok {
+			return nil, nil, errors.New("anonymize: text resource changed type while scrubbing")
+		}
+		resource.Text = payload
+		typed.Resource = resource
+		return typed, findings, nil
+	default:
+		return nil, nil, errors.New("anonymize: content changed type while scrubbing")
+	}
+}
+
+func (s *LocalScrubber) scrubMeta(meta *mcp.Meta, reg *tokenRegistry) (*mcp.Meta, []Finding, error) {
+	if meta == nil {
+		return nil, nil, nil
+	}
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: marshal result metadata: %w", err)
+	}
+	scrubbedJSON, findings, err := s.scrubJSON(string(encoded), reg, -1)
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: scrub result metadata: %w", err)
+	}
+	var out mcp.Meta
+	if err := json.Unmarshal([]byte(scrubbedJSON), &out); err != nil {
+		return nil, nil, fmt.Errorf("anonymize: decode result metadata: %w", err)
+	}
+	return &out, findings, nil
+}
+
 // scrubJSON parses jsonStr, walks the tree, masks strings, and re-serialises.
-func (s *LocalScrubber) scrubJSON(jsonStr string, reg *tokenRegistry, contentIdx int) (string, []Finding) {
+func (s *LocalScrubber) scrubJSON(jsonStr string, reg *tokenRegistry, contentIdx int) (string, []Finding, error) {
 	var root any
 	if err := json.Unmarshal([]byte(jsonStr), &root); err != nil {
 		// Fallback: treat as plain text.
 		masked, f := s.scrubText(jsonStr, reg, contentIdx, "")
-		return masked, f
+		return masked, f, nil
 	}
 	var findings []Finding
-	root = s.walkNode(root, "", reg, contentIdx, &findings)
+	root, err := s.walkNode(root, "", reg, contentIdx, &findings)
+	if err != nil {
+		return "", findings, err
+	}
 	b, err := json.Marshal(root)
 	if err != nil {
-		return jsonStr, findings
+		return "", findings, err
 	}
-	return string(b), findings
+	return string(b), findings, nil
 }
 
-func (s *LocalScrubber) walkNode(node any, path string, reg *tokenRegistry, contentIdx int, findings *[]Finding) any {
+func (s *LocalScrubber) walkNode(node any, path string, reg *tokenRegistry, contentIdx int, findings *[]Finding) (any, error) {
 	switch v := node.(type) {
 	case map[string]any:
+		out := make(map[string]any, len(v))
 		for k, val := range v {
-			if _, skip := s.whitelist[k]; skip {
-				continue
-			}
 			childPath := k
 			if path != "" {
 				childPath = path + "." + k
 			}
-			v[k] = s.walkNode(val, childPath, reg, contentIdx, findings)
+			maskedKey, keyFindings := s.scrubText(k, reg, contentIdx, childPath+"{key}")
+			*findings = append(*findings, keyFindings...)
+			if _, collision := out[maskedKey]; collision {
+				return nil, fmt.Errorf("anonymize: JSON key collision after scrubbing at %q", childPath)
+			}
+			if _, skip := s.whitelist[k]; skip {
+				out[maskedKey] = val
+				continue
+			}
+			scrubbed, err := s.walkNode(val, childPath, reg, contentIdx, findings)
+			if err != nil {
+				return nil, err
+			}
+			out[maskedKey] = scrubbed
 		}
-		return v
+		return out, nil
 	case []any:
 		for i, el := range v {
 			childPath := fmt.Sprintf("%s[%d]", path, i)
-			v[i] = s.walkNode(el, childPath, reg, contentIdx, findings)
+			scrubbed, err := s.walkNode(el, childPath, reg, contentIdx, findings)
+			if err != nil {
+				return nil, err
+			}
+			v[i] = scrubbed
 		}
-		return v
+		return v, nil
 	case string:
 		masked, f := s.scrubText(v, reg, contentIdx, path)
 		*findings = append(*findings, f...)
-		return masked
+		return masked, nil
 	default:
-		return node
+		return node, nil
 	}
 }
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"cloud.google.com/go/bigquery"
@@ -155,56 +154,56 @@ func WithGraphTimeout(d time.Duration) Option {
 // then bool fields last to avoid padding between same-size groups.
 type gcpAdapter struct {
 	// --- GCP SDK clients (pointer-sized, 8 bytes each) ---
-	clusterMgr                *container.ClusterManagerClient
-	runSvc                    *run.ServicesClient
-	runRevisions              *run.RevisionsClient
-	runJobs                   *run.JobsClient
-	runExecs                  *run.ExecutionsClient
-	fnGen1                    *cloudfunctions.Service
-	eventarcClient            *eventarc.Client
-	schedulerClient           *scheduler.CloudSchedulerClient
-	workflowsClient           *workflows.Client
-	workflowExecClient        *workflowexecutions.Client
-	tasksClient               *cloudtasks.Client
-	secretMgrClient           *secretmanager.Client
-	vpcAccess                 *vpcaccess.Service
-	sqlAdmin                  *sqladmin.Service
-	computeSvc                *compute.Service
-	apiGatewaySvc             *apigateway.Service
-	artifactRegistrySvc       *artifactregistry.Service
-	cloudBuildSvc             *cloudbuild.Service
-	serviceDirectorySvc       *servicedirectory.APIService
-	traceClient               *cloudtrace.Service
-	pubsub                    *pubsub.Client
-	logAdmin                  *logadmin.Client
-	metric                    *monitoring.MetricClient
-	crm                       *cloudresourcemanager.Service
-	bq                        *bigquery.Client
-	gcs                       *storage.Client
-	spannerSvc                *spanner.Service
-	alloydbSvc                *alloydb.Service
-	firestoreSvc              *firestore.Service
-	redisSvc                  *redis.Service
-	iamAdminSvc               *iam.Service
-	monitoringSvc             *monitoringv3.Service
-	monitoringV1Svc           *monitoringv1.Service
-	crmV3Svc                  *crmv3.Service
-	rec                       *recommender.Client
-	assetSvc                  *cloudasset.Service
-	iamV2Svc                  *iamv2.Service
-	gkeHubSvc                 *gkehub.Service
-	costBQ                    *bigquery.Client
-	limiter                   *rate.Limiter
-	log                       *slog.Logger
-	auraCache                 *ttlCache[models.AuraReport]
-	regionsCache              *ttlCache[regionDiscovery]
-	graphCache                *ttlCache[models.ServerlessGraph]
-	recommenderCache          *ttlCache[[]recommenderInsight]
-	costRecommendationCache   *ttlCache[models.ListCostRecommendationsResponse]
-	graphFlight               singleflight.Group
-	closeOnce                 sync.Once
-	closeErr                  error
-	recommenderQuotaExhausted atomic.Bool
+	clusterMgr              *container.ClusterManagerClient
+	runSvc                  *run.ServicesClient
+	runRevisions            *run.RevisionsClient
+	runJobs                 *run.JobsClient
+	runExecs                *run.ExecutionsClient
+	fnGen1                  *cloudfunctions.Service
+	eventarcClient          *eventarc.Client
+	schedulerClient         *scheduler.CloudSchedulerClient
+	workflowsClient         *workflows.Client
+	workflowExecClient      *workflowexecutions.Client
+	tasksClient             *cloudtasks.Client
+	secretMgrClient         *secretmanager.Client
+	vpcAccess               *vpcaccess.Service
+	sqlAdmin                *sqladmin.Service
+	computeSvc              *compute.Service
+	apiGatewaySvc           *apigateway.Service
+	artifactRegistrySvc     *artifactregistry.Service
+	cloudBuildSvc           *cloudbuild.Service
+	serviceDirectorySvc     *servicedirectory.APIService
+	traceClient             *cloudtrace.Service
+	pubsub                  *pubsub.Client
+	logAdmin                *logadmin.Client
+	metric                  *monitoring.MetricClient
+	crm                     *cloudresourcemanager.Service
+	bq                      *bigquery.Client
+	gcs                     *storage.Client
+	spannerSvc              *spanner.Service
+	alloydbSvc              *alloydb.Service
+	firestoreSvc            *firestore.Service
+	redisSvc                *redis.Service
+	iamAdminSvc             *iam.Service
+	monitoringSvc           *monitoringv3.Service
+	monitoringV1Svc         *monitoringv1.Service
+	crmV3Svc                *crmv3.Service
+	rec                     *recommender.Client
+	assetSvc                *cloudasset.Service
+	iamV2Svc                *iamv2.Service
+	gkeHubSvc               *gkehub.Service
+	costBQ                  *bigquery.Client
+	limiter                 *rate.Limiter
+	log                     *slog.Logger
+	auraCache               *ttlCache[models.AuraReport]
+	regionsCache            *ttlCache[regionDiscovery]
+	graphCache              *ttlCache[models.ServerlessGraph]
+	recommenderCache        *ttlCache[[]recommenderInsight]
+	costRecommendationCache *ttlCache[models.ListCostRecommendationsResponse]
+	graphFlight             singleflight.Group
+	closeOnce               sync.Once
+	closeErr                error
+	recommenderQuota        recommenderQuotaGate
 	// --- time.Duration (8 bytes each) ---
 	callTimeout  time.Duration
 	graphTimeout time.Duration
@@ -262,188 +261,194 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 
 	needed := neededClients(a.enabledModules)
 	var err error
+	limitedHTTPClient, httpEndpoint, err := newRateLimitedHTTPClient(ctx, a.limiter, a.clientOpts)
+	if err != nil {
+		return nil, fmt.Errorf("gcp: create rate-limited HTTP transport: %w", err)
+	}
+	httpOpts := rateLimitedHTTPOptions(limitedHTTPClient, httpEndpoint)
+	grpcOpts := rateLimitedGRPCOptions(a.clientOpts, a.limiter)
 
 	if needed[clientClusterMgr] {
-		a.clusterMgr, err = container.NewClusterManagerClient(ctx, a.clientOpts...)
+		a.clusterMgr, err = container.NewClusterManagerClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create container client: %w", err)
 		}
 	}
 
 	if needed[clientRunSvc] {
-		a.runSvc, err = run.NewServicesClient(ctx, a.clientOpts...)
+		a.runSvc, err = run.NewServicesClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create run services client: %w", err)
 		}
 	}
 
 	if needed[clientRunRevisions] {
-		a.runRevisions, err = run.NewRevisionsClient(ctx, a.clientOpts...)
+		a.runRevisions, err = run.NewRevisionsClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create run revisions client: %w", err)
 		}
 	}
 
 	if needed[clientRunJobs] {
-		a.runJobs, err = run.NewJobsClient(ctx, a.clientOpts...)
+		a.runJobs, err = run.NewJobsClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create run jobs client: %w", err)
 		}
-		a.runExecs, err = run.NewExecutionsClient(ctx, a.clientOpts...)
+		a.runExecs, err = run.NewExecutionsClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create run executions client: %w", err)
 		}
 	}
 
 	if needed[clientFunctionsV1] {
-		a.fnGen1, err = cloudfunctions.NewService(ctx, a.clientOpts...)
+		a.fnGen1, err = cloudfunctions.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloudfunctions v1 client: %w", err)
 		}
 	}
 
 	if needed[clientEventarc] {
-		a.eventarcClient, err = eventarc.NewClient(ctx, a.clientOpts...)
+		a.eventarcClient, err = eventarc.NewClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create eventarc client: %w", err)
 		}
 	}
 
 	if needed[clientScheduler] {
-		a.schedulerClient, err = scheduler.NewCloudSchedulerClient(ctx, a.clientOpts...)
+		a.schedulerClient, err = scheduler.NewCloudSchedulerClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create scheduler client: %w", err)
 		}
 	}
 
 	if needed[clientWorkflows] {
-		a.workflowsClient, err = workflows.NewClient(ctx, a.clientOpts...)
+		a.workflowsClient, err = workflows.NewClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create workflows client: %w", err)
 		}
 	}
 
 	if needed[clientWorkflowExec] {
-		a.workflowExecClient, err = workflowexecutions.NewClient(ctx, a.clientOpts...)
+		a.workflowExecClient, err = workflowexecutions.NewClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create workflow executions client: %w", err)
 		}
 	}
 
 	if needed[clientTasks] {
-		a.tasksClient, err = cloudtasks.NewClient(ctx, a.clientOpts...)
+		a.tasksClient, err = cloudtasks.NewClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloudtasks client: %w", err)
 		}
 	}
 
 	if needed[clientSecretMgr] {
-		a.secretMgrClient, err = secretmanager.NewClient(ctx, a.clientOpts...)
+		a.secretMgrClient, err = secretmanager.NewClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create secretmanager client: %w", err)
 		}
 	}
 
 	if needed[clientTrace] {
-		a.traceClient, err = cloudtrace.NewService(ctx, a.clientOpts...)
+		a.traceClient, err = cloudtrace.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloudtrace client: %w", err)
 		}
 	}
 
 	if needed[clientVPCAccess] {
-		a.vpcAccess, err = vpcaccess.NewService(ctx, a.clientOpts...)
+		a.vpcAccess, err = vpcaccess.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create vpcaccess client: %w", err)
 		}
 	}
 
 	if needed[clientCompute] {
-		a.computeSvc, err = compute.NewService(ctx, a.clientOpts...)
+		a.computeSvc, err = compute.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create compute client: %w", err)
 		}
 	}
 
 	if needed[clientAPIGateway] {
-		a.apiGatewaySvc, err = apigateway.NewService(ctx, a.clientOpts...)
+		a.apiGatewaySvc, err = apigateway.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create apigateway client: %w", err)
 		}
 	}
 
 	if needed[clientArtifactRegistry] {
-		a.artifactRegistrySvc, err = artifactregistry.NewService(ctx, a.clientOpts...)
+		a.artifactRegistrySvc, err = artifactregistry.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create artifactregistry client: %w", err)
 		}
 	}
 
 	if needed[clientCloudBuild] {
-		a.cloudBuildSvc, err = cloudbuild.NewService(ctx, a.clientOpts...)
+		a.cloudBuildSvc, err = cloudbuild.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloudbuild client: %w", err)
 		}
 	}
 
 	if needed[clientServiceDirectory] {
-		a.serviceDirectorySvc, err = servicedirectory.NewService(ctx, a.clientOpts...)
+		a.serviceDirectorySvc, err = servicedirectory.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create servicedirectory client: %w", err)
 		}
 	}
 
 	if needed[clientMonitoringV3] {
-		a.monitoringSvc, err = monitoringv3.NewService(ctx, a.clientOpts...)
+		a.monitoringSvc, err = monitoringv3.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create monitoring v3 client: %w", err)
 		}
 	}
 
 	if needed[clientMonitoringV1] {
-		a.monitoringV1Svc, err = monitoringv1.NewService(ctx, a.clientOpts...)
+		a.monitoringV1Svc, err = monitoringv1.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create monitoring v1 client: %w", err)
 		}
 	}
 
 	if needed[clientIAMAdmin] {
-		a.iamAdminSvc, err = iam.NewService(ctx, a.clientOpts...)
+		a.iamAdminSvc, err = iam.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create iam client: %w", err)
 		}
 	}
 
 	if needed[clientSQLAdmin] {
-		a.sqlAdmin, err = sqladmin.NewService(ctx, a.clientOpts...)
+		a.sqlAdmin, err = sqladmin.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create sqladmin client: %w", err)
 		}
 	}
 
 	if needed[clientPubSub] {
-		a.pubsub, err = pubsub.NewClient(ctx, projectID, a.clientOpts...)
+		a.pubsub, err = pubsub.NewClient(ctx, projectID, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create pubsub client: %w", err)
 		}
 	}
 
 	if needed[clientLogAdmin] {
-		a.logAdmin, err = logadmin.NewClient(ctx, projectID, a.clientOpts...)
+		a.logAdmin, err = logadmin.NewClient(ctx, projectID, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create log admin client: %w", err)
 		}
 	}
 
 	if needed[clientMetric] {
-		a.metric, err = monitoring.NewMetricClient(ctx, a.clientOpts...)
+		a.metric, err = monitoring.NewMetricClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create metric client: %w", err)
 		}
 	}
 
 	if a.enableRecommender {
-		a.rec, err = recommender.NewClient(ctx, a.clientOpts...)
+		a.rec, err = recommender.NewClient(ctx, grpcOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create recommender client: %w", err)
 		}
@@ -451,8 +456,6 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 	}
 
 	if needed[clientCRM] {
-		httpOpts := make([]option.ClientOption, len(a.clientOpts))
-		copy(httpOpts, a.clientOpts)
 		a.crm, err = cloudresourcemanager.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloudresourcemanager client: %w", err)
@@ -460,8 +463,6 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 	}
 
 	if needed[clientCRMv3] {
-		httpOpts := make([]option.ClientOption, len(a.clientOpts))
-		copy(httpOpts, a.clientOpts)
 		a.crmV3Svc, err = crmv3.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloudresourcemanager/v3 client: %w", err)
@@ -469,28 +470,28 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 	}
 
 	if needed[clientAsset] {
-		a.assetSvc, err = cloudasset.NewService(ctx, a.clientOpts...)
+		a.assetSvc, err = cloudasset.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create cloud asset client: %w", err)
 		}
 	}
 
 	if needed[clientIAMv2] {
-		a.iamV2Svc, err = iamv2.NewService(ctx, a.clientOpts...)
+		a.iamV2Svc, err = iamv2.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create IAM v2 client: %w", err)
 		}
 	}
 
 	if needed[clientGKEHub] {
-		a.gkeHubSvc, err = gkehub.NewService(ctx, a.clientOpts...)
+		a.gkeHubSvc, err = gkehub.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create GKE Hub client: %w", err)
 		}
 	}
 
 	if needed[clientBQ] {
-		a.bq, err = bigquery.NewClient(ctx, projectID, a.clientOpts...)
+		a.bq, err = bigquery.NewClient(ctx, projectID, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create bigquery client: %w", err)
 		}
@@ -499,7 +500,7 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 		if a.costConfig.QueryProjectID == projectID && a.bq != nil {
 			a.costBQ = a.bq
 		} else {
-			a.costBQ, err = bigquery.NewClient(ctx, a.costConfig.QueryProjectID, a.clientOpts...)
+			a.costBQ, err = bigquery.NewClient(ctx, a.costConfig.QueryProjectID, httpOpts...)
 			if err != nil {
 				return nil, fmt.Errorf("gcp: create cost BigQuery client: %w", err)
 			}
@@ -509,35 +510,35 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 	}
 
 	if needed[clientGCS] {
-		a.gcs, err = storage.NewClient(ctx, a.clientOpts...)
+		a.gcs, err = storage.NewClient(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create storage client: %w", err)
 		}
 	}
 
 	if needed[clientSpanner] {
-		a.spannerSvc, err = spanner.NewService(ctx, a.clientOpts...)
+		a.spannerSvc, err = spanner.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create spanner client: %w", err)
 		}
 	}
 
 	if needed[clientAlloyDB] {
-		a.alloydbSvc, err = alloydb.NewService(ctx, a.clientOpts...)
+		a.alloydbSvc, err = alloydb.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create alloydb client: %w", err)
 		}
 	}
 
 	if needed[clientFirestore] {
-		a.firestoreSvc, err = firestore.NewService(ctx, a.clientOpts...)
+		a.firestoreSvc, err = firestore.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create firestore client: %w", err)
 		}
 	}
 
 	if needed[clientMemorystore] {
-		a.redisSvc, err = redis.NewService(ctx, a.clientOpts...)
+		a.redisSvc, err = redis.NewService(ctx, httpOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("gcp: create memorystore client: %w", err)
 		}
@@ -682,11 +683,12 @@ func (a *gcpAdapter) withTimeout(ctx context.Context) (context.Context, context.
 	return context.WithTimeout(ctx, a.callTimeout)
 }
 
-// rateWait waits for the token bucket before a GCP call. Returns an error if
-// ctx is cancelled while waiting.
+// rateWait remains at public-method entry points as a cheap cancellation check.
+// The token bucket itself is enforced by the shared HTTP/gRPC transports so
+// every page, retry, poll, and nested API request consumes its own token.
 func (a *gcpAdapter) rateWait(ctx context.Context, op string) error {
-	if err := a.limiter.Wait(ctx); err != nil {
-		return fmt.Errorf("%s: rate limiter: %w", op, err)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%s: %w", op, err)
 	}
 	return nil
 }

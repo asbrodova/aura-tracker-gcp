@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"cloud.google.com/go/recommender/apiv1/recommenderpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
 	secretmanagerpb "cloud.google.com/go/secretmanager/apiv1/secretmanagerpb"
 	"google.golang.org/api/cloudasset/v1"
@@ -326,26 +325,34 @@ func (a *gcpAdapter) ListWorkloadIdentitySecurityFacts(ctx context.Context, req 
 }
 
 func (a *gcpAdapter) ListSecurityRecommendations(ctx context.Context, req models.SecurityFactsRequest) (models.SecurityRecommendationFacts, error) {
-	if err := a.rateWait(ctx, "security.ListSecurityRecommendations"); err != nil {
-		return models.SecurityRecommendationFacts{}, err
-	}
+	const op = "security.ListSecurityRecommendations"
 	if a.rec == nil {
 		return models.SecurityRecommendationFacts{Recommendations: []models.SecurityRecommendationFact{}, Enabled: false}, nil
+	}
+	if err := a.rateWait(ctx, op); err != nil {
+		return models.SecurityRecommendationFacts{}, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
 	result := models.SecurityRecommendationFacts{Recommendations: []models.SecurityRecommendationFact{}, Enabled: true}
 	for _, recommenderID := range []string{"google.iam.policy.Recommender"} {
-		parent := fmt.Sprintf("projects/%s/locations/global/recommenders/%s", req.ProjectID, recommenderID)
-		it := a.rec.ListRecommendations(ctx, &recommenderpb.ListRecommendationsRequest{Parent: parent, Filter: `stateInfo.state = "ACTIVE"`})
+		it, err := a.activeRecommendations(ctx, op, req.ProjectID, "global", recommenderID, maxInventoryPageSize)
+		if err != nil {
+			return models.SecurityRecommendationFacts{}, err
+		}
 		for {
 			recommendation, err := it.Next()
 			if err == iterator.Done {
 				break
 			}
 			if err != nil {
-				return models.SecurityRecommendationFacts{}, wrapGCPError("security.ListSecurityRecommendations", err)
+				return models.SecurityRecommendationFacts{}, err
+			}
+			if len(result.Recommendations) >= maxUnpagedInventoryItems {
+				result.Truncated = true
+				result.Warnings = append(result.Warnings, fmt.Sprintf("security recommendation inventory reached the %d-item safety cap", maxUnpagedInventoryItems))
+				break
 			}
 			fact := models.SecurityRecommendationFact{
 				Name: recommendation.Name, RecommenderID: recommenderID, Subtype: recommendation.RecommenderSubtype,

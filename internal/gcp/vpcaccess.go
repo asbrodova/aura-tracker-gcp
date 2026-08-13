@@ -21,6 +21,9 @@ func (a *gcpAdapter) ListVPCConnectors(ctx context.Context, req models.ListVPCCo
 	}
 
 	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceVPCAccess)
+	if err := ctx.Err(); err != nil {
+		return models.ListVPCConnectorsResponse{}, fmt.Errorf("vpcaccess.ListVPCConnectors: %w", err)
+	}
 	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
@@ -50,7 +53,12 @@ func (a *gcpAdapter) ListVPCConnectors(ctx context.Context, req models.ListVPCCo
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return models.ListVPCConnectorsResponse{}, fmt.Errorf("vpcaccess.ListVPCConnectors: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return models.ListVPCConnectorsResponse{}, fmt.Errorf("vpcaccess.ListVPCConnectors: %w", err)
+	}
 
 	if connectors == nil {
 		connectors = []models.VPCConnectorSummary{}

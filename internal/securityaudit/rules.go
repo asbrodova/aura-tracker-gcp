@@ -319,7 +319,7 @@ func permitsExternalIngress(service models.PublicServiceSecurityFact) bool {
 func evaluateFirewalls(facts models.FirewallSecurityFacts) []models.SecurityFinding {
 	var out []models.SecurityFinding
 	for _, firewall := range facts.Firewalls {
-		if strings.ToUpper(firewall.Direction) != "INGRESS" || !allowsWorld(firewall) || len(firewall.Allowed) == 0 {
+		if strings.ToUpper(firewall.Direction) != "INGRESS" || !allowsWorld(firewall) || len(firewall.Allowed) == 0 || !hasPotentialFirewallTarget(firewall) {
 			continue
 		}
 		allTraffic := false
@@ -342,7 +342,7 @@ func evaluateFirewalls(facts models.FirewallSecurityFacts) []models.SecurityFind
 				webOnly = false
 			}
 		}
-		noTarget := len(firewall.TargetTags) == 0 && len(firewall.TargetServiceAccounts) == 0
+		noTarget := len(firewall.TargetTags) == 0 && len(firewall.TargetServiceAccounts) == 0 && len(effectiveSecureTagNames(firewall.TargetSecureTags)) == 0
 		if firewall.Disabled {
 			if allTraffic || len(dangerous) > 0 {
 				out = append(out, newFinding("FW-004", models.SecuritySeverityLow, models.SecurityCategoryFirewall,
@@ -521,8 +521,32 @@ func isPrivilegedRole(role string) bool {
 }
 
 func isGoogleManagedServiceAgent(member string) bool {
-	return strings.Contains(member, "@cloudservices.gserviceaccount.com") ||
-		strings.Contains(member, "@gcp-sa-") || strings.Contains(member, "service-") && strings.Contains(member, "@")
+	const prefix = "serviceAccount:"
+	if !strings.HasPrefix(member, prefix) {
+		return false
+	}
+	email := strings.TrimPrefix(member, prefix)
+	local, domain, ok := strings.Cut(email, "@")
+	if !ok || local == "" || domain == "" || strings.Contains(domain, "@") {
+		return false
+	}
+	if domain == "cloudservices.gserviceaccount.com" {
+		return allDecimal(local)
+	}
+	return strings.HasPrefix(local, "service-") && allDecimal(strings.TrimPrefix(local, "service-")) &&
+		strings.HasSuffix(domain, ".iam.gserviceaccount.com")
+}
+
+func allDecimal(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func isDefaultServiceAccount(member string) bool {
@@ -607,9 +631,6 @@ func keyAgeDays(key models.ServiceAccountKeyFact, now time.Time) int {
 }
 
 func allowsWorld(firewall models.FirewallSecurityFact) bool {
-	if len(firewall.SourceRanges) == 0 && len(firewall.SourceTags) == 0 && len(firewall.SourceServiceAccounts) == 0 {
-		return true
-	}
 	for _, value := range firewall.SourceRanges {
 		if value == "0.0.0.0/0" || value == "::/0" {
 			return true
@@ -619,7 +640,14 @@ func allowsWorld(firewall models.FirewallSecurityFact) bool {
 			return true
 		}
 	}
-	return false
+	return len(firewall.SourceRanges) == 0 && !hasFirewallSourceSelector(firewall)
+}
+
+func hasFirewallSourceSelector(firewall models.FirewallSecurityFact) bool {
+	return len(firewall.SourceTags)+len(firewall.SourceServiceAccounts)+len(firewall.SourceSecureTags)+
+		len(firewall.SourceAddressGroups)+len(firewall.SourceFQDNs)+len(firewall.SourceNetworks)+
+		len(firewall.SourceRegionCodes)+len(firewall.SourceThreatIntel) > 0 ||
+		firewall.SourceNetworkContext != "" || firewall.SourceNetworkType != ""
 }
 
 func portsContain(ranges []string, wanted int) bool {
@@ -704,14 +732,23 @@ func denyPrincipalMatches(principal, member string) bool {
 	if principal == member {
 		return true
 	}
-	if member == "allUsers" {
-		return strings.Contains(principal, "/public:all")
+	if principal == "principalSet://goog/public:all" {
+		return true
 	}
-	if member == "allAuthenticatedUsers" {
-		return strings.Contains(principal, "/public:allAuthenticatedUsers")
+	switch {
+	case member == "allUsers" || member == "allAuthenticatedUsers":
+		return false
+	case strings.HasPrefix(member, "user:"):
+		return principal == "principal://goog/subject/"+strings.TrimPrefix(member, "user:")
+	case strings.HasPrefix(member, "group:"):
+		return principal == "principalSet://goog/group/"+strings.TrimPrefix(member, "group:")
+	case strings.HasPrefix(member, "serviceAccount:"):
+		return principal == "principal://iam.googleapis.com/projects/-/serviceAccounts/"+strings.TrimPrefix(member, "serviceAccount:")
+	case strings.HasPrefix(member, "principal://"), strings.HasPrefix(member, "principalSet://"):
+		return principal == member
+	default:
+		return false
 	}
-	identity := strings.TrimPrefix(strings.TrimPrefix(strings.TrimPrefix(member, "user:"), "group:"), "serviceAccount:")
-	return identity != "" && strings.HasSuffix(principal, "/"+identity)
 }
 
 func denyPrincipalExcepted(exceptions []string, member string) bool {
@@ -750,12 +787,42 @@ func fullyShadowingDeny(allow models.FirewallSecurityFact, firewalls []models.Fi
 }
 
 func firewallTargetsCover(deny, allow models.FirewallSecurityFact) bool {
-	if len(deny.TargetTags)+len(deny.TargetServiceAccounts)+len(deny.TargetSecureTags) == 0 {
+	if !hasPotentialFirewallTarget(deny) {
+		return false
+	}
+	denySecureTags := effectiveSecureTagNames(deny.TargetSecureTags)
+	allowSecureTags := effectiveSecureTagNames(allow.TargetSecureTags)
+	if len(deny.TargetTags)+len(deny.TargetServiceAccounts)+len(denySecureTags) == 0 {
 		return true
 	}
 	return stringSetCovers(deny.TargetTags, allow.TargetTags) &&
 		stringSetCovers(deny.TargetServiceAccounts, allow.TargetServiceAccounts) &&
-		stringSetCovers(deny.TargetSecureTags, allow.TargetSecureTags)
+		stringSetCovers(denySecureTags, allowSecureTags)
+}
+
+func hasPotentialFirewallTarget(firewall models.FirewallSecurityFact) bool {
+	if len(firewall.TargetSecureTags) == 0 || len(firewall.TargetTags)+len(firewall.TargetServiceAccounts) > 0 {
+		return true
+	}
+	return len(effectiveSecureTagNames(firewall.TargetSecureTags)) > 0
+}
+
+func effectiveSecureTagNames(tags []string) []string {
+	names := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		name, state, found := strings.Cut(tag, ":")
+		if name == "" {
+			continue
+		}
+		if found && strings.EqualFold(state, "INEFFECTIVE") {
+			continue
+		}
+		if !contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func stringSetCovers(superset, subset []string) bool {

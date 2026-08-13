@@ -216,6 +216,13 @@ type FirewallSecurityFact struct {
 	EffectiveOrder        int                    `json:"effective_order,omitempty"`
 	TargetSecureTags      []string               `json:"target_secure_tags,omitempty"`
 	SourceSecureTags      []string               `json:"source_secure_tags,omitempty"`
+	SourceAddressGroups   []string               `json:"source_address_groups,omitempty"`
+	SourceFQDNs           []string               `json:"source_fqdns,omitempty"`
+	SourceNetworks        []string               `json:"source_networks,omitempty"`
+	SourceRegionCodes     []string               `json:"source_region_codes,omitempty"`
+	SourceThreatIntel     []string               `json:"source_threat_intelligence,omitempty"`
+	SourceNetworkContext  string                 `json:"source_network_context,omitempty"`
+	SourceNetworkType     string                 `json:"source_network_type,omitempty"`
 }
 
 type FirewallSecurityFacts struct {
@@ -281,6 +288,8 @@ type SecurityRecommendationFact struct {
 type SecurityRecommendationFacts struct {
 	Recommendations []SecurityRecommendationFact `json:"recommendations"`
 	Enabled         bool                         `json:"enabled"`
+	Truncated       bool                         `json:"truncated,omitempty"`
+	Warnings        []string                     `json:"warnings,omitempty"`
 }
 
 type SecurityFinding struct {

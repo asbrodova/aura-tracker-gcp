@@ -23,7 +23,7 @@ type TopologyNode struct {
 type TopologyEdge struct {
 	From         string `json:"from"`               // TopologyNode.ID
 	To           string `json:"to"`                 // TopologyNode.ID
-	Relationship string `json:"relationship"`       // connects_to_db | publishes_to | subscribes_to | triggers | reads_secret | reads_writes_storage | reads_writes_cache | network_via_vpc
+	Relationship string `json:"relationship"`       // connects_to_db | publishes_to | subscribes_to | has_subscription | pushes_to | triggers | reads_secret | reads_writes_storage | reads_writes_cache | network_via_vpc
 	Evidence     string `json:"evidence"`           // e.g. "cloud_sql_annotation", "env_var:DATABASE_URL", "push_subscription:sub-name"
 	Confidence   string `json:"confidence"`         // high | medium | low
 	Inferred     bool   `json:"inferred,omitempty"` // true when the edge is derived heuristically from env var naming conventions, not explicit config

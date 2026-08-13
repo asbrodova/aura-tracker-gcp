@@ -2,9 +2,11 @@ package drift
 
 import (
 	"fmt"
+	"net/url"
 	"reflect"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
@@ -324,6 +326,9 @@ func safeDifferenceValue(path string, value any, present bool) any {
 	if !present {
 		return nil
 	}
+	if isSensitiveDriftPath(path) {
+		return "[REDACTED]"
+	}
 	switch typed := value.(type) {
 	case map[string]any:
 		out := make(map[string]any, len(typed))
@@ -337,19 +342,113 @@ func safeDifferenceValue(path string, value any, present bool) any {
 			out[index] = safeDifferenceValue(fmt.Sprintf("%s/%d", path, index), child, true)
 		}
 		return out
-	}
-	lower := strings.ToLower(path)
-	leaf := lower
-	if index := strings.LastIndex(leaf, "/"); index >= 0 {
-		leaf = leaf[index+1:]
-	}
-	if (strings.Contains(lower, "/env_vars/") && (leaf == "value" || leaf == "literal_value_fingerprint")) ||
-		strings.Contains(lower, "/omitted_annotation_fingerprints/") ||
-		leaf == "password" || leaf == "token" || leaf == "api_key" ||
-		leaf == "private_key" || leaf == "credential" || leaf == "credentials" {
-		return "[REDACTED]"
+	case string:
+		if isURLDriftPath(path) {
+			return safeDriftURL(typed)
+		}
 	}
 	return value
+}
+
+func isSensitiveDriftPath(path string) bool {
+	segments := driftPathSegments(path)
+	for i, segment := range segments {
+		key := canonicalDriftKey(segment)
+		if key == "annotations" {
+			return true
+		}
+		if key == "auth" || key == "authentication" || key == "credentials" || key == "secrets" {
+			return true
+		}
+		if key == "omittedannotationfingerprints" || key == "literalvaluefingerprint" {
+			return true
+		}
+		if i > 0 && canonicalDriftKey(segments[i-1]) == "envvars" && key == "value" {
+			return true
+		}
+		for _, token := range []string{
+			"secret", "password", "passwd", "pwd", "token", "apikey", "authorization",
+			"credential", "privatekey", "cookie", "signature", "dsn", "connectionstring",
+		} {
+			if key == token || strings.HasPrefix(key, token) || strings.HasSuffix(key, token) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isURLDriftPath(path string) bool {
+	segments := driftPathSegments(path)
+	if len(segments) == 0 {
+		return false
+	}
+	key := canonicalDriftKey(segments[len(segments)-1])
+	for _, token := range []string{"url", "uri", "endpoint", "targetref", "webhook"} {
+		if key == token || strings.HasSuffix(key, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func safeDriftURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	u, err := url.Parse(value)
+	if err != nil || (u.Scheme == "" && u.Host == "" && u.Path == "") {
+		return "[REDACTED]"
+	}
+	if u.Scheme != "" && u.Host == "" {
+		return "[REDACTED]"
+	}
+	if u.Scheme == "" && u.Host == "" && !strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "projects/") {
+		// Artifact references commonly omit a scheme but start with a registry
+		// hostname. Parse those through a temporary HTTPS origin. Every other
+		// opaque URL-designated value (including DSNs) is withheld.
+		first, _, hasPath := strings.Cut(value, "/")
+		if !hasPath || !strings.Contains(first, ".") {
+			return "[REDACTED]"
+		}
+		absolute, parseErr := url.Parse("https://" + value)
+		if parseErr != nil || absolute.Host == "" {
+			return "[REDACTED]"
+		}
+		u = absolute
+	}
+	// URL-designated fields are useful for drift when their routing structure
+	// changes, but credentials never are. Preserve query-key presence while
+	// replacing every value, and omit userinfo and fragments entirely.
+	u.User = nil
+	u.Fragment = ""
+	query := u.Query()
+	for key := range query {
+		query[key] = []string{"[REDACTED]"}
+	}
+	u.RawQuery = query.Encode()
+	safe := u.String()
+	if !strings.Contains(value, "://") && strings.HasPrefix(safe, "https://") {
+		safe = strings.TrimPrefix(safe, "https://")
+	}
+	return safe
+}
+
+func driftPathSegments(path string) []string {
+	raw := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	out := make([]string, 0, len(raw))
+	for _, segment := range raw {
+		segment = strings.ReplaceAll(strings.ReplaceAll(segment, "~1", "/"), "~0", "~")
+		out = append(out, segment)
+	}
+	return out
+}
+
+func canonicalDriftKey(value string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r)
+		}
+		return -1
+	}, value)
 }
 
 func fieldSummary(path, environmentA, environmentB string, aPresent, bPresent bool) string {

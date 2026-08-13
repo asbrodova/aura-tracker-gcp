@@ -72,8 +72,51 @@ test_missing_account_is_created() {
 
   assert_contains "$output" "iam service-accounts create aura-tracker-mcp"
   assert_contains "$output" "--role=roles/run.viewer"
+	assert_contains "$output" "--role=roles/storage.bucketViewer"
+	assert_contains "$output" "services enable cloudfunctions.googleapis.com"
+	assert_contains "$output" "services enable artifactregistry.googleapis.com"
+	assert_contains "$output" "services enable servicedirectory.googleapis.com"
   assert_not_contains "$output" "services enable servicehealth.googleapis.com"
-  assert_not_contains "$output" "services enable recommender.googleapis.com"
+	assert_contains "$output" "services enable recommender.googleapis.com"
+}
+
+test_modules_none_provisions_only_resources() {
+	local output
+	output="$(run_setup true env MODULES=none)"
+
+	assert_contains "$output" "services enable bigquery.googleapis.com"
+	assert_contains "$output" "services enable storage.googleapis.com"
+	assert_contains "$output" "services enable run.googleapis.com"
+	assert_contains "$output" "--role=roles/storage.bucketViewer"
+	assert_not_contains "$output" "services enable container.googleapis.com"
+	assert_not_contains "$output" "services enable recommender.googleapis.com"
+	assert_not_contains "$output" "--role=roles/compute.viewer"
+}
+
+test_selected_modules_scope_capabilities() {
+	local output
+	output="$(run_setup true env MODULES=cloudrun,monitoring)"
+
+	assert_contains "$output" "services enable monitoring.googleapis.com"
+	assert_contains "$output" "services enable cloudtrace.googleapis.com"
+	assert_contains "$output" "--role=roles/monitoring.viewer"
+	assert_contains "$output" "--role=roles/cloudtrace.user"
+	assert_not_contains "$output" "services enable compute.googleapis.com"
+	assert_not_contains "$output" "services enable cloudfunctions.googleapis.com"
+}
+
+test_unknown_module_is_rejected() {
+	local output
+	local status
+
+	set +e
+	output="$(run_setup true env MODULES=cloudrun,typo 2>&1)"
+	status=$?
+	set -e
+
+	[[ "$status" -eq 2 ]] || fail "expected unknown module to exit 2, got ${status}"
+	assert_contains "$output" "unknown MODULES entry 'typo'"
+	assert_not_contains "$output" "GCLOUD"
 }
 
 test_optional_flags_work_for_existing_account() {
@@ -154,6 +197,7 @@ test_local_auth_guidance_is_keyless() {
 	assert_contains "$output" "LOCAL_IMPERSONATION_PRINCIPAL=user:YOUR_EMAIL"
 	assert_not_contains "$output" "service-accounts keys create"
 	assert_not_contains "$output" "sa-key.json"
+	assert_contains "$output" "--max-instances=1"
 }
 
 test_local_impersonation_principal_reconciles_token_creator() {
@@ -183,6 +227,9 @@ test_invalid_local_impersonation_principal_is_rejected() {
 
 test_existing_account_reconciles_service_health
 test_missing_account_is_created
+test_modules_none_provisions_only_resources
+test_selected_modules_scope_capabilities
+test_unknown_module_is_rejected
 test_optional_flags_work_for_existing_account
 test_security_audit_setup_is_read_only
 test_security_audit_organization_roles_are_opt_in

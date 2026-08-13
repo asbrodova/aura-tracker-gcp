@@ -23,8 +23,11 @@ type InspectTopicHealthRequest struct {
 
 type SubscriptionLag struct {
 	SubscriptionName    string `json:"subscription_name"`
+	AckDeadlineSeconds  int32  `json:"ack_deadline_seconds,omitempty"`
 	UndeliveredMessages int64  `json:"undelivered_messages"`
 	OldestUnackedAge    string `json:"oldest_unacked_age"`
+	MetricsObservedAt   string `json:"metrics_observed_at,omitempty"`
+	MetricsAvailable    bool   `json:"metrics_available"`
 }
 
 type TopicHealthReport struct {

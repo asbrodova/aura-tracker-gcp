@@ -52,6 +52,7 @@ func (r *recommendationRow) Save() (map[string]bigquery.Value, string, error) {
 // ExportRecommendationsToBQ fetches all active recommendations across all supported
 // recommender types and writes them to a BigQuery table via streaming insert.
 func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	const op = "recommender.ExportRecommendationsToBQ"
 	if a.rec == nil {
 		return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("recommender client not initialised: ensure RECOMMENDER_ENABLED is not set to 'false'")
 	}
@@ -62,7 +63,7 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 		return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("dataset is required")
 	}
 
-	if err := a.rateWait(ctx, "recommender.ExportRecommendationsToBQ"); err != nil {
+	if err := a.rateWait(ctx, op); err != nil {
 		return models.ExportRecommendationsToBQResponse{}, err
 	}
 	ctx, cancel := a.withTimeout(ctx)
@@ -78,21 +79,29 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 	exportedAt := time.Now().UTC()
 	var rows []*recommendationRow
 
+	// Preflight the complete export set before reading anything. This avoids
+	// spending quota on earlier recommender types when a later type is already
+	// circuit-broken, while activeRecommendations repeats the check to close the
+	// race between this pass and each network request.
+	for _, recID := range recommenderIDs {
+		if _, err := a.checkRecommenderQuota(op, recID); err != nil {
+			return models.ExportRecommendationsToBQResponse{}, err
+		}
+	}
+
 	// The "-" wildcard location fetches recommendations across all GCP regions.
 	for _, recID := range recommenderIDs {
-		parent := fmt.Sprintf("projects/%s/locations/-/recommenders/%s", projectID, recID)
-		it := a.rec.ListRecommendations(ctx, &recommenderpb.ListRecommendationsRequest{
-			Parent:   parent,
-			Filter:   `stateInfo.state = "ACTIVE"`,
-			PageSize: maxUnpagedInventoryItems,
-		})
+		it, err := a.activeRecommendations(ctx, op, projectID, "-", recID, maxInventoryPageSize)
+		if err != nil {
+			return models.ExportRecommendationsToBQResponse{}, err
+		}
 		for {
 			rec, err := it.Next()
 			if err == iterator.Done {
 				break
 			}
 			if err != nil {
-				return models.ExportRecommendationsToBQResponse{}, wrapGCPError("recommender.ExportRecommendationsToBQ", err)
+				return models.ExportRecommendationsToBQResponse{}, err
 			}
 			if len(rows) >= maxRecommendationExportRows {
 				return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("recommender.ExportRecommendationsToBQ: active recommendation count exceeded the %d-row safety limit", maxRecommendationExportRows)
@@ -104,14 +113,14 @@ func (a *gcpAdapter) ExportRecommendationsToBQ(ctx context.Context, req models.E
 			row := &recommendationRow{
 				ResourceName:      primaryTargetResource(rec),
 				RecommenderID:     recID,
-				Subtype:           classifyRecommenderID(recID),
+				Subtype:           recommendationSubtype(rec, recID),
 				Description:       rec.Description,
 				MonthlySavingsUSD: extractMonthlySavings(rec),
 				Priority:          priority,
 				ExportedAt:        exportedAt,
 			}
 			if req.ExecutionID != "" {
-				digest := sha256.Sum256([]byte(req.ExecutionID + "\x00" + recID + "\x00" + row.ResourceName))
+				digest := sha256.Sum256([]byte(req.ExecutionID + "\x00" + recID + "\x00" + rec.Name + "\x00" + row.Subtype + "\x00" + row.ResourceName))
 				row.insertID = fmt.Sprintf("%x", digest[:16])
 			}
 			rows = append(rows, row)

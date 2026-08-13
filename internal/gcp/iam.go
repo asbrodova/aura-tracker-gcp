@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/time/rate"
 	"google.golang.org/api/cloudresourcemanager/v1"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
@@ -152,7 +153,7 @@ func (a *gcpAdapter) TestPermissions(ctx context.Context, req models.TestPermiss
 		})
 	}
 
-	identity := resolveCallerIdentity(ctx)
+	identity := resolveCallerIdentity(ctx, a.limiter)
 	if identity == "" {
 		identity = fmt.Sprintf("project:%s (ADC)", req.ProjectID)
 	}
@@ -166,7 +167,7 @@ func (a *gcpAdapter) TestPermissions(ctx context.Context, req models.TestPermiss
 
 // resolveCallerIdentity queries the GCP Metadata Server for the service account email
 // of the running instance. Returns "" when not running on GCP (e.g. local dev with ADC).
-func resolveCallerIdentity(ctx context.Context) string {
+func resolveCallerIdentity(ctx context.Context, limiter *rate.Limiter) string {
 	reqCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
@@ -177,7 +178,8 @@ func resolveCallerIdentity(ctx context.Context) string {
 	}
 	req.Header.Set("Metadata-Flavor", "Google")
 
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Transport: &rateLimitedRoundTripper{base: http.DefaultTransport, limiter: limiter}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return ""
 	}

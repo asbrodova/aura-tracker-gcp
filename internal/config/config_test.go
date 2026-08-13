@@ -34,3 +34,10 @@ func TestLoadAcceptsKnownFieldsAndMissingFile(t *testing.T) {
 		t.Fatalf("loaded config = %+v, %v", cfg, err)
 	}
 }
+
+func TestLoadWithoutHomeTreatsUserConfigAsOptional(t *testing.T) {
+	t.Setenv("HOME", "")
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load() without HOME returned %v", err)
+	}
+}

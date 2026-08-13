@@ -16,9 +16,37 @@ const (
 	defaultInventoryPageSize = 250
 	maxInventoryPageSize     = 1000
 	maxUnpagedInventoryItems = 1000
+	// Filtered inventories may need to inspect excluded resources before they
+	// can fill the public result budget. Keep that scan separately bounded.
+	maxFilteredInventoryScanItems = maxUnpagedInventoryItems * 10
 )
 
 var errInventoryLimitReached = errors.New("inventory result limit reached")
+
+type filteredInventoryBudget struct {
+	resultLimit int
+	scanLimit   int
+	scanned     int
+	accepted    int
+}
+
+// consider accounts for one raw API result. It tells the caller whether to
+// include an eligible result and whether a proven omission reached either
+// budget. Excluded resources consume only the scan budget.
+func (b *filteredInventoryBudget) consider(eligible bool) (include, stop bool) {
+	if b.scanned >= b.scanLimit {
+		return false, true
+	}
+	b.scanned++
+	if !eligible {
+		return false, false
+	}
+	if b.accepted >= b.resultLimit {
+		return false, true
+	}
+	b.accepted++
+	return true, false
+}
 
 // appendInventoryBounded appends an item when capacity remains. A false return
 // means the item was not appended, proving that at least one result was omitted.

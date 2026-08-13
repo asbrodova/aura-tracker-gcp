@@ -3,6 +3,7 @@ package anonymize
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -58,33 +59,21 @@ func (d *DLPAnonymizer) scrub(ctx context.Context, result *mcp.CallToolResult) (
 	var allFindings []Finding
 
 	out := *result
+	meta, findings, err := d.scrubMeta(ctx, result.Meta, reg)
+	if err != nil {
+		return nil, nil, err
+	}
+	out.Meta = meta
+	allFindings = append(allFindings, findings...)
 	out.Content = make([]mcp.Content, len(result.Content))
-	copy(out.Content, result.Content)
 
-	for i, c := range out.Content {
-		switch content := c.(type) {
-		case mcp.TextContent:
-			masked, findings, err := d.scrubString(ctx, content.Text, reg, i)
-			if err != nil {
-				return nil, nil, err
-			}
-			content.Text = masked
-			out.Content[i] = content
-			allFindings = append(allFindings, findings...)
-		case mcp.EmbeddedResource:
-			textResource, ok := content.Resource.(mcp.TextResourceContents)
-			if !ok {
-				continue
-			}
-			masked, findings, err := d.scrubString(ctx, textResource.Text, reg, i)
-			if err != nil {
-				return nil, nil, err
-			}
-			textResource.Text = masked
-			content.Resource = textResource
-			out.Content[i] = content
-			allFindings = append(allFindings, findings...)
+	for i, content := range result.Content {
+		scrubbed, findings, scrubErr := d.scrubContent(ctx, content, reg, i)
+		if scrubErr != nil {
+			return nil, nil, scrubErr
 		}
+		out.Content[i] = scrubbed
+		allFindings = append(allFindings, findings...)
 	}
 
 	if out.StructuredContent != nil {
@@ -104,6 +93,102 @@ func (d *DLPAnonymizer) scrub(ctx context.Context, result *mcp.CallToolResult) (
 		out.StructuredContent = sc
 	}
 	return &out, allFindings, nil
+}
+
+func (d *DLPAnonymizer) scrubContent(ctx context.Context, content mcp.Content, reg *tokenRegistry, contentIdx int) (mcp.Content, []Finding, error) {
+	if content == nil {
+		return nil, nil, errors.New("anonymize: nil MCP content withheld")
+	}
+	var err error
+	content, err = prepareScrubbableContent(content)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Scrub textual payloads directly to preserve provider offsets, then scrub
+	// the complete serialized envelope with the payload blanked. This covers all
+	// metadata and link fields without inspecting the same text twice.
+	var payload string
+	var hasPayload bool
+	switch typed := content.(type) {
+	case mcp.TextContent:
+		payload = typed.Text
+		hasPayload = true
+		typed.Text = ""
+		content = typed
+	case mcp.EmbeddedResource:
+		if resource, ok := typed.Resource.(mcp.TextResourceContents); ok {
+			payload = resource.Text
+			hasPayload = true
+			resource.Text = "__ANONYMIZE_TEXT_PAYLOAD__"
+			typed.Resource = resource
+			content = typed
+		}
+	}
+
+	scrubbed, findings, err := d.scrubSerializedContent(ctx, content, reg, contentIdx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !hasPayload {
+		return scrubbed, findings, nil
+	}
+
+	payload, payloadFindings, err := d.scrubString(ctx, payload, reg, contentIdx)
+	if err != nil {
+		return nil, nil, err
+	}
+	findings = append(findings, payloadFindings...)
+	switch typed := scrubbed.(type) {
+	case mcp.TextContent:
+		typed.Text = payload
+		return typed, findings, nil
+	case mcp.EmbeddedResource:
+		resource, ok := typed.Resource.(mcp.TextResourceContents)
+		if !ok {
+			return nil, nil, errors.New("anonymize: text resource changed type while scrubbing")
+		}
+		resource.Text = payload
+		typed.Resource = resource
+		return typed, findings, nil
+	default:
+		return nil, nil, errors.New("anonymize: content changed type while scrubbing")
+	}
+}
+
+func (d *DLPAnonymizer) scrubSerializedContent(ctx context.Context, content mcp.Content, reg *tokenRegistry, contentIdx int) (mcp.Content, []Finding, error) {
+	encoded, err := json.Marshal(content)
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: marshal MCP content: %w", err)
+	}
+	masked, findings, err := d.scrubString(ctx, string(encoded), reg, contentIdx)
+	if err != nil {
+		return nil, nil, err
+	}
+	scrubbed, err := parseScrubbedContent([]byte(masked))
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: decode scrubbed MCP content: %w", err)
+	}
+	return scrubbed, findings, nil
+}
+
+func (d *DLPAnonymizer) scrubMeta(ctx context.Context, meta *mcp.Meta, reg *tokenRegistry) (*mcp.Meta, []Finding, error) {
+	if meta == nil {
+		return nil, nil, nil
+	}
+	encoded, err := json.Marshal(meta)
+	if err != nil {
+		return nil, nil, fmt.Errorf("anonymize: marshal result metadata: %w", err)
+	}
+	masked, findings, err := d.scrubString(ctx, string(encoded), reg, -1)
+	if err != nil {
+		return nil, nil, err
+	}
+	var out mcp.Meta
+	if err := json.Unmarshal([]byte(masked), &out); err != nil {
+		return nil, nil, fmt.Errorf("anonymize: decode scrubbed result metadata: %w", err)
+	}
+	return &out, findings, nil
 }
 
 func (d *DLPAnonymizer) scrubString(ctx context.Context, text string, reg *tokenRegistry, contentIdx int) (string, []Finding, error) {
@@ -145,6 +230,9 @@ func maskByOffsets(src string, findings []models.DLPFinding, reg *tokenRegistry)
 	for _, f := range sorted {
 		end := f.Offset + f.Length
 		if f.Offset < 0 || end > len(b) {
+			continue
+		}
+		if f.Quote != "" && string(b[f.Offset:end]) != f.Quote {
 			continue
 		}
 		key := f.Quote

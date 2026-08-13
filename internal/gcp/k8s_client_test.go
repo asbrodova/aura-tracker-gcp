@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,19 @@ import (
 type staticTokenSource struct{ tok *oauth2.Token }
 
 func (s *staticTokenSource) Token() (*oauth2.Token, error) { return s.tok, nil }
+
+type k8sRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f k8sRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func k8sJSONResponse(req *http.Request, body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+		Request:    req,
+	}
+}
 
 // newTestK8sServer creates an httptest.TLSServer with the given handler and
 // returns a k8sClient pre-configured to trust the server's certificate.
@@ -491,9 +505,12 @@ func TestListServices(t *testing.T) {
 	mux.HandleFunc("/api/v1/services", serveJSON(t, fixture))
 
 	client := newTestK8sServer(t, mux.ServeHTTP)
-	services, err := client.listServices(context.Background(), "")
+	services, truncated, err := client.listServices(context.Background(), "")
 	if err != nil {
 		t.Fatalf("listServices: %v", err)
+	}
+	if truncated {
+		t.Fatal("single-page service inventory reported truncation")
 	}
 	if len(services) != 1 {
 		t.Fatalf("expected 1 service, got %d", len(services))
@@ -507,6 +524,60 @@ func TestListServices(t *testing.T) {
 	}
 	if len(s.Ports) != 1 || s.Ports[0].Port != 80 {
 		t.Errorf("ports = %+v", s.Ports)
+	}
+}
+
+func TestListServicesFollowsKubernetesContinuationTokens(t *testing.T) {
+	t.Parallel()
+	requests := 0
+	client := &k8sClient{
+		baseURL: "https://k8s.test",
+		httpClient: &http.Client{Transport: k8sRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requests++
+			if req.URL.Query().Get("limit") != "4" && requests == 1 {
+				t.Fatalf("first page limit = %q, want 4", req.URL.Query().Get("limit"))
+			}
+			switch requests {
+			case 1:
+				if req.URL.Query().Get("continue") != "" {
+					t.Fatalf("first continuation = %q", req.URL.Query().Get("continue"))
+				}
+				return k8sJSONResponse(req, `{"metadata":{"continue":"native-token"},"items":[{"metadata":{"name":"one"}}]}`), nil
+			case 2:
+				if req.URL.Query().Get("continue") != "native-token" {
+					t.Fatalf("second continuation = %q", req.URL.Query().Get("continue"))
+				}
+				return k8sJSONResponse(req, `{"items":[{"metadata":{"name":"two"}}]}`), nil
+			default:
+				t.Fatalf("unexpected request %d", requests)
+				return nil, nil
+			}
+		})},
+	}
+
+	services, truncated, err := client.listServicesBounded(context.Background(), "", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated || requests != 2 || len(services) != 2 || services[0].Name != "one" || services[1].Name != "two" {
+		t.Fatalf("services = %+v, truncated = %v, requests = %d", services, truncated, requests)
+	}
+}
+
+func TestListServicesSignalsSafetyCapOnlyAfterProvenOmission(t *testing.T) {
+	t.Parallel()
+	client := &k8sClient{
+		baseURL: "https://k8s.test",
+		httpClient: &http.Client{Transport: k8sRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return k8sJSONResponse(req, `{"items":[{"metadata":{"name":"one"}},{"metadata":{"name":"two"}},{"metadata":{"name":"three"}}]}`), nil
+		})},
+	}
+	services, truncated, err := client.listServicesBounded(context.Background(), "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(services) != 2 {
+		t.Fatalf("services = %+v, truncated = %v", services, truncated)
 	}
 }
 
@@ -530,9 +601,12 @@ func TestListNetworkPolicies(t *testing.T) {
 	mux.HandleFunc("/apis/networking.k8s.io/v1/networkpolicies", serveJSON(t, fixture))
 
 	client := newTestK8sServer(t, mux.ServeHTTP)
-	policies, err := client.listNetworkPolicies(context.Background(), "")
+	policies, truncated, err := client.listNetworkPolicies(context.Background(), "")
 	if err != nil {
 		t.Fatalf("listNetworkPolicies: %v", err)
+	}
+	if truncated {
+		t.Fatal("single-page network-policy inventory reported truncation")
 	}
 	if len(policies) != 1 {
 		t.Fatalf("expected 1 policy, got %d", len(policies))
@@ -567,9 +641,12 @@ func TestListIngresses_SkipsHTTPRoutesOn404(t *testing.T) {
 	})
 
 	client := newTestK8sServer(t, mux.ServeHTTP)
-	ingresses, err := client.listIngresses(context.Background(), "")
+	ingresses, truncated, err := client.listIngresses(context.Background(), "")
 	if err != nil {
 		t.Fatalf("listIngresses: %v", err)
+	}
+	if truncated {
+		t.Fatal("single-page ingress inventory reported truncation")
 	}
 	if len(ingresses) != 1 {
 		t.Fatalf("expected 1 ingress, got %d", len(ingresses))

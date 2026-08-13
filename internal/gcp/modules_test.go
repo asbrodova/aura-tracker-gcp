@@ -20,6 +20,16 @@ func TestNeededClientsForIncidentModule(t *testing.T) {
 	}
 }
 
+func TestNeededClientsForPubSubModuleIncludesMonitoringMetrics(t *testing.T) {
+	t.Parallel()
+	needed := neededClients(map[string]bool{"pubsub": true})
+	for _, client := range []clientKey{clientPubSub, clientMetric} {
+		if !needed[client] {
+			t.Errorf("pubsub module did not initialize %s", client)
+		}
+	}
+}
+
 func TestAlwaysOnResourcesInitializeCloudRunRevisionClients(t *testing.T) {
 	t.Parallel()
 	needed := neededClients(map[string]bool{})
