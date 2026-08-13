@@ -4,7 +4,7 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/asbrodova/aura-tracker-gcp)](go.mod)
 [![Go Report Card](https://goreportcard.com/badge/github.com/asbrodova/aura-tracker-gcp)](https://goreportcard.com/report/github.com/asbrodova/aura-tracker-gcp)
 [![GoDoc](https://pkg.go.dev/badge/github.com/asbrodova/aura-tracker-gcp.svg)](https://pkg.go.dev/github.com/asbrodova/aura-tracker-gcp)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 <!-- Add your social preview image here: -->
 <!-- ![aura-tracker-gcp banner](docs/banner.png) -->
