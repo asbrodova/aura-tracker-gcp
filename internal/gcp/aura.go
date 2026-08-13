@@ -34,13 +34,13 @@ var (
 
 var errAuraMetricNoData = errors.New("monitoring metric has no data in the requested window")
 
-// recommenderQuotaNote is surfaced in AuraReport.RecommenderNote when the daily
-// Recommender API quota is exhausted. The note instructs the LLM to stop polling.
-const recommenderQuotaNote = "RECOMMENDER QUOTA EXHAUSTED: The Cloud Recommender API has " +
-	"hit its daily limit (100 reads/day on Basic tier; 1,000,000/day on Paid tiers). " +
-	"Do NOT call any Aura Score or Aura Summary tool again in this session — doing so " +
-	"will not add new recommender signals and wastes tokens. The quota resets daily at " +
-	"midnight Pacific Time (PT)."
+func recommenderQuotaNote(retryAt time.Time) string {
+	note := "RECOMMENDER QUOTA EXHAUSTED: Recommender signals are unavailable; the Aura score was computed from the remaining telemetry."
+	if !retryAt.IsZero() {
+		return fmt.Sprintf("%s Do not retry before %s; requests resume automatically afterward.", note, retryAt.UTC().Format(time.RFC3339))
+	}
+	return note + " Wait for the quota window to reset before retrying."
+}
 
 // cacheKey builds the lookup key for auraCache.
 func cacheKey(projectID string, kind models.ResourceKind, region, name string) string {
@@ -55,8 +55,12 @@ func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRe
 		return models.AuraReport{}, err
 	}
 	key := cacheKey(req.ProjectID, req.ResourceKind, req.Region, req.ResourceName)
-	if cached, ok := a.auraCache.get(key); ok {
-		return cached, nil
+	if a.auraCache != nil {
+		if cached, ok := a.auraCache.get(key); ok {
+			if auraCacheUsable(cached, a.recommenderQuota.currentTime()) {
+				return cached, nil
+			}
+		}
 	}
 
 	if err := a.rateWait(ctx, "aura.GetAuraScore"); err != nil {
@@ -66,14 +70,14 @@ func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRe
 	defer cancel()
 
 	var signals []models.AuraHealthSignal
-	var quotaExhausted bool
+	var quotaRetryAt time.Time
 	var err error
 
 	switch req.ResourceKind {
 	case models.ResourceKindCloudRun:
-		signals, quotaExhausted, err = a.fetchCloudRunSignals(ctx, req.ProjectID, req.ResourceName, req.Region)
+		signals, quotaRetryAt, err = a.fetchCloudRunSignals(ctx, req.ProjectID, req.ResourceName, req.Region)
 	case models.ResourceKindCloudSQL:
-		signals, quotaExhausted, err = a.fetchCloudSQLSignals(ctx, req.ProjectID, req.ResourceName, req.Region)
+		signals, quotaRetryAt, err = a.fetchCloudSQLSignals(ctx, req.ProjectID, req.ResourceName, req.Region)
 	case models.ResourceKindBigQuery:
 		signals, err = a.fetchBigQuerySignals(ctx, req.ProjectID, req.ResourceName)
 	case models.ResourceKindGKE:
@@ -91,11 +95,18 @@ func (a *gcpAdapter) GetAuraScore(ctx context.Context, req models.GetAuraScoreRe
 
 	report := calculateAura(req.ResourceKind, req.ResourceName, req.Region, signals)
 	report.CachedAt = time.Now().UTC()
-	if quotaExhausted {
-		report.RecommenderNote = recommenderQuotaNote
+	if !quotaRetryAt.IsZero() {
+		report.RecommenderRetryAt = quotaRetryAt.UTC()
+		report.RecommenderNote = recommenderQuotaNote(quotaRetryAt)
 	}
-	a.auraCache.set(key, report)
+	if a.auraCache != nil {
+		a.auraCache.set(key, report)
+	}
 	return report, nil
+}
+
+func auraCacheUsable(report models.AuraReport, now time.Time) bool {
+	return report.RecommenderRetryAt.IsZero() || now.Before(report.RecommenderRetryAt)
 }
 
 func validateAuraRequest(req models.GetAuraScoreRequest) error {
@@ -302,6 +313,9 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 	if err := g.Wait(); err != nil {
 		return models.ProjectAuraSummaryResponse{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return models.ProjectAuraSummaryResponse{}, fmt.Errorf("aura.GetProjectAuraSummary: %w", err)
+	}
 
 	// Sort scored resources worst-first, with unavailable resources last. Their
 	// placeholder score is not a health score and must not rank as critical.
@@ -360,14 +374,14 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 // Per-resource signal fetchers
 // ---------------------------------------------------------------------------
 
-func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, region string) ([]models.AuraHealthSignal, bool, error) {
+func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, region string) ([]models.AuraHealthSignal, time.Time, error) {
 	baseFilter := fmt.Sprintf(`resource.labels.service_name = "%s" AND resource.labels.location = "%s"`, escapeMonitoringString(name), escapeMonitoringString(region))
 
 	var (
 		errCount5xx, totalCount, cpuUtil, latencyP99   float64
 		errCountErr, totalCountErr, cpuErr, latencyErr error
 		recInsights                                    []recommenderInsight
-		quotaExhausted                                 bool
+		quotaRetryAt                                   time.Time
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -411,7 +425,7 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 		if err != nil {
 			var qe *ports.RecommenderQuotaExhaustedError
 			if errors.As(err, &qe) {
-				quotaExhausted = true
+				quotaRetryAt = qe.RetryAt
 				return nil
 			}
 			a.log.WarnContext(gctx, "aura: recommender unavailable for Cloud Run", "service", name, "err", err)
@@ -422,7 +436,10 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 	})
 
 	if err := g.Wait(); err != nil {
-		return nil, false, err
+		return nil, time.Time{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, time.Time{}, err
 	}
 
 	errorRate, errorRateErr := ratioMetricValue(errCount5xx, errCountErr, totalCount, totalCountErr)
@@ -435,10 +452,10 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 	for _, ins := range recInsights {
 		signals = append(signals, recommenderSignal(ins))
 	}
-	return signals, quotaExhausted, nil
+	return signals, quotaRetryAt, nil
 }
 
-func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instanceName, region string) ([]models.AuraHealthSignal, bool, error) {
+func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instanceName, region string) ([]models.AuraHealthSignal, time.Time, error) {
 	// Cloud SQL instance IDs are formatted as "project:region:instance" in some APIs
 	// but resource.labels.database_id uses the plain instance name.
 	baseFilter := fmt.Sprintf(`resource.labels.database_id = "%s:%s"`, escapeMonitoringString(projectID), escapeMonitoringString(instanceName))
@@ -446,7 +463,7 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 	var cpuUtil, memUtil, diskUtil float64
 	var cpuErr, memErr, diskErr error
 	var idleInsights, overprovisionedInsights []recommenderInsight
-	var idleQuotaExhausted, overprovisionedQuotaExhausted bool
+	var idleQuotaRetryAt, overprovisionedQuotaRetryAt time.Time
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -471,7 +488,7 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 		if err != nil {
 			var qe *ports.RecommenderQuotaExhaustedError
 			if errors.As(err, &qe) {
-				idleQuotaExhausted = true
+				idleQuotaRetryAt = qe.RetryAt
 				return nil
 			}
 			a.log.WarnContext(gctx, "aura: recommender unavailable for Cloud SQL idle", "instance", instanceName, "err", err)
@@ -489,7 +506,7 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 		if err != nil {
 			var qe *ports.RecommenderQuotaExhaustedError
 			if errors.As(err, &qe) {
-				overprovisionedQuotaExhausted = true
+				overprovisionedQuotaRetryAt = qe.RetryAt
 				return nil
 			}
 			a.log.WarnContext(gctx, "aura: recommender unavailable for Cloud SQL overprovisioned", "instance", instanceName, "err", err)
@@ -499,7 +516,12 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 		return nil
 	})
 
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, time.Time{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, time.Time{}, err
+	}
 
 	signals := []models.AuraHealthSignal{
 		metricHealthSignal("cpu_util", round4(cpuUtil), cpuErr, sqlSignalScore),
@@ -510,7 +532,17 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 	for _, ins := range recInsights {
 		signals = append(signals, recommenderSignal(ins))
 	}
-	return signals, idleQuotaExhausted || overprovisionedQuotaExhausted, nil
+	return signals, earliestNonZeroTime(idleQuotaRetryAt, overprovisionedQuotaRetryAt), nil
+}
+
+func earliestNonZeroTime(values ...time.Time) time.Time {
+	var earliest time.Time
+	for _, value := range values {
+		if !value.IsZero() && (earliest.IsZero() || value.Before(earliest)) {
+			earliest = value
+		}
+	}
+	return earliest
 }
 
 func (a *gcpAdapter) fetchBigQuerySignals(ctx context.Context, projectID, datasetID string) ([]models.AuraHealthSignal, error) {
@@ -546,7 +578,12 @@ func (a *gcpAdapter) fetchBigQuerySignals(ctx context.Context, projectID, datase
 		return nil
 	})
 
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	failRate, failRateErr := ratioMetricValue(failedJobs, failedJobsErr, totalJobs, totalJobsErr)
 
@@ -605,7 +642,12 @@ func (a *gcpAdapter) fetchGKESignals(ctx context.Context, projectID, clusterName
 		return nil
 	})
 
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	return []models.AuraHealthSignal{
 		metricHealthSignal("node_cpu_util", round4(nodeCPU), nodeCPUErr, func(value float64) (int, string) { return gkeSignalScore("node_cpu_util", value) }),

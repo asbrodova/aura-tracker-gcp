@@ -168,6 +168,8 @@ type TraceDependencyEdge struct {
 type ListTraceDependencyEdgesRequest struct {
 	ProjectID     string `json:"project_id"`
 	LookbackHours int    `json:"lookback_hours,omitempty"` // default 168 (7 days)
+	PageSize      int    `json:"page_size,omitempty"`
+	PageToken     string `json:"page_token,omitempty"`
 }
 
 // ListTraceDependencyEdgesResponse holds the inferred edges.
@@ -177,6 +179,8 @@ type ListTraceDependencyEdgesResponse struct {
 	TracesScanned int    `json:"traces_scanned"`
 	LookbackHours int    `json:"lookback_hours"`
 	Backend       string `json:"backend"` // always "trace"
+	NextPageToken string `json:"next_page_token,omitempty"`
+	Truncated     bool   `json:"truncated,omitempty"`
 }
 
 // TraceService represents a service discovered via Cloud Trace.

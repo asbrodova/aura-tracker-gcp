@@ -31,16 +31,27 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	if cached, ok := a.graphCache.get(cacheKey); ok {
 		return applyArchitectureGraphView(cached, req), nil
 	}
-	value, err, _ := a.graphFlight.Do(cacheKey, func() (any, error) {
+	if err := ctx.Err(); err != nil {
+		return models.ServerlessGraph{}, fmt.Errorf("archgraph: %w", err)
+	}
+
+	value, err := doSharedCall(ctx, &a.graphFlight, cacheKey, func(sharedCtx context.Context) (any, error) {
 		if cached, ok := a.graphCache.get(cacheKey); ok {
 			return cached, nil
 		}
-		return a.collectArchitectureGraph(ctx, req)
+		return a.collectArchitectureGraph(sharedCtx, req)
 	})
 	if err != nil {
+		if ctx.Err() != nil {
+			return models.ServerlessGraph{}, fmt.Errorf("archgraph: %w", err)
+		}
 		return models.ServerlessGraph{}, err
 	}
-	return applyArchitectureGraphView(value.(models.ServerlessGraph), req), nil
+	graph, ok := value.(models.ServerlessGraph)
+	if !ok {
+		return models.ServerlessGraph{}, fmt.Errorf("archgraph: shared collection returned %T", value)
+	}
+	return applyArchitectureGraphView(graph, req), nil
 }
 
 func validateArchitectureGraphRequest(req models.ExportArchitectureGraphRequest) error {
@@ -583,6 +594,9 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 	if err := b1.Wait(); err != nil {
 		return models.ServerlessGraph{}, fmt.Errorf("archgraph: batch1: %w", err)
 	}
+	if err := outerCtx.Err(); err != nil {
+		return models.ServerlessGraph{}, fmt.Errorf("archgraph: batch1: %w", err)
+	}
 
 	// ────────────────────────────────────────────────────────────────────
 	// Batch 2 — Per-cluster GKE workload listing
@@ -693,6 +707,9 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 		if err := b2.Wait(); err != nil {
 			return models.ServerlessGraph{}, fmt.Errorf("archgraph: batch2: %w", err)
 		}
+		if err := outerCtx.Err(); err != nil {
+			return models.ServerlessGraph{}, fmt.Errorf("archgraph: batch2: %w", err)
+		}
 	}
 
 	// ────────────────────────────────────────────────────────────────────
@@ -743,6 +760,9 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 	}
 
 	if err := b3.Wait(); err != nil {
+		return models.ServerlessGraph{}, fmt.Errorf("archgraph: batch3: %w", err)
+	}
+	if err := outerCtx.Err(); err != nil {
 		return models.ServerlessGraph{}, fmt.Errorf("archgraph: batch3: %w", err)
 	}
 

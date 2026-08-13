@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
-	"sync"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
@@ -22,6 +22,7 @@ var (
 	cachePatterns              = []string{"REDIS_HOST", "REDIS_URL", "CACHE_URL", "CACHE_HOST"}
 	secretSuffixes             = []string{"_SECRET", "_KEY", "_PASSWORD", "_CREDENTIALS", "_TOKEN"}
 	pubsubValueRe              = regexp.MustCompile(`^projects/[^/]+/topics/[^/]+$`)
+	topologyEnvNameRe          = regexp.MustCompile(`^[A-Z_][A-Z0-9_]*$`)
 )
 
 func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServiceTopologyRequest) (models.ServiceTopologyReport, error) {
@@ -55,50 +56,55 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 		URL:    svc.Uri,
 	}}
 
-	var (
-		edges []models.TopologyEdge
-		warns []string
-		mu    sync.Mutex
-	)
+	direct := inferFromServiceSpec(svc, rootID, req.Project)
+	nodes = append(nodes, direct.nodes...)
+	edges := append([]models.TopologyEdge(nil), direct.edges...)
+	var warns []string
 
 	g, gctx := errgroup.WithContext(ctx)
-
-	// Goroutine 1: infer relationships from service spec — no I/O, pure computation.
+	var subscriptions []*pubsubpb.Subscription
+	var subscriptionsErr error
 	g.Go(func() error {
-		derived := inferFromServiceSpec(svc, rootID, req.Project)
-		mu.Lock()
-		nodes = append(nodes, derived.nodes...)
-		edges = append(edges, derived.edges...)
-		mu.Unlock()
+		subscriptions, subscriptionsErr = a.listTopologySubscriptions(gctx, req.Project)
 		return nil
 	})
 
-	// Goroutine 2: scan Pub/Sub subscriptions for push endpoints matching this service URL.
-	g.Go(func() error {
-		if svc.Uri == "" {
+	var serviceInventory models.ListServicesResponse
+	var serviceInventoryErr error
+	if depth == 2 {
+		g.Go(func() error {
+			serviceInventory, serviceInventoryErr = a.ListServices(gctx, models.ListServicesRequest{ProjectID: req.Project})
 			return nil
-		}
-		subNodes, subEdges, err := a.findPushSubscriptions(gctx, req.Project, svc.Uri, rootID)
-		if err != nil {
-			mu.Lock()
-			nodes = append(nodes, subNodes...)
-			edges = append(edges, subEdges...)
-			warns = append(warns, "pubsub push scan: "+err.Error())
-			mu.Unlock()
-			return nil // non-fatal: insufficient permissions should not fail the whole call
-		}
-		mu.Lock()
-		nodes = append(nodes, subNodes...)
-		edges = append(edges, subEdges...)
-		mu.Unlock()
-		return nil
-	})
+		})
+	}
 
 	if err := g.Wait(); err != nil {
 		return models.ServiceTopologyReport{}, wrapGCPError("topology.GetServiceTopology", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return models.ServiceTopologyReport{}, wrapGCPError("topology.GetServiceTopology", err)
+	}
+	if subscriptionsErr != nil {
+		warns = append(warns, "pubsub subscription scan: "+subscriptionsErr.Error())
+	}
+	if serviceInventoryErr != nil {
+		warns = append(warns, "depth-2 Cloud Run service discovery: "+serviceInventoryErr.Error())
+	}
+	if serviceInventory.Truncated {
+		warns = append(warns, "depth-2 Cloud Run service discovery was truncated; some push targets may be unresolved")
+	}
+
+	incoming := inferIncomingPushTopics(subscriptions, svc.Uri, rootID)
+	nodes = append(nodes, incoming.nodes...)
+	edges = append(edges, incoming.edges...)
+	if depth == 2 {
+		expanded := expandPubSubSecondHop(nodes, subscriptions, serviceInventory.Services, rootID)
+		nodes = append(nodes, expanded.nodes...)
+		edges = append(edges, expanded.edges...)
+	}
 
 	deduped := dedupNodes(nodes)
+	edges = dedupTopologyEdges(edges)
 	report := models.ServiceTopologyReport{
 		RootService:   req.ServiceName,
 		Project:       req.Project,
@@ -158,6 +164,9 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 	// 3. Environment variables — infer dependencies from naming conventions and values.
 	if len(svc.Template.Containers) > 0 {
 		for _, env := range svc.Template.Containers[0].Env {
+			if env == nil {
+				continue
+			}
 			// 3a. Secret Manager reference (ValueSource) — explicit, high confidence.
 			if vs := env.GetValueSource(); vs != nil {
 				if ref := vs.GetSecretKeyRef(); ref != nil && ref.Secret != "" {
@@ -194,12 +203,12 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 
 			// 3c. Env var name suggests a database connection.
 			if containsAny(name, dbEnvPatterns) {
-				nodeID := "external_db:" + value
-				r.nodes = append(r.nodes, models.TopologyNode{ID: nodeID, Kind: "external_db", Name: value})
+				node := redactedEnvDependency("external_db", "database endpoint", rootID, env.Name)
+				r.nodes = append(r.nodes, node)
 				r.edges = append(r.edges, models.TopologyEdge{
-					From: rootID, To: nodeID,
+					From: rootID, To: node.ID,
 					Relationship: "connects_to_db",
-					Evidence:     "env_var:" + env.Name,
+					Evidence:     "env_var:" + safeTopologyEnvName(env.Name),
 					Confidence:   "medium",
 					Inferred:     true,
 				})
@@ -258,12 +267,12 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 
 			// 3e-bis. Env var name suggests a Redis/cache endpoint.
 			if containsAny(name, cachePatterns) {
-				nodeID := "redis_cache:" + value
-				r.nodes = append(r.nodes, models.TopologyNode{ID: nodeID, Kind: "redis_cache", Name: value})
+				node := redactedEnvDependency("redis_cache", "cache endpoint", rootID, env.Name)
+				r.nodes = append(r.nodes, node)
 				r.edges = append(r.edges, models.TopologyEdge{
-					From: rootID, To: nodeID,
+					From: rootID, To: node.ID,
 					Relationship: "reads_writes_cache",
-					Evidence:     "env_var:" + env.Name,
+					Evidence:     "env_var:" + safeTopologyEnvName(env.Name),
 					Confidence:   "medium",
 					Inferred:     true,
 				})
@@ -288,37 +297,66 @@ func inferFromServiceSpec(svc *runpb.Service, rootID, project string) inferResul
 	return r
 }
 
-// findPushSubscriptions scans all Pub/Sub subscriptions in the project and returns
-// nodes/edges for those whose push endpoint starts with the service URL.
-func (a *gcpAdapter) findPushSubscriptions(ctx context.Context, project, serviceURL, rootID string) ([]models.TopologyNode, []models.TopologyEdge, error) {
-	var nodes []models.TopologyNode
-	var edges []models.TopologyEdge
+// redactedEnvDependency deliberately does not accept the environment value.
+// Endpoint-shaped values are untrusted strings and may contain credentials even
+// when they resemble valid hosts. The public graph preserves only classification
+// and env-name evidence; the root keeps otherwise-identical env names distinct
+// when multiple services are traversed in one report.
+func redactedEnvDependency(kind, label, rootID, envName string) models.TopologyNode {
+	envName = safeTopologyEnvName(envName)
+	return models.TopologyNode{
+		ID:   kind + ":" + rootID + ":env:" + envName,
+		Kind: kind,
+		Name: label + " configured via " + envName + " (value withheld)",
+	}
+}
 
+func safeTopologyEnvName(name string) string {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	if !topologyEnvNameRe.MatchString(name) {
+		return "CONFIGURED_ENDPOINT"
+	}
+	return name
+}
+
+// listTopologySubscriptions performs one bounded project-wide scan that is
+// reused for both direct incoming edges and depth-two Pub/Sub expansion.
+func (a *gcpAdapter) listTopologySubscriptions(ctx context.Context, project string) ([]*pubsubpb.Subscription, error) {
+	if a.pubsub == nil || a.pubsub.SubscriptionAdminClient == nil {
+		return nil, fmt.Errorf("pubsub client is not initialized")
+	}
 	it := a.pubsub.SubscriptionAdminClient.ListSubscriptions(ctx, &pubsubpb.ListSubscriptionsRequest{
 		Project: "projects/" + project, PageSize: maxUnpagedInventoryItems,
 	})
-
+	var subscriptions []*pubsubpb.Subscription
 	for scanned := 0; ; scanned++ {
 		sub, err := it.Next()
 		if isIteratorDone(err) {
 			break
 		}
 		if err != nil {
-			return nil, nil, err
+			return subscriptions, err
 		}
 		if scanned >= maxUnpagedInventoryItems {
-			return nodes, edges, fmt.Errorf("%w at %d subscriptions", errInventoryLimitReached, maxUnpagedInventoryItems)
+			return subscriptions, fmt.Errorf("%w at %d subscriptions", errInventoryLimitReached, maxUnpagedInventoryItems)
 		}
-		if sub.PushConfig == nil || sub.PushConfig.PushEndpoint == "" {
-			continue
-		}
-		if !strings.HasPrefix(sub.PushConfig.PushEndpoint, serviceURL) {
-			continue
-		}
+		subscriptions = append(subscriptions, sub)
+	}
+	return subscriptions, nil
+}
 
+func inferIncomingPushTopics(subscriptions []*pubsubpb.Subscription, serviceURL, rootID string) inferResult {
+	var result inferResult
+	if serviceURL == "" {
+		return result
+	}
+	for _, sub := range subscriptions {
+		if sub == nil || sub.PushConfig == nil || !topologyEndpointMatchesService(sub.PushConfig.PushEndpoint, serviceURL) {
+			continue
+		}
 		topicNodeID := "pubsub_topic:" + sub.Topic
-		nodes = append(nodes, models.TopologyNode{ID: topicNodeID, Kind: "pubsub_topic", Name: sub.Topic})
-		edges = append(edges, models.TopologyEdge{
+		result.nodes = append(result.nodes, models.TopologyNode{ID: topicNodeID, Kind: "pubsub_topic", Name: sub.Topic})
+		result.edges = append(result.edges, models.TopologyEdge{
 			From:         topicNodeID,
 			To:           rootID,
 			Relationship: "triggers",
@@ -326,8 +364,102 @@ func (a *gcpAdapter) findPushSubscriptions(ctx context.Context, project, service
 			Confidence:   "high",
 		})
 	}
+	return result
+}
 
-	return nodes, edges, nil
+// expandPubSubSecondHop follows only resources that were direct neighbors of
+// the root. Direct topics expand to their subscriptions and known Cloud Run
+// push consumers. A directly referenced subscription expands only to its own
+// topic, preventing accidental third-hop sibling expansion.
+func expandPubSubSecondHop(directNodes []models.TopologyNode, subscriptions []*pubsubpb.Subscription, services []models.ServiceSummary, rootID string) inferResult {
+	directTopics := make(map[string]bool)
+	directSubscriptions := make(map[string]bool)
+	for _, node := range directNodes {
+		switch node.Kind {
+		case "pubsub_topic":
+			directTopics[node.Name] = true
+		case "pubsub_subscription":
+			directSubscriptions[node.Name] = true
+		}
+	}
+
+	var result inferResult
+	for _, sub := range subscriptions {
+		if sub == nil {
+			continue
+		}
+		topicIsDirect := directTopics[sub.Topic]
+		subscriptionIsDirect := directSubscriptions[sub.Name]
+		if !topicIsDirect && !subscriptionIsDirect {
+			continue
+		}
+
+		topicID := "pubsub_topic:" + sub.Topic
+		subscriptionID := "pubsub_subscription:" + sub.Name
+		result.nodes = append(result.nodes,
+			models.TopologyNode{ID: topicID, Kind: "pubsub_topic", Name: sub.Topic},
+			models.TopologyNode{ID: subscriptionID, Kind: "pubsub_subscription", Name: sub.Name},
+		)
+		result.edges = append(result.edges, models.TopologyEdge{
+			From: topicID, To: subscriptionID, Relationship: "has_subscription",
+			Evidence: "subscription_metadata", Confidence: "high",
+		})
+
+		if sub.PushConfig == nil || sub.PushConfig.PushEndpoint == "" {
+			continue
+		}
+		service, ok := matchTopologyCloudRunService(sub.PushConfig.PushEndpoint, services)
+		if !ok {
+			continue
+		}
+		serviceID := "cloudrun:" + service.Name
+		if serviceID == "cloudrun:" {
+			continue
+		}
+		result.nodes = append(result.nodes, models.TopologyNode{
+			ID: serviceID, Kind: "cloudrun_service", Name: service.Name, Region: service.Region, URL: service.URL,
+		})
+		if topicIsDirect {
+			result.edges = append(result.edges, models.TopologyEdge{
+				From: topicID, To: serviceID, Relationship: "triggers",
+				Evidence: "push_subscription:" + sub.Name, Confidence: "high",
+			})
+		} else if subscriptionIsDirect && serviceID != rootID {
+			result.edges = append(result.edges, models.TopologyEdge{
+				From: subscriptionID, To: serviceID, Relationship: "pushes_to",
+				Evidence: "push_subscription:" + sub.Name, Confidence: "high",
+			})
+		}
+	}
+	return result
+}
+
+func matchTopologyCloudRunService(endpoint string, services []models.ServiceSummary) (models.ServiceSummary, bool) {
+	ordered := append([]models.ServiceSummary(nil), services...)
+	sort.SliceStable(ordered, func(i, j int) bool { return len(ordered[i].URL) > len(ordered[j].URL) })
+	for _, service := range ordered {
+		if service.URL != "" && topologyEndpointMatchesService(endpoint, service.URL) {
+			return service, true
+		}
+	}
+	return models.ServiceSummary{}, false
+}
+
+func topologyEndpointMatchesService(endpoint, serviceURL string) bool {
+	serviceURL = strings.TrimRight(strings.TrimSpace(serviceURL), "/")
+	endpoint = strings.TrimSpace(endpoint)
+	if serviceURL == "" || !strings.HasPrefix(endpoint, serviceURL) {
+		return false
+	}
+	if len(endpoint) == len(serviceURL) {
+		return true
+	}
+	switch endpoint[len(serviceURL)] {
+	case '/', '?', '#':
+		return true
+	default:
+		return false
+	}
 }
 
 // renderRelationships converts nodes and edges into flat human-readable statements
@@ -363,6 +495,19 @@ func dedupNodes(nodes []models.TopologyNode) []models.TopologyNode {
 		if !seen[n.ID] {
 			seen[n.ID] = true
 			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func dedupTopologyEdges(edges []models.TopologyEdge) []models.TopologyEdge {
+	seen := make(map[string]bool, len(edges))
+	out := make([]models.TopologyEdge, 0, len(edges))
+	for _, edge := range edges {
+		key := edge.From + "\x00" + edge.To + "\x00" + edge.Relationship + "\x00" + edge.Evidence
+		if !seen[key] {
+			seen[key] = true
+			out = append(out, edge)
 		}
 	}
 	return out

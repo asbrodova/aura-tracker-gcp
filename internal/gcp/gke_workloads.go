@@ -71,7 +71,7 @@ func (a *gcpAdapter) dialSecurityK8sGateway(ctx context.Context, projectID, loca
 	if err != nil {
 		return nil, fmt.Errorf("connect gateway token source: %w", err)
 	}
-	return dialGatewayWithTokenSource(endpoint, tokenSource), nil
+	return dialGatewayWithTokenSource(endpoint, tokenSource, a.limiter), nil
 }
 
 // dialK8s fetches cluster endpoint + CA cert from the GKE API and constructs
@@ -100,7 +100,7 @@ func (a *gcpAdapter) dialK8s(ctx context.Context, projectID, location, clusterNa
 	if c.MasterAuth != nil {
 		caCert = c.MasterAuth.ClusterCaCertificate
 	}
-	return dialCluster(ctx, c.Endpoint, caCert)
+	return dialCluster(ctx, c.Endpoint, caCert, a.limiter)
 }
 
 // wrapK8sError converts raw K8s REST HTTP errors into typed gcp errors so that
@@ -189,11 +189,11 @@ func (a *gcpAdapter) ListGKEServices(ctx context.Context, req models.ListGKEServ
 		return models.ListGKEServicesResponse{}, err
 	}
 
-	services, err := k8s.listServices(ctx, req.Namespace)
+	services, truncated, err := k8s.listServices(ctx, req.Namespace)
 	if err != nil {
 		return models.ListGKEServicesResponse{}, wrapK8sErr("gke.ListGKEServices", err)
 	}
-	return models.ListGKEServicesResponse{Services: services}, nil
+	return models.ListGKEServicesResponse{Services: services, Truncated: truncated}, nil
 }
 
 func (a *gcpAdapter) ListGKEIngresses(ctx context.Context, req models.ListGKEIngressesRequest) (models.ListGKEIngressesResponse, error) {
@@ -208,11 +208,11 @@ func (a *gcpAdapter) ListGKEIngresses(ctx context.Context, req models.ListGKEIng
 		return models.ListGKEIngressesResponse{}, err
 	}
 
-	ingresses, err := k8s.listIngresses(ctx, req.Namespace)
+	ingresses, truncated, err := k8s.listIngresses(ctx, req.Namespace)
 	if err != nil {
 		return models.ListGKEIngressesResponse{}, wrapK8sErr("gke.ListGKEIngresses", err)
 	}
-	return models.ListGKEIngressesResponse{Ingresses: ingresses}, nil
+	return models.ListGKEIngressesResponse{Ingresses: ingresses, Truncated: truncated}, nil
 }
 
 func (a *gcpAdapter) ListGKENetworkPolicies(ctx context.Context, req models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error) {
@@ -227,9 +227,9 @@ func (a *gcpAdapter) ListGKENetworkPolicies(ctx context.Context, req models.List
 		return models.ListGKENetworkPoliciesResponse{}, err
 	}
 
-	policies, err := k8s.listNetworkPolicies(ctx, req.Namespace)
+	policies, truncated, err := k8s.listNetworkPolicies(ctx, req.Namespace)
 	if err != nil {
 		return models.ListGKENetworkPoliciesResponse{}, wrapK8sErr("gke.ListGKENetworkPolicies", err)
 	}
-	return models.ListGKENetworkPoliciesResponse{Policies: policies}, nil
+	return models.ListGKENetworkPoliciesResponse{Policies: policies, Truncated: truncated}, nil
 }

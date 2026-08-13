@@ -19,6 +19,9 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 	}
 
 	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceEventarc)
+	if err := ctx.Err(); err != nil {
+		return models.ListTriggersResponse{}, fmt.Errorf("eventarc.ListTriggers: %w", err)
+	}
 	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
@@ -55,7 +58,12 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return models.ListTriggersResponse{}, fmt.Errorf("eventarc.ListTriggers: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return models.ListTriggersResponse{}, fmt.Errorf("eventarc.ListTriggers: %w", err)
+	}
 
 	if triggers == nil {
 		triggers = []models.TriggerSummary{}

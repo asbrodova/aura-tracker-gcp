@@ -537,7 +537,7 @@ Firestore is available through the `datastores` module (Phase 2), which also cov
 
 **Module:** `cloudsql`  
 **IAM role:** `roles/cloudsql.viewer`  
-Recommender signals are included by default (12h cache, safe 429 handling). Disable with `RECOMMENDER_ENABLED=false`.
+Recommender signals are included by default. Successful results are cached for 12 hours. Valid cache hits remain usable during a quota block; uncached reads stop until the server-provided retry time, the minute window, or the next Pacific-midnight daily reset. Disable with `RECOMMENDER_ENABLED=false`.
 
 ```json
 {
@@ -711,7 +711,7 @@ Each resource also returns a `reasons` array the LLM uses to suggest concrete ac
 
 **Band mapping:** 🟢 80–100 Healthy · 🟡 50–79 Warning · 🔴 0–49 Critical
 
-Scores are cached in-process for **5 minutes**. Recommender signals (idle/overprovisioned + estimated monthly USD savings) are **active by default** with a 12-hour result cache and safe quota handling. Set `RECOMMENDER_ENABLED=false` to disable.
+Scores are cached in-process for **5 minutes**. Recommender signals (idle/overprovisioned + estimated monthly USD savings) are **active by default** with a 12-hour result cache. Quota gates are maintained per recommender: cached signals remain available, uncached reads stop until the reported retry time, and requests resume automatically afterward. Set `RECOMMENDER_ENABLED=false` to disable.
 
 → Scoring formula, signal weights per resource type, GCP Recommender integration, and quota details: [Aura Score](https://github.com/asbrodova/aura-tracker-gcp/wiki/Aura-Score)
 
@@ -817,6 +817,9 @@ The idempotent `scripts/setup-iam.sh` script creates or updates the `aura-tracke
 ```bash
 PROJECT_ID=my-project bash scripts/setup-iam.sh
 
+# Provision only a matching subset of tool modules (resources stay available)
+PROJECT_ID=my-project MODULES=cloudrun,monitoring bash scripts/setup-iam.sh
+
 # Also authorize a developer for keyless local service-account impersonation
 PROJECT_ID=my-project LOCAL_IMPERSONATION_PRINCIPAL=user:developer@example.com \
   bash scripts/setup-iam.sh
@@ -838,7 +841,7 @@ PROJECT_ID=my-project COST_REASONING_ENABLED=true \
   BILLING_EXPORT_DATASET=cloud_billing bash scripts/setup-iam.sh
 ```
 
-Re-running the script is safe: it keeps an existing service account and reconciles the requested roles and optional APIs. It always enables the IAM Service Account Credentials API so its printed impersonated-ADC command works. `LOCAL_IMPERSONATION_PRINCIPAL` optionally grants `roles/iam.serviceAccountTokenCreator` on this service account only; it accepts `user:`, `group:`, and `serviceAccount:` principals. Setup flags are additive—setting a flag to `false` or omitting it does not disable an API or revoke a previously granted role. Run it as a team admin with permission to change project IAM; API-enabling options also require permission to enable services.
+Re-running the script is safe: it keeps an existing service account and reconciles the APIs and read-only roles required by `MODULES` (`all` by default, matching the server default; `none` keeps only the always-on resources). This includes Storage Bucket Viewer for bucket enumeration in addition to Storage Object Viewer. It always enables the IAM Service Account Credentials API so its printed impersonated-ADC command works. `LOCAL_IMPERSONATION_PRINCIPAL` optionally grants `roles/iam.serviceAccountTokenCreator` on this service account only; it accepts `user:`, `group:`, and `serviceAccount:` principals. Setup flags are additive—setting a flag to `false` or omitting it does not disable an API or revoke a previously granted role. Run it as a team admin with permission to change project IAM; API-enabling options also require permission to enable services.
 
 → Full per-module IAM role table: [Getting Started — IAM Setup](https://github.com/asbrodova/aura-tracker-gcp/wiki/Getting-Started#iam-setup)
 
@@ -852,7 +855,7 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `ANONYMIZE_ENABLED` | No | Set `true` to enable PII/credential scrubbing on all tool outputs |
 | `ANONYMIZE_CONFIG_PATH` | No | Path to a YAML config file for the anonymization engine (custom patterns, whitelist, audit mode) |
 | `ANONYMIZE_PROJECT_ID` | No | Set `true` to mask an unaliased project ID as `[GCP_PROJECT_ID]`. Aliased projects are always returned as their aliases regardless of this setting. |
-| `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Aura Scores include idle/over-provisioned signals with estimated monthly USD savings. Results are cached for 12 h; 429 quota errors emit an explicit LLM stop signal instead of retrying. Requires the Recommender Viewer role. |
+| `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Aura Scores include idle/over-provisioned signals with estimated monthly USD savings. Successful results are cached for 12 h. Per-recommender quota gates preserve valid cache hits, block uncached reads until an RFC3339 `retry_at`, and resume automatically. Gate state is process-local. Requires the Recommender Viewer role. |
 | `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to register the `gcp_export_recommendations_to_bq` tool. Off by default. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name used by `gcp_export_recommendations_to_bq`. Overrides `recommender_export.dataset` in `~/.aura-tracker.yaml`. |
 | `COST_REASONING_ENABLED` | No | Set `true` to register `gcp_cost_explain`. Off by default; `BILLING_EXPORT_DATASET` is then required. |
@@ -869,7 +872,7 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `GRAPHVIZ_DOT_PATH` | No | Path to Graphviz `dot` for SVG diagram generation. Auto-discovered on `PATH`; set to `/usr/bin/dot` in the official container. Mermaid and Graphviz DOT source do not require it. |
 | `MCP_TRANSPORT` | No | Transport mode: `stdio` (default, for Claude Desktop) or `sse` (for Cloud Run / web-based MCP clients) |
 | `PORT` | No | HTTP port when `MCP_TRANSPORT=sse`. Cloud Run sets this automatically. Defaults to `8080`. |
-| `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server (e.g. `https://my-service-xyz.run.app`). Non-loopback URLs must use HTTPS. Defaults to `http://localhost:PORT` for local testing. |
+| `MCP_BASE_URL` | No | Public HTTPS URL of the SSE server, optionally including its preserved route prefix (e.g. `https://my-service-xyz.run.app/mcp`). Non-loopback URLs must use HTTPS. Defaults to `http://localhost:PORT` for local testing. |
 | `MCP_AUTH_MODE` | No | SSE authentication mode: `required` (default) or `disabled`. Disabled mode is accepted only for a loopback base URL and binds the listener to loopback. |
 | `MCP_AUTH_AUDIENCE` | No | Expected Google ID-token audience. Defaults to `MCP_BASE_URL` without a trailing slash. |
 | `MCP_AUTH_ALLOWED_EMAILS` | No | Comma-separated allowlist of verified email claims. Required for a public SSE endpoint unless the broad-access override below is explicitly enabled. |
@@ -950,6 +953,9 @@ PROJECT_ID=my-project LOCAL_IMPERSONATION_PRINCIPAL=user:developer@example.com \
 # Reconcile mutation roles (gcp_gke_scale_deployment, gcp_cloudrun_update_traffic)
 PROJECT_ID=my-project MUTATION_ROLES=true bash scripts/setup-iam.sh
 
+# Match a restricted --modules deployment; always-on resources are included
+PROJECT_ID=my-project MODULES=cloudrun,monitoring bash scripts/setup-iam.sh
+
 # Enable Recommender API and reconcile its viewer role
 PROJECT_ID=my-project RECOMMENDER_ENABLED=true bash scripts/setup-iam.sh
 
@@ -967,7 +973,7 @@ PROJECT_ID=my-project COST_REASONING_ENABLED=true \
   bash scripts/setup-iam.sh
 ```
 
-The optional flags can be combined in one invocation and also work when the service account already exists. The script always enables `iamcredentials.googleapis.com`; when `LOCAL_IMPERSONATION_PRINCIPAL` is set, it grants that principal Service Account Token Creator on this service account only so `gcloud auth application-default login --impersonate-service-account=...` can succeed without a key file. `SECURITY_AUDIT_ENABLED=true` enables the project-security and Connect Gateway APIs and grants read-only Cloud Asset, IAM service-account, Secret Manager, Compute, Functions, Recommender IAM, Service Usage, GKE Hub Viewer, and Gateway Reader access. Set `SECURITY_AUDIT_FLEET_PROJECT_ID` when the fleet host differs; set `SECURITY_AUDIT_ORGANIZATION_ID` to let an organization admin add the read-only ancestor IAM/deny roles. Kubernetes object collection also needs the RBAC template in `deploy/security-audit-rbac.yaml.tmpl`. `RECOMMENDER_ENABLED=true` and `SERVICE_HEALTH_ENABLED=true` each enable their API and grant the corresponding viewer role; `MUTATION_ROLES=true` grants the mutation roles. `COST_REASONING_ENABLED=true` enables BigQuery and Cloud Asset Inventory, grants BigQuery Job User on the query project, grants Cloud Asset Viewer on the workload project, and grants BigQuery Data Viewer on the export project. The script uses a project-wide Data Viewer binding for idempotent setup; prefer a dataset-level binding in tightly scoped production environments. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
+The optional flags can be combined in one invocation and also work when the service account already exists. `MODULES` accepts the same comma-separated module names as `--modules`; omitted/`all` provisions the default server surface, while `none` provisions only the four always-on resources. The script always enables `iamcredentials.googleapis.com`; when `LOCAL_IMPERSONATION_PRINCIPAL` is set, it grants that principal Service Account Token Creator on this service account only so `gcloud auth application-default login --impersonate-service-account=...` can succeed without a key file. The default `security` module receives its project-level read-only dependencies automatically. `SECURITY_AUDIT_ENABLED=true` additionally reconciles a distinct fleet project and optional organization IAM/deny readers; Kubernetes object collection also needs the RBAC template in `deploy/security-audit-rbac.yaml.tmpl`. `RECOMMENDER_ENABLED=true` forces Recommender setup even for a module subset, and `SERVICE_HEALTH_ENABLED=true` adds its API and viewer role; `MUTATION_ROLES=true` grants mutation roles. `COST_REASONING_ENABLED=true` enables BigQuery and Cloud Asset Inventory, grants BigQuery Job User on the query project, grants Cloud Asset Viewer on the workload project, and grants BigQuery Data Viewer on the export project. The script uses a project-wide Data Viewer binding for idempotent setup; prefer a dataset-level binding in tightly scoped production environments. These setup switches are additive: `false` does not disable APIs or revoke roles. Disable Recommender at runtime with the server's `RECOMMENDER_ENABLED=false`; platform-health collection is controlled per diagnosis with `include_platform_health=false`.
 
 **For developers joining the team:** you do not need to run the admin setup. Ask an admin to set `LOCAL_IMPERSONATION_PRINCIPAL=user:YOUR_EMAIL` when running it, then use the printed impersonated-ADC command. Direct user ADC also works if your own account already has every required project role.
 
@@ -1214,7 +1220,7 @@ The server uses **Hexagonal Architecture** (Ports and Adapters) to ensure the MC
 
 **Dependency rule:** `internal/mcp` never imports `internal/gcp`. Ordinary tool modules depend on `ports/`; incident diagnosis, cost reasoning, diagrams, and environment drift delegate to deterministic application-layer engines whose narrow `DataSource` interfaces are satisfied by the same `GCPService`. `internal/safety` sits at the port boundary—it implements `GCPService` and wraps the real adapter, wired exclusively in `cmd/`. The model sees only tool names and JSON schemas.
 
-Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. SSE requires a Google-signed ID token in `Authorization: Bearer <token>` by default; validation covers signature, expiry, audience, subject, and the optional verified-email allowlist. Public base URLs must use HTTPS. The MCP protocol layer is otherwise identical in both modes.
+Set `MCP_TRANSPORT=sse` to switch from stdio to HTTP/SSE for Cloud Run deployments. SSE requires a Google Accounts-issued ID token in `Authorization: Bearer <token>` by default; validation covers signature, issuer, expiry, audience, subject, and the optional verified-email allowlist. Public base URLs must use HTTPS. Session capabilities are bound to the token issuer and subject, so a refreshed token for the same identity can continue a session but a different identity cannot inject messages into it. The SDK keeps SSE sessions in process memory; run a single server instance unless the deployment provides session-affine routing to the same instance for the initial stream and every message. Bearer-authenticated SSE currently targets same-origin or non-browser MCP clients that can set the `Authorization` header; native cross-origin `EventSource` clients are not supported. The MCP protocol layer is otherwise identical in both modes.
 
 → Architectural decisions, hexagonal boundary rules, SSE deployment, and contributor guide: [Architecture & Contributing](https://github.com/asbrodova/aura-tracker-gcp/wiki/Architecture-and-Contributing)
 

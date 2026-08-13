@@ -53,10 +53,11 @@ type IAMResources struct {
 	log          *slog.Logger
 	environments *environments.Registry
 	placeholder  string
+	permissions  []string
 }
 
-func NewIAMResources(svc ports.IAMService, log *slog.Logger, registry *environments.Registry, placeholder string) *IAMResources {
-	return &IAMResources{svc: svc, log: log, environments: registry, placeholder: placeholder}
+func NewIAMResources(svc ports.IAMService, log *slog.Logger, registry *environments.Registry, placeholder string, permissions []string) *IAMResources {
+	return &IAMResources{svc: svc, log: log, environments: registry, placeholder: placeholder, permissions: append([]string(nil), permissions...)}
 }
 
 func resolveEnvironment(registry *environments.Registry, selector, placeholder string) (environments.Environment, error) {

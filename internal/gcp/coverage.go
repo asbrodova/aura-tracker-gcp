@@ -29,6 +29,7 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 	}
 
 	var nodes []computeNode
+	var warnings []string
 
 	// Cloud Run services.
 	if a.runSvc != nil {
@@ -37,15 +38,19 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 			regions = []string{"-"} // wildcard
 		}
 		for _, region := range regions {
-			parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, region)
 			svcResp, err := a.ListServices(ctx, models.ListServicesRequest{ProjectID: req.ProjectID, Region: region})
 			if err == nil {
 				for _, s := range svcResp.Services {
-					urn := fmt.Sprintf("urn:gcp:run:%s:%s:cloud_run_service/%s", region, req.ProjectID, s.Name)
+					nodeRegion := s.Region
+					if nodeRegion == "" {
+						nodeRegion = region
+					}
+					urn := fmt.Sprintf("urn:gcp:run:%s:%s:cloud_run_service/%s", nodeRegion, req.ProjectID, s.Name)
 					nodes = append(nodes, computeNode{urn: urn, kind: models.KindCloudRunService, name: s.Name})
 				}
+			} else {
+				warnings = append(warnings, fmt.Sprintf("Cloud Run inventory unavailable for region %q: %v", region, err))
 			}
-			_ = parent // suppress unused if no error path uses it
 		}
 	}
 
@@ -55,11 +60,13 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 			Nodes:       []models.NodeCoverage{},
 			Summary:     models.CoverageSummary{},
+			Warnings:    warnings,
 		}, nil
 	}
 
 	// ── Step 2: build "has_traces" set ───────────────────────────────────
 	traceNames := map[string]bool{}
+	traceAvailable := a.traceClient != nil
 	if a.traceClient != nil {
 		traceResp, err := a.ListTraceDependencyEdges(ctx, models.ListTraceDependencyEdgesRequest{
 			ProjectID:     req.ProjectID,
@@ -70,12 +77,21 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 				traceNames[strings.ToLower(e.Caller)] = true
 				traceNames[strings.ToLower(e.Callee)] = true
 			}
+			if traceResp.Truncated {
+				traceAvailable = false
+				warnings = append(warnings, "Trace inventory was truncated; trace coverage may be understated. Continue from the returned page token to inspect the remaining traces.")
+			}
+		} else {
+			traceAvailable = false
+			warnings = append(warnings, "Trace coverage unavailable: "+err.Error())
 		}
+	} else {
+		warnings = append(warnings, "Trace coverage unavailable: Cloud Trace client is not configured")
 	}
 
 	// ── Step 3: build "has_alerts" set ───────────────────────────────────
 	alertNames := map[string]bool{}
-	alertInventoryWarning := ""
+	alertsAvailable := a.monitoringSvc != nil
 	if a.monitoringSvc != nil {
 		alertResp, err := a.ListAlertPolicies(ctx, models.ListAlertPoliciesRequest{ProjectID: req.ProjectID, PageSize: maxInventoryPageSize})
 		if err == nil {
@@ -90,11 +106,15 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 				}
 			}
 			if alertResp.Truncated {
-				alertInventoryWarning = "Alert policy inventory was truncated; alert coverage may be understated. Narrow the project inventory or inspect the next page directly."
+				alertsAvailable = false
+				warnings = append(warnings, "Alert policy inventory was truncated; alert coverage may be understated. Narrow the project inventory or inspect the next page directly.")
 			}
 		} else {
-			alertInventoryWarning = "Alert policy inventory could not be read; alert coverage may be understated: " + err.Error()
+			alertsAvailable = false
+			warnings = append(warnings, "Alert policy inventory unavailable: "+err.Error())
 		}
+	} else {
+		warnings = append(warnings, "Alert policy inventory unavailable: Monitoring client is not configured")
 	}
 
 	// ── Step 4: per-node metrics + log checks ─────────────────────────────
@@ -105,10 +125,25 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 	for _, n := range nodes {
 		nameLower := strings.ToLower(n.name)
 
-		hasMetrics := a.checkHasMetrics(ctx, req.ProjectID, n.name, startTime, now)
+		hasMetrics, metricsErr := a.checkHasMetrics(ctx, req.ProjectID, n.name, startTime, now)
 		hasTraces := traceNames[nameLower]
-		hasLogs := a.checkHasLogs(ctx, req.ProjectID, n.name, startTime)
+		hasLogs, logsErr := a.checkHasLogs(ctx, req.ProjectID, n.name, startTime)
 		hasAlerts := alertNames[nameLower]
+		unavailable := make([]string, 0, 4)
+		if metricsErr != nil {
+			unavailable = append(unavailable, "metrics")
+			warnings = append(warnings, fmt.Sprintf("Metrics coverage unavailable for %q: %v", n.name, metricsErr))
+		}
+		if !traceAvailable && !hasTraces {
+			unavailable = append(unavailable, "traces")
+		}
+		if logsErr != nil {
+			unavailable = append(unavailable, "logs")
+			warnings = append(warnings, fmt.Sprintf("Log coverage unavailable for %q: %v", n.name, logsErr))
+		}
+		if !alertsAvailable && !hasAlerts {
+			unavailable = append(unavailable, "alerts")
+		}
 
 		score := coverageScore(hasMetrics, hasTraces, hasLogs, hasAlerts, n.otelSidecar)
 
@@ -117,12 +152,13 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 			NodeKind: n.kind,
 			NodeName: n.name,
 			Coverage: models.ObservabilityBlock{
-				HasMetrics:    hasMetrics,
-				HasTraces:     hasTraces,
-				HasLogs:       hasLogs,
-				HasAlerts:     hasAlerts,
-				OtelSidecar:   n.otelSidecar,
-				CoverageScore: score,
+				HasMetrics:         hasMetrics,
+				HasTraces:          hasTraces,
+				HasLogs:            hasLogs,
+				HasAlerts:          hasAlerts,
+				OtelSidecar:        n.otelSidecar,
+				CoverageScore:      score,
+				UnavailableSignals: unavailable,
 			},
 		})
 	}
@@ -130,9 +166,7 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 	// ── Step 5: build summary ─────────────────────────────────────────────
 	summary := buildCoverageSummary(coverages)
 	recs := buildRecommendations(coverages)
-	if alertInventoryWarning != "" {
-		recs = append([]string{alertInventoryWarning}, recs...)
-	}
+	sort.Strings(warnings)
 
 	return models.ObservabilityCoverageResponse{
 		ProjectID:       req.ProjectID,
@@ -140,14 +174,15 @@ func (a *gcpAdapter) GetObservabilityCoverage(ctx context.Context, req models.Ge
 		Nodes:           coverages,
 		Summary:         summary,
 		Recommendations: recs,
+		Warnings:        warnings,
 	}, nil
 }
 
 // checkHasMetrics returns true if any Cloud Monitoring time series exists for
 // the Cloud Run service in the last 24 hours.
-func (a *gcpAdapter) checkHasMetrics(ctx context.Context, projectID, serviceName string, start, end time.Time) bool {
+func (a *gcpAdapter) checkHasMetrics(ctx context.Context, projectID, serviceName string, start, end time.Time) (bool, error) {
 	if a.metric == nil {
-		return false
+		return false, fmt.Errorf("monitoring metric client is unavailable")
 	}
 	filter := fmt.Sprintf(`metric.type = "run.googleapis.com/request_count" AND resource.labels.service_name = "%s"`, serviceName)
 	pbReq := &monitoringpb.ListTimeSeriesRequest{
@@ -161,14 +196,14 @@ func (a *gcpAdapter) checkHasMetrics(ctx context.Context, projectID, serviceName
 	}
 	it := a.metric.ListTimeSeries(ctx, pbReq)
 	_, err := it.Next()
-	return err == nil || err != iterator.Done
+	return coverageSignalPresence(err)
 }
 
 // checkHasLogs returns true if at least one log entry exists for the service
 // in the last 24 hours.
-func (a *gcpAdapter) checkHasLogs(ctx context.Context, projectID, serviceName string, since time.Time) bool {
+func (a *gcpAdapter) checkHasLogs(ctx context.Context, projectID, serviceName string, since time.Time) (bool, error) {
 	if a.logAdmin == nil {
-		return false
+		return false, fmt.Errorf("logging client is unavailable")
 	}
 	sinceRFC := since.Format(time.RFC3339)
 	filter := fmt.Sprintf(
@@ -182,7 +217,18 @@ func (a *gcpAdapter) checkHasLogs(ctx context.Context, projectID, serviceName st
 		logadmin.PageSize(1),
 	)
 	_, err := it.Next()
-	return err == nil
+	return coverageSignalPresence(err)
+}
+
+func coverageSignalPresence(err error) (bool, error) {
+	switch err {
+	case nil:
+		return true, nil
+	case iterator.Done:
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // coverageScore computes the 0–1 weighted signal coverage score per the plan.
@@ -243,13 +289,13 @@ func buildCoverageSummary(coverages []models.NodeCoverage) models.CoverageSummar
 func buildRecommendations(coverages []models.NodeCoverage) []string {
 	var noTraces, noMetrics, noAlerts, noOtel []string
 	for _, c := range coverages {
-		if !c.Coverage.HasTraces {
+		if !c.Coverage.HasTraces && !coverageSignalUnavailable(c.Coverage, "traces") {
 			noTraces = append(noTraces, c.NodeName)
 		}
-		if !c.Coverage.HasMetrics {
+		if !c.Coverage.HasMetrics && !coverageSignalUnavailable(c.Coverage, "metrics") {
 			noMetrics = append(noMetrics, c.NodeName)
 		}
-		if !c.Coverage.HasAlerts {
+		if !c.Coverage.HasAlerts && !coverageSignalUnavailable(c.Coverage, "alerts") {
 			noAlerts = append(noAlerts, c.NodeName)
 		}
 		if !c.Coverage.OtelSidecar {
@@ -272,4 +318,13 @@ func buildRecommendations(coverages []models.NodeCoverage) []string {
 		recs = append(recs, fmt.Sprintf("%d service(s) have no OTel sidecar — see https://opentelemetry.io/docs/instrumentation/", n))
 	}
 	return recs
+}
+
+func coverageSignalUnavailable(coverage models.ObservabilityBlock, signal string) bool {
+	for _, unavailable := range coverage.UnavailableSignals {
+		if unavailable == signal {
+			return true
+		}
+	}
+	return false
 }

@@ -2,16 +2,19 @@ package gcp
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"cloud.google.com/go/bigquery"
+	"google.golang.org/api/iterator"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
 const (
-	maxDatasets = 100
-	maxTables   = 200
-	maxFields   = 500
+	defaultDatasetPageSize = 100
+	defaultTablePageSize   = 200
+	maxFields              = 500
 )
 
 func (a *gcpAdapter) ListDatasets(ctx context.Context, req models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
@@ -20,19 +23,23 @@ func (a *gcpAdapter) ListDatasets(ctx context.Context, req models.ListDatasetsRe
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
+	pageSize, err := bigQueryInventoryPageSize(req.PageSize, defaultDatasetPageSize)
+	if err != nil {
+		return models.ListDatasetsResponse{}, fmt.Errorf("bigquery.ListDatasets: %w", err)
+	}
 
 	it := a.bq.DatasetsInProject(ctx, req.ProjectID)
-	var datasets []models.DatasetSummary
-	for len(datasets) < maxDatasets {
-		ds, err := it.Next()
-		if err != nil {
-			if isIteratorDone(err) {
-				break
-			}
-			return models.ListDatasetsResponse{}, wrapGCPError("bigquery.ListDatasets", err)
-		}
+	var handles []*bigquery.Dataset
+	nextPageToken, err := iterator.NewPager(it, pageSize, req.PageToken).NextPage(&handles)
+	if err != nil {
+		return models.ListDatasetsResponse{}, wrapGCPError("bigquery.ListDatasets", err)
+	}
+	datasets := make([]models.DatasetSummary, 0, len(handles))
+	var metadataErrors []models.ToolError
+	for _, ds := range handles {
 		meta, err := ds.Metadata(ctx)
 		if err != nil {
+			metadataErrors = append(metadataErrors, bigQueryMetadataToolError("bigquery.datasets.get", ds.DatasetID, err))
 			continue
 		}
 		datasets = append(datasets, models.DatasetSummary{
@@ -41,10 +48,11 @@ func (a *gcpAdapter) ListDatasets(ctx context.Context, req models.ListDatasetsRe
 			Labels:   meta.Labels,
 		})
 	}
-	if datasets == nil {
-		datasets = []models.DatasetSummary{}
-	}
-	return models.ListDatasetsResponse{ProjectID: req.ProjectID, Datasets: datasets}, nil
+	sortToolErrors(metadataErrors)
+	return models.ListDatasetsResponse{
+		ProjectID: req.ProjectID, Datasets: datasets, NextPageToken: nextPageToken,
+		Truncated: nextPageToken != "", Errors: metadataErrors,
+	}, nil
 }
 
 func (a *gcpAdapter) ListTables(ctx context.Context, req models.ListTablesRequest) (models.ListTablesResponse, error) {
@@ -53,19 +61,26 @@ func (a *gcpAdapter) ListTables(ctx context.Context, req models.ListTablesReques
 	}
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
+	if req.DatasetID == "" {
+		return models.ListTablesResponse{}, fmt.Errorf("bigquery.ListTables: dataset_id is required")
+	}
+	pageSize, err := bigQueryInventoryPageSize(req.PageSize, defaultTablePageSize)
+	if err != nil {
+		return models.ListTablesResponse{}, fmt.Errorf("bigquery.ListTables: %w", err)
+	}
 
 	it := a.bq.DatasetInProject(req.ProjectID, req.DatasetID).Tables(ctx)
-	var tables []models.TableSummary
-	for len(tables) < maxTables {
-		t, err := it.Next()
+	var handles []*bigquery.Table
+	nextPageToken, err := iterator.NewPager(it, pageSize, req.PageToken).NextPage(&handles)
+	if err != nil {
+		return models.ListTablesResponse{}, wrapGCPError("bigquery.ListTables", err)
+	}
+	tables := make([]models.TableSummary, 0, len(handles))
+	var metadataErrors []models.ToolError
+	for _, table := range handles {
+		meta, err := table.Metadata(ctx)
 		if err != nil {
-			if isIteratorDone(err) {
-				break
-			}
-			return models.ListTablesResponse{}, wrapGCPError("bigquery.ListTables", err)
-		}
-		meta, err := t.Metadata(ctx)
-		if err != nil {
+			metadataErrors = append(metadataErrors, bigQueryMetadataToolError("bigquery.tables.get", table.TableID, err))
 			continue
 		}
 		partField := ""
@@ -73,17 +88,37 @@ func (a *gcpAdapter) ListTables(ctx context.Context, req models.ListTablesReques
 			partField = meta.TimePartitioning.Field
 		}
 		tables = append(tables, models.TableSummary{
-			ID:             t.TableID,
+			ID:             table.TableID,
 			Type:           string(meta.Type),
 			NumRows:        meta.NumRows,
 			SizeGB:         float64(meta.NumBytes) / 1e9,
 			PartitionField: partField,
 		})
 	}
-	if tables == nil {
-		tables = []models.TableSummary{}
+	sortToolErrors(metadataErrors)
+	return models.ListTablesResponse{
+		ProjectID: req.ProjectID, DatasetID: req.DatasetID, Tables: tables,
+		NextPageToken: nextPageToken, Truncated: nextPageToken != "", Errors: metadataErrors,
+	}, nil
+}
+
+func bigQueryInventoryPageSize(requested, defaultValue int) (int, error) {
+	if requested == 0 {
+		return defaultValue, nil
 	}
-	return models.ListTablesResponse{ProjectID: req.ProjectID, DatasetID: req.DatasetID, Tables: tables}, nil
+	return inventoryPageSize(requested)
+}
+
+func bigQueryMetadataToolError(api, resource string, err error) models.ToolError {
+	wrapped := wrapGCPError(api, err)
+	result := models.ToolError{FailingAPI: api, Message: fmt.Sprintf("%s: %v", resource, wrapped)}
+	var denied *PermissionDeniedError
+	if errors.As(wrapped, &denied) {
+		result.MissingIAMPermissions = denied.MissingPermissions
+	}
+	var retriable *RetriableError
+	result.Retriable = errors.As(wrapped, &retriable)
+	return result
 }
 
 func (a *gcpAdapter) GetTableSchema(ctx context.Context, req models.GetTableSchemaRequest) (models.TableSchemaResponse, error) {

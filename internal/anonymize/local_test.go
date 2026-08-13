@@ -101,6 +101,174 @@ func TestScrubGCPAPIKey(t *testing.T) {
 	}
 }
 
+func TestLocalScrubberDeepScrubsToolResult(t *testing.T) {
+	const sentinel = "privacy@example.com"
+	result := &mcp.CallToolResult{
+		Result: mcp.Result{Meta: &mcp.Meta{
+			ProgressToken: sentinel,
+			AdditionalFields: map[string]any{
+				"nested": map[string]any{"owner": sentinel},
+			},
+		}},
+		Content: []mcp.Content{
+			mcp.TextContent{
+				Type: "text", Text: sentinel,
+				Meta:      &mcp.Meta{AdditionalFields: map[string]any{"owner": sentinel}},
+				Annotated: mcp.Annotated{Annotations: &mcp.Annotations{LastModified: sentinel}},
+			},
+			mcp.ResourceLink{
+				Type: "resource_link", URI: "gcp://" + sentinel + "/logs", Name: sentinel, Description: sentinel,
+				Annotated: mcp.Annotated{Annotations: &mcp.Annotations{LastModified: sentinel}},
+			},
+			mcp.NewEmbeddedResource(mcp.TextResourceContents{
+				URI: "gcp://" + sentinel + "/resource", Text: sentinel,
+				Meta: map[string]any{"owner": sentinel},
+			}),
+		},
+		StructuredContent: map[string]any{
+			"owner":           sentinel,
+			"key-" + sentinel: map[string]any{"nested": sentinel},
+		},
+	}
+	// Add outer embedded-resource metadata after construction.
+	embedded := result.Content[2].(mcp.EmbeddedResource)
+	embedded.Meta = &mcp.Meta{AdditionalFields: map[string]any{"owner": sentinel}}
+	embedded.Annotations = &mcp.Annotations{LastModified: sentinel}
+	result.Content[2] = embedded
+
+	before, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := newScrubber(t).Scrub(context.Background(), result)
+	if err != nil {
+		t.Fatalf("Scrub() error = %v", err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), sentinel) {
+		t.Fatalf("sensitive string survived deep scrub: %s", encoded)
+	}
+	after, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("scrubber mutated its input:\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
+func TestLocalScrubberDetectsJSONKeyCollision(t *testing.T) {
+	result := &mcp.CallToolResult{StructuredContent: map[string]any{
+		"admin@example.com": "first",
+		"[EMAIL_1]":         "second",
+	}}
+	if _, err := newScrubber(t).Scrub(context.Background(), result); err == nil {
+		t.Fatal("expected colliding scrubbed JSON keys to fail closed")
+	}
+}
+
+func TestLocalScrubberWithholdsOpaqueContent(t *testing.T) {
+	tests := []mcp.Content{
+		mcp.ImageContent{Type: "image", Data: "opaque", MIMEType: "image/png"},
+		mcp.AudioContent{Type: "audio", Data: "opaque", MIMEType: "audio/mpeg"},
+		mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "gcp://blob", Blob: "opaque"}),
+	}
+	for _, content := range tests {
+		if _, err := newScrubber(t).Scrub(context.Background(), &mcp.CallToolResult{Content: []mcp.Content{content}}); err == nil {
+			t.Errorf("opaque content %T was not withheld", content)
+		}
+	}
+}
+
+func TestScrubResourceContentsCoversURITextAndMetadata(t *testing.T) {
+	const sentinel = "resource-owner@example.com"
+	contents := []mcp.ResourceContents{mcp.TextResourceContents{
+		URI:  "gcp://" + sentinel + "/inventory",
+		Text: `{"owner":"` + sentinel + `"}`,
+		Meta: map[string]any{"nested": map[string]any{"owner": sentinel}},
+	}}
+	got, err := ScrubResourceContents(context.Background(), newScrubber(t), contents)
+	if err != nil {
+		t.Fatalf("ScrubResourceContents() error = %v", err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), sentinel) {
+		t.Fatalf("resource field bypassed scrubber: %s", encoded)
+	}
+	original, _ := json.Marshal(contents)
+	if !strings.Contains(string(original), sentinel) {
+		t.Fatal("resource scrubber mutated input")
+	}
+}
+
+func TestScrubPromptResultCoversDescriptionMetadataAndMessages(t *testing.T) {
+	const sentinel = "prompt-owner@example.com"
+	prompt := &mcp.GetPromptResult{
+		Result: mcp.Result{Meta: &mcp.Meta{
+			ProgressToken:    sentinel,
+			AdditionalFields: map[string]any{"owner": sentinel},
+		}},
+		Description: "Audit " + sentinel,
+		Messages: []mcp.PromptMessage{
+			mcp.NewPromptMessage(mcp.RoleUser, mcp.TextContent{
+				Type: "text", Text: "Investigate " + sentinel,
+				Meta: &mcp.Meta{AdditionalFields: map[string]any{"owner": sentinel}},
+			}),
+		},
+	}
+	got, err := ScrubPromptResult(context.Background(), newScrubber(t), prompt)
+	if err != nil {
+		t.Fatalf("ScrubPromptResult() error = %v", err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), sentinel) {
+		t.Fatalf("prompt field bypassed scrubber: %s", encoded)
+	}
+	original, _ := json.Marshal(prompt)
+	if !strings.Contains(string(original), sentinel) {
+		t.Fatal("prompt scrubber mutated input")
+	}
+}
+
+func TestAuditOnlyResourceAndPromptUseSafeEnvelopes(t *testing.T) {
+	const sentinel = "audit-owner@example.com"
+	scrubber, err := NewLocalScrubber(Config{AuditOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resources, err := ScrubResourceContents(context.Background(), scrubber, []mcp.ResourceContents{
+		mcp.TextResourceContents{URI: "gcp://" + sentinel, Text: sentinel},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resourceJSON, _ := json.Marshal(resources)
+	if strings.Contains(string(resourceJSON), sentinel) || !strings.Contains(string(resourceJSON), "anonymize://audit") {
+		t.Fatalf("unsafe resource audit envelope: %s", resourceJSON)
+	}
+
+	prompt, err := ScrubPromptResult(context.Background(), scrubber, &mcp.GetPromptResult{
+		Description: sentinel,
+		Messages:    []mcp.PromptMessage{mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(sentinel))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptJSON, _ := json.Marshal(prompt)
+	if strings.Contains(string(promptJSON), sentinel) || prompt.Description != "Anonymization audit report" {
+		t.Fatalf("unsafe prompt audit envelope: %s", promptJSON)
+	}
+}
+
 // Same raw value → same token (stable across multiple occurrences).
 func TestTokenStability(t *testing.T) {
 	s := newScrubber(t)

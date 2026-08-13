@@ -2,6 +2,7 @@ package gcp
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
@@ -9,7 +10,6 @@ import (
 
 const (
 	maxTraceDependencyPages = 10
-	traceDependencyPageSize = 200
 	defaultLookbackHours    = 168
 )
 
@@ -24,20 +24,26 @@ func (a *gcpAdapter) ListTraceDependencyEdges(ctx context.Context, req models.Li
 	if lookback <= 0 {
 		lookback = defaultLookbackHours
 	}
+	pageSize, err := inventoryPageSize(req.PageSize)
+	if err != nil {
+		return models.ListTraceDependencyEdgesResponse{}, fmt.Errorf("trace.ListTraceDependencyEdges: %w", err)
+	}
 
 	startTime := time.Now().UTC().Add(-time.Duration(lookback) * time.Hour).Format(time.RFC3339)
 
 	// edgeCount maps "caller|callee" → count.
 	edgeCount := map[string]int{}
 
-	pageToken := ""
+	pageToken := req.PageToken
 	tracesScanned := 0
+	nextPageToken := ""
 
 	for page := 0; page < maxTraceDependencyPages; page++ {
 		call := a.traceClient.Projects.Traces.List(req.ProjectID).
 			StartTime(startTime).
-			PageSize(traceDependencyPageSize).
+			PageSize(int64(pageSize)).
 			OrderBy("start_time desc").
+			View("COMPLETE").
 			Context(ctx)
 		if pageToken != "" {
 			call = call.PageToken(pageToken)
@@ -79,10 +85,11 @@ func (a *gcpAdapter) ListTraceDependencyEdges(ctx context.Context, req models.Li
 			}
 		}
 
-		if resp.NextPageToken == "" {
+		nextPageToken = resp.NextPageToken
+		if nextPageToken == "" {
 			break
 		}
-		pageToken = resp.NextPageToken
+		pageToken = nextPageToken
 	}
 
 	edges := make([]models.TraceDependencyEdge, 0, len(edgeCount))
@@ -100,6 +107,8 @@ func (a *gcpAdapter) ListTraceDependencyEdges(ctx context.Context, req models.Li
 		TracesScanned: tracesScanned,
 		LookbackHours: lookback,
 		Backend:       "trace",
+		NextPageToken: nextPageToken,
+		Truncated:     nextPageToken != "",
 	}, nil
 }
 

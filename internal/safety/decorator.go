@@ -61,7 +61,7 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 			return preview, err
 		}
 		planID := uuid.New().String()
-		if err := d.store.putScoped(planID, mutationOwner(ctx), scaleTarget(req), scaleDeploymentPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
+		if err := d.store.putScoped(planID, mutationOwner(ctx), scaleTarget(req), planKindScaleDeployment, scaleDeploymentPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
 			return models.ScaleDeploymentResponse{}, fmt.Errorf("%s: %w", op, err)
 		}
 		ttl := d.store.expiresIn(planID)
@@ -85,7 +85,7 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 
 	// Path 2: confirm — consume the stored plan and execute with original params.
 	if req.ConfirmPlanID != "" {
-		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx))
+		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx), planKindScaleDeployment)
 		if !ok {
 			return models.ScaleDeploymentResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
@@ -97,7 +97,7 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 		}
 		plan, ok := raw.(scaleDeploymentPlan)
 		if !ok {
-			d.store.finish(req.ConfirmPlanID, true)
+			d.store.finish(req.ConfirmPlanID, false)
 			return models.ScaleDeploymentResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
 		}
 		execReq := plan.OriginalRequest
@@ -145,7 +145,7 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 			return preview, err
 		}
 		planID := uuid.New().String()
-		if err := d.store.putScoped(planID, mutationOwner(ctx), trafficTarget(req), updateTrafficPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
+		if err := d.store.putScoped(planID, mutationOwner(ctx), trafficTarget(req), planKindUpdateTraffic, updateTrafficPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
 			return models.UpdateTrafficResponse{}, fmt.Errorf("%s: %w", op, err)
 		}
 		ttl := d.store.expiresIn(planID)
@@ -168,7 +168,7 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 	}
 
 	if req.ConfirmPlanID != "" {
-		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx))
+		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx), planKindUpdateTraffic)
 		if !ok {
 			return models.UpdateTrafficResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
@@ -180,7 +180,7 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 		}
 		plan, ok := raw.(updateTrafficPlan)
 		if !ok {
-			d.store.finish(req.ConfirmPlanID, true)
+			d.store.finish(req.ConfirmPlanID, false)
 			return models.UpdateTrafficResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
 		}
 		execReq := plan.OriginalRequest
@@ -224,7 +224,7 @@ func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req mod
 			return preview, err
 		}
 		planID := uuid.New().String()
-		if err := d.store.putScoped(planID, mutationOwner(ctx), recommendationExportTarget(req), exportRecommendationsPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
+		if err := d.store.putScoped(planID, mutationOwner(ctx), recommendationExportTarget(req), planKindExportRecommendations, exportRecommendationsPlan{OriginalRequest: req, DryRunResponse: preview}); err != nil {
 			return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("%s: %w", op, err)
 		}
 		ttl := d.store.expiresIn(planID)
@@ -238,13 +238,13 @@ func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req mod
 		return preview, nil
 	}
 	if req.ConfirmPlanID != "" {
-		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx))
+		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx), planKindExportRecommendations)
 		if !ok {
 			return models.ExportRecommendationsToBQResponse{}, &ports.ConfirmationRequiredError{Op: op, Message: fmt.Sprintf("plan_id %q not found, expired, in use, or owned by another caller. Run with dry_run=true first.", req.ConfirmPlanID)}
 		}
 		plan, ok := raw.(exportRecommendationsPlan)
 		if !ok {
-			d.store.finish(req.ConfirmPlanID, true)
+			d.store.finish(req.ConfirmPlanID, false)
 			return models.ExportRecommendationsToBQResponse{}, fmt.Errorf("%s: internal: wrong plan type", op)
 		}
 		execReq := plan.OriginalRequest
@@ -280,7 +280,11 @@ func auditArgs(ctx context.Context, args ...any) []any {
 
 func mutationOwner(ctx context.Context) string {
 	principal, _ := requestmeta.PrincipalFromContext(ctx)
-	return principal.Actor() + "\x00" + requestmeta.SessionID(ctx)
+	identity := principal.IdentityKey()
+	if identity == "" {
+		identity = principal.Actor()
+	}
+	return identity + "\x00" + requestmeta.SessionID(ctx)
 }
 
 func scaleTarget(req models.ScaleDeploymentRequest) string {

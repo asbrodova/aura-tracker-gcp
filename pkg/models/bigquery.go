@@ -2,6 +2,8 @@ package models
 
 type ListDatasetsRequest struct {
 	ProjectID string `json:"project_id"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
 }
 
 type DatasetSummary struct {
@@ -11,13 +13,18 @@ type DatasetSummary struct {
 }
 
 type ListDatasetsResponse struct {
-	ProjectID string           `json:"project_id"`
-	Datasets  []DatasetSummary `json:"datasets"`
+	ProjectID     string           `json:"project_id"`
+	Datasets      []DatasetSummary `json:"datasets"`
+	NextPageToken string           `json:"next_page_token,omitempty"`
+	Truncated     bool             `json:"truncated,omitempty"`
+	Errors        []ToolError      `json:"errors,omitempty"`
 }
 
 type ListTablesRequest struct {
 	ProjectID string `json:"project_id"`
 	DatasetID string `json:"dataset_id"`
+	PageSize  int    `json:"page_size,omitempty"`
+	PageToken string `json:"page_token,omitempty"`
 }
 
 type TableSummary struct {
@@ -29,9 +36,12 @@ type TableSummary struct {
 }
 
 type ListTablesResponse struct {
-	ProjectID string         `json:"project_id"`
-	DatasetID string         `json:"dataset_id"`
-	Tables    []TableSummary `json:"tables"`
+	ProjectID     string         `json:"project_id"`
+	DatasetID     string         `json:"dataset_id"`
+	Tables        []TableSummary `json:"tables"`
+	NextPageToken string         `json:"next_page_token,omitempty"`
+	Truncated     bool           `json:"truncated,omitempty"`
+	Errors        []ToolError    `json:"errors,omitempty"`
 }
 
 type GetTableSchemaRequest struct {

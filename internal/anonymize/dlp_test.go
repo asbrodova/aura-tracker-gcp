@@ -22,6 +22,24 @@ func (m *mockDLPService) InspectText(_ context.Context, _ ports.DLPInspectReques
 	return m.resp, m.err
 }
 
+type sentinelDLPService struct {
+	sentinel string
+}
+
+func (m *sentinelDLPService) InspectText(_ context.Context, req ports.DLPInspectRequest) (ports.DLPInspectResponse, error) {
+	var findings []models.DLPFinding
+	for offset := 0; ; {
+		i := strings.Index(req.Content[offset:], m.sentinel)
+		if i < 0 {
+			break
+		}
+		i += offset
+		findings = append(findings, models.DLPFinding{InfoType: "SENTINEL", Offset: i, Length: len(m.sentinel), Quote: m.sentinel})
+		offset = i + len(m.sentinel)
+	}
+	return ports.DLPInspectResponse{Findings: findings}, nil
+}
+
 func dlpTextResult(s string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{mcp.TextContent{Text: s}}}
 }
@@ -40,7 +58,7 @@ func newDLP(svc ports.DLPService, auditOnly bool) *DLPAnonymizer {
 // --- maskByOffsets unit tests ---
 
 func TestMaskByOffsets_Single(t *testing.T) {
-	findings := []models.DLPFinding{{InfoType: "EMAIL_ADDRESS", Offset: 5, Length: 9, Quote: "a@b.com00"}}
+	findings := []models.DLPFinding{{InfoType: "EMAIL_ADDRESS", Offset: 6, Length: 9, Quote: "a@b.com00"}}
 	reg := newTokenRegistry()
 	got, _ := maskByOffsets("hello a@b.com00 world", findings, reg)
 	if !strings.Contains(got, "[EMAIL_ADDRESS_1]") {
@@ -233,6 +251,90 @@ func TestDLPAnonymizer_StructuredContent(t *testing.T) {
 	b, _ := json.Marshal(out.StructuredContent)
 	if strings.Contains(string(b), "a@b.com") {
 		t.Errorf("structured content email should be masked, got %s", b)
+	}
+}
+
+func TestDLPAnonymizerDeepScrubsToolResult(t *testing.T) {
+	const sentinel = "dlp-sentinel-value"
+	d := newDLP(&sentinelDLPService{sentinel: sentinel}, false)
+	result := &mcp.CallToolResult{
+		Result: mcp.Result{Meta: &mcp.Meta{
+			ProgressToken:    sentinel,
+			AdditionalFields: map[string]any{"nested": map[string]any{"owner": sentinel}},
+		}},
+		Content: []mcp.Content{
+			mcp.TextContent{Type: "text", Text: sentinel, Meta: &mcp.Meta{AdditionalFields: map[string]any{"owner": sentinel}}},
+			mcp.ResourceLink{Type: "resource_link", URI: "gcp://" + sentinel, Name: sentinel, Description: sentinel},
+			mcp.NewEmbeddedResource(mcp.TextResourceContents{URI: "gcp://" + sentinel, Text: sentinel, Meta: map[string]any{"owner": sentinel}}),
+		},
+		StructuredContent: map[string]any{"owner": sentinel},
+	}
+	before, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := d.Scrub(context.Background(), result)
+	if err != nil {
+		t.Fatalf("Scrub() error = %v", err)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), sentinel) {
+		t.Fatalf("sensitive string survived deep DLP scrub: %s", encoded)
+	}
+	after, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("DLP scrubber mutated its input:\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
+func TestDLPAnonymizerWithholdsOpaqueContent(t *testing.T) {
+	d := newDLP(&sentinelDLPService{sentinel: "sentinel"}, false)
+	for _, content := range []mcp.Content{
+		mcp.ImageContent{Type: "image", Data: "opaque", MIMEType: "image/png"},
+		mcp.AudioContent{Type: "audio", Data: "opaque", MIMEType: "audio/mpeg"},
+		mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "gcp://blob", Blob: "opaque"}),
+	} {
+		if _, err := d.Scrub(context.Background(), &mcp.CallToolResult{Content: []mcp.Content{content}}); err == nil {
+			t.Errorf("opaque content %T was not withheld", content)
+		}
+	}
+}
+
+func TestDLPDeepScrubsResourcesAndPrompts(t *testing.T) {
+	const sentinel = "dlp-resource-sentinel"
+	d := newDLP(&sentinelDLPService{sentinel: sentinel}, false)
+	resources, err := ScrubResourceContents(context.Background(), d, []mcp.ResourceContents{
+		mcp.TextResourceContents{
+			URI:  "gcp://" + sentinel,
+			Text: sentinel,
+			Meta: map[string]any{"owner": sentinel},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resourceJSON, _ := json.Marshal(resources)
+	if strings.Contains(string(resourceJSON), sentinel) {
+		t.Fatalf("DLP resource field bypass: %s", resourceJSON)
+	}
+
+	prompt, err := ScrubPromptResult(context.Background(), d, &mcp.GetPromptResult{
+		Result:      mcp.Result{Meta: &mcp.Meta{AdditionalFields: map[string]any{"owner": sentinel}}},
+		Description: sentinel,
+		Messages:    []mcp.PromptMessage{mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(sentinel))},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptJSON, _ := json.Marshal(prompt)
+	if strings.Contains(string(promptJSON), sentinel) {
+		t.Fatalf("DLP prompt field bypass: %s", promptJSON)
 	}
 }
 

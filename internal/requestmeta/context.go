@@ -17,6 +17,7 @@ type Principal struct {
 	Subject  string
 	Email    string
 	Audience string
+	Issuer   string
 }
 
 // Actor returns the most useful stable identifier for audit logging.
@@ -25,6 +26,16 @@ func (p Principal) Actor() string {
 		return p.Email
 	}
 	return p.Subject
+}
+
+// IdentityKey returns the immutable OIDC identity used for authorization and
+// ownership checks. Email is intentionally excluded because it can change
+// while an authenticated session is active.
+func (p Principal) IdentityKey() string {
+	if p.Issuer == "" || p.Subject == "" {
+		return ""
+	}
+	return p.Issuer + "\x00" + p.Subject
 }
 
 func WithPrincipal(ctx context.Context, principal Principal) context.Context {

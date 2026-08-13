@@ -131,12 +131,13 @@ const (
 // All fields are populated by the observability coverage pass in
 // gcp_export_architecture_graph and gcp_observability_coverage.
 type ObservabilityBlock struct {
-	HasMetrics    bool    `json:"has_metrics"`
-	HasTraces     bool    `json:"has_traces"`
-	HasLogs       bool    `json:"has_logs"`
-	HasAlerts     bool    `json:"has_alerts"`
-	OtelSidecar   bool    `json:"otel_sidecar,omitempty"`
-	CoverageScore float64 `json:"coverage_score"` // 0.0–1.0
+	HasMetrics         bool     `json:"has_metrics"`
+	HasTraces          bool     `json:"has_traces"`
+	HasLogs            bool     `json:"has_logs"`
+	HasAlerts          bool     `json:"has_alerts"`
+	OtelSidecar        bool     `json:"otel_sidecar,omitempty"`
+	CoverageScore      float64  `json:"coverage_score"` // 0.0–1.0
+	UnavailableSignals []string `json:"unavailable_signals,omitempty"`
 }
 
 // GraphNode is a resource node in the architecture graph.

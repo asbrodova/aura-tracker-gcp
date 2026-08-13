@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 type fakeSource struct {
@@ -22,6 +23,7 @@ type fakeSource struct {
 	metricsErr error
 	metricsFn  func(models.GetMetricsRequest) (models.GetMetricsResponse, error)
 	factCalls  int
+	recsCalls  int
 }
 
 func (f *fakeSource) CollectCostFacts(_ context.Context, _ models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
@@ -29,6 +31,7 @@ func (f *fakeSource) CollectCostFacts(_ context.Context, _ models.CollectCostFac
 	return f.facts, f.factsErr
 }
 func (f *fakeSource) ListCostRecommendations(_ context.Context, _ models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error) {
+	f.recsCalls++
 	return f.recs, f.recsErr
 }
 func (f *fakeSource) ListCreatedAssets(_ context.Context, _ models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error) {
@@ -109,6 +112,67 @@ func TestExplainRetainsBillingEvidenceWhenOptionalSourcesFail(t *testing.T) {
 	}
 	if response.Status != "partial" || response.Totals.Delta != 10 || len(response.Drivers) == 0 {
 		t.Fatalf("billing evidence was not retained: %+v", response)
+	}
+}
+
+func TestExplainQuotaDegradationIsPartialAndCachedOnlyUntilRetry(t *testing.T) {
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	retryAt := now.Add(2 * time.Minute)
+	source := &fakeSource{
+		facts: models.BillingCostFacts{Currency: "USD", Facts: []models.CostFact{
+			{Dimension: "total", Key: "total", Current: models.CostMeasure{NetCost: 20}, Baseline: models.CostMeasure{NetCost: 10}},
+		}},
+		recsErr: &ports.RecommenderQuotaExhaustedError{Op: "cost recommendations", RetryAt: retryAt},
+	}
+	engine := New(source, nil, Config{}, WithClock(func() time.Time { return now }))
+	request := models.ExplainCostRequest{ProjectID: "prod-project", IncludeTraffic: boolPointer(false)}
+
+	response, err := engine.Explain(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Status != "partial" {
+		t.Fatalf("status = %q, want partial", response.Status)
+	}
+	wantRetry := retryAt.Format(time.RFC3339)
+	foundCoverage, foundWarning := false, false
+	for _, check := range response.Coverage.Checks {
+		if check.Name == "recommender" && check.Status == "partial" && strings.Contains(check.Message, wantRetry) {
+			foundCoverage = true
+		}
+	}
+	for _, warning := range response.Warnings {
+		if strings.Contains(warning, wantRetry) {
+			foundWarning = true
+		}
+	}
+	if !foundCoverage || !foundWarning {
+		t.Fatalf("quota retry timestamp missing from coverage or warnings: coverage=%+v warnings=%+v", response.Coverage.Checks, response.Warnings)
+	}
+	engine.cacheMu.RLock()
+	for _, entry := range engine.cache {
+		if !entry.expiresAt.Equal(retryAt) {
+			engine.cacheMu.RUnlock()
+			t.Fatalf("cache expiry = %s, want %s", entry.expiresAt, retryAt)
+		}
+	}
+	engine.cacheMu.RUnlock()
+
+	now = retryAt.Add(-time.Second)
+	cached, err := engine.Explain(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cached.Coverage.CacheHit || source.factCalls != 1 || source.recsCalls != 1 {
+		t.Fatalf("before retry: cache_hit=%v fact_calls=%d recommender_calls=%d", cached.Coverage.CacheHit, source.factCalls, source.recsCalls)
+	}
+
+	now = retryAt
+	if _, err := engine.Explain(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if source.factCalls != 2 || source.recsCalls != 2 {
+		t.Fatalf("at retry: fact_calls=%d recommender_calls=%d, want 2/2", source.factCalls, source.recsCalls)
 	}
 }
 

@@ -1,6 +1,8 @@
 package gcp
 
 import (
+	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,5 +83,30 @@ func TestValidateGroupByField(t *testing.T) {
 	}
 	if err := validateGroupByField("resource.labels.bad-key"); err == nil {
 		t.Fatal("expected invalid group-by field error")
+	}
+}
+
+func TestMetricIntervalRejectsExplicitRangeBeyondLimit(t *testing.T) {
+	now := time.Date(2026, time.August, 7, 12, 0, 0, 0, time.UTC)
+	_, _, err := metricInterval(models.GetMetricsRequest{
+		StartTime: now.Add(-25 * time.Hour).Format(time.RFC3339),
+		EndTime:   now.Format(time.RFC3339),
+	}, now)
+	if err == nil || !strings.Contains(err.Error(), "must not exceed 1440 minutes") {
+		t.Fatalf("metricInterval error = %v", err)
+	}
+}
+
+func TestGetMetricsRejectsNegativeBoundsBeforeCallingClient(t *testing.T) {
+	adapter := &gcpAdapter{callTimeout: time.Second}
+	tests := []models.GetMetricsRequest{
+		{MetricType: "custom.googleapis.com/test", LookbackMinutes: -1},
+		{MetricType: "custom.googleapis.com/test", AlignmentPeriodSeconds: -1},
+		{MetricType: "custom.googleapis.com/test", MaxTimeSeries: -1},
+	}
+	for _, req := range tests {
+		if _, err := adapter.GetMetrics(context.Background(), req); err == nil {
+			t.Fatalf("GetMetrics(%+v) unexpectedly succeeded", req)
+		}
 	}
 }

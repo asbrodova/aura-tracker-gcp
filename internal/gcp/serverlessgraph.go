@@ -24,6 +24,9 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 	}
 	outerCtx, cancel := context.WithTimeout(ctx, a.graphTimeout)
 	defer cancel()
+	if err := outerCtx.Err(); err != nil {
+		return models.ServerlessGraph{}, fmt.Errorf("serverlessgraph: inventory: %w", err)
+	}
 
 	// --- Fan out all listers in parallel ---
 
@@ -208,7 +211,12 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 		return nil
 	})
 
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return models.ServerlessGraph{}, fmt.Errorf("serverlessgraph: inventory: %w", err)
+	}
+	if err := outerCtx.Err(); err != nil {
+		return models.ServerlessGraph{}, fmt.Errorf("serverlessgraph: inventory: %w", err)
+	}
 
 	// --- Build nodes ---
 

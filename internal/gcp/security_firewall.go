@@ -197,6 +197,13 @@ func policyFirewallFact(projectID, network, region, policyID, shortName, policyT
 	if rule.Match != nil {
 		fact.SourceRanges = append([]string(nil), rule.Match.SrcIpRanges...)
 		fact.DestinationRanges = append([]string(nil), rule.Match.DestIpRanges...)
+		fact.SourceAddressGroups = append([]string(nil), rule.Match.SrcAddressGroups...)
+		fact.SourceFQDNs = append([]string(nil), rule.Match.SrcFqdns...)
+		fact.SourceNetworks = append([]string(nil), rule.Match.SrcNetworks...)
+		fact.SourceRegionCodes = append([]string(nil), rule.Match.SrcRegionCodes...)
+		fact.SourceThreatIntel = append([]string(nil), rule.Match.SrcThreatIntelligences...)
+		fact.SourceNetworkContext = rule.Match.SrcNetworkContext
+		fact.SourceNetworkType = rule.Match.SrcNetworkType
 		for _, layer4 := range rule.Match.Layer4Configs {
 			protocol := models.FirewallProtocolFact{Protocol: layer4.IpProtocol, Ports: append([]string(nil), layer4.Ports...)}
 			switch fact.Action {

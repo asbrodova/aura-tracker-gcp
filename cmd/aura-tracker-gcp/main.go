@@ -262,11 +262,17 @@ For automation, use an attached service account, Workload Identity, or service-a
 			IdleTimeout:       2 * time.Minute,
 			MaxHeaderBytes:    64 << 10,
 		}
+		sessionBinding, err := newSSESessionBinding()
+		if err != nil {
+			return err
+		}
 		sseServer := server.NewSSEServer(s,
-			server.WithBaseURL(baseURL),
+			server.WithBaseURL(authCfg.Origin),
+			server.WithStaticBasePath(authCfg.BasePath),
 			server.WithHTTPServer(httpServer),
+			server.WithSessionIDGenerator(sessionBinding.NewSessionID),
 		)
-		httpServer.Handler = http.MaxBytesHandler(authenticatedMCPHandler(sseServer, googleIdentityTokenValidator{}, authCfg, log), 2<<20)
+		httpServer.Handler = http.MaxBytesHandler(authenticatedMCPHandler(sseServer, googleIdentityTokenValidator{}, authCfg, log, sessionBinding), 2<<20)
 		log.Info("aura-tracker-gcp starting", "transport", "sse", "version", version, "addr", listenAddr, "base_url", baseURL, "auth_mode", authCfg.Mode)
 
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)

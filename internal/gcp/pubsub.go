@@ -3,12 +3,19 @@ package gcp
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+)
+
+const (
+	pubsubHealthMetricLookback = 10 * time.Minute
+	pubsubBacklogThreshold     = 10000
+	pubsubOldestAgeThreshold   = 5 * time.Minute
 )
 
 func (a *gcpAdapter) ListTopics(ctx context.Context, req models.ListTopicsRequest) (models.ListTopicsResponse, error) {
@@ -97,7 +104,9 @@ func (a *gcpAdapter) InspectTopicHealth(ctx context.Context, req models.InspectT
 		return models.TopicHealthReport{}, wrapGCPError("pubsub.InspectTopicHealth.getTopic", err)
 	}
 
-	// List subscriptions and fetch their ack deadline as a proxy for health.
+	// List subscriptions and retain the configured ack deadline separately from
+	// runtime lag. AckDeadlineSeconds is a delivery setting, not the age of the
+	// oldest unacknowledged message.
 	subIt := a.pubsub.TopicAdminClient.ListTopicSubscriptions(ctx, &pubsubpb.ListTopicSubscriptionsRequest{
 		Topic: topicName, PageSize: maxUnpagedInventoryItems,
 	})
@@ -128,19 +137,16 @@ func (a *gcpAdapter) InspectTopicHealth(ctx context.Context, req models.InspectT
 			continue
 		}
 
-		ageStr := ""
-		if sub.AckDeadlineSeconds > 0 {
-			ageStr = formatDuration(time.Duration(sub.AckDeadlineSeconds) * time.Second)
-		}
-
 		lags = append(lags, models.SubscriptionLag{
-			SubscriptionName: subName,
-			OldestUnackedAge: ageStr,
+			SubscriptionName:   subName,
+			AckDeadlineSeconds: sub.AckDeadlineSeconds,
 		})
 	}
 	if subscriptionScanTruncated {
 		issues = append(issues, fmt.Sprintf("subscription inspection truncated at %d items", maxUnpagedInventoryItems))
 	}
+	metricIssues := a.populateSubscriptionLagMetrics(ctx, req.ProjectID, lags)
+	issues = append(issues, metricIssues...)
 
 	healthy := len(issues) == 0
 	return models.TopicHealthReport{
@@ -150,6 +156,104 @@ func (a *gcpAdapter) InspectTopicHealth(ctx context.Context, req models.InspectT
 		Healthy:       healthy,
 		Issues:        issues,
 	}, nil
+}
+
+type subscriptionGaugeObservation struct {
+	value     float64
+	timestamp time.Time
+}
+
+func (a *gcpAdapter) populateSubscriptionLagMetrics(ctx context.Context, projectID string, lags []models.SubscriptionLag) []string {
+	if len(lags) == 0 {
+		return nil
+	}
+	if a.metric == nil {
+		return []string{"subscription lag metrics unavailable: Monitoring client is not configured"}
+	}
+
+	end := time.Now().UTC().Truncate(time.Second)
+	start := end.Add(-pubsubHealthMetricLookback)
+	query := func(metricType string) (models.GetMetricsResponse, error) {
+		return a.GetMetrics(ctx, models.GetMetricsRequest{
+			ProjectID:              projectID,
+			MetricType:             metricType,
+			StartTime:              start.Format(time.RFC3339),
+			EndTime:                end.Format(time.RFC3339),
+			LookbackMinutes:        int(pubsubHealthMetricLookback / time.Minute),
+			AlignmentPeriodSeconds: 60,
+			PerSeriesAligner:       "ALIGN_MAX",
+			MaxTimeSeries:          maxUnpagedInventoryItems,
+		})
+	}
+
+	backlogResponse, backlogErr := query("pubsub.googleapis.com/subscription/num_undelivered_messages")
+	ageResponse, ageErr := query("pubsub.googleapis.com/subscription/oldest_unacked_message_age")
+	backlogBySubscription := latestSubscriptionGaugeValues(backlogResponse, start, end)
+	ageBySubscription := latestSubscriptionGaugeValues(ageResponse, start, end)
+
+	issues := make([]string, 0)
+	if backlogErr != nil {
+		issues = append(issues, "subscription backlog metrics unavailable: "+backlogErr.Error())
+	} else if backlogResponse.Truncated {
+		issues = append(issues, "subscription backlog metric inventory was truncated")
+	}
+	if ageErr != nil {
+		issues = append(issues, "oldest-unacked metrics unavailable: "+ageErr.Error())
+	} else if ageResponse.Truncated {
+		issues = append(issues, "oldest-unacked metric inventory was truncated")
+	}
+
+	for i := range lags {
+		subscriptionID := parseSubResourceName(lags[i].SubscriptionName)
+		backlog, hasBacklog := backlogBySubscription[subscriptionID]
+		age, hasAge := ageBySubscription[subscriptionID]
+		lags[i].MetricsAvailable = hasBacklog && hasAge
+
+		if hasBacklog {
+			lags[i].UndeliveredMessages = int64(math.Round(math.Max(0, backlog.value)))
+			lags[i].MetricsObservedAt = backlog.timestamp.Format(time.RFC3339)
+			if backlog.value >= pubsubBacklogThreshold {
+				issues = append(issues, fmt.Sprintf("subscription %q has %.0f undelivered messages", subscriptionID, backlog.value))
+			}
+		} else if backlogErr == nil {
+			issues = append(issues, fmt.Sprintf("subscription %q has no recent backlog metric", subscriptionID))
+		}
+
+		if hasAge {
+			ageDuration := time.Duration(math.Max(0, age.value) * float64(time.Second))
+			lags[i].OldestUnackedAge = formatDuration(ageDuration)
+			if lags[i].MetricsObservedAt == "" || age.timestamp.After(backlog.timestamp) {
+				lags[i].MetricsObservedAt = age.timestamp.Format(time.RFC3339)
+			}
+			if ageDuration >= pubsubOldestAgeThreshold {
+				issues = append(issues, fmt.Sprintf("subscription %q oldest unacked message is %.0f seconds old", subscriptionID, age.value))
+			}
+		} else if ageErr == nil {
+			issues = append(issues, fmt.Sprintf("subscription %q has no recent oldest-unacked metric", subscriptionID))
+		}
+	}
+	return issues
+}
+
+func latestSubscriptionGaugeValues(response models.GetMetricsResponse, start, end time.Time) map[string]subscriptionGaugeObservation {
+	values := make(map[string]subscriptionGaugeObservation)
+	for _, series := range response.Series {
+		subscriptionID := parseSubResourceName(series.ResourceLabels["subscription_id"])
+		if subscriptionID == "" {
+			continue
+		}
+		for _, point := range series.Points {
+			timestamp, err := time.Parse(time.RFC3339Nano, point.Timestamp)
+			if err != nil || timestamp.Before(start) || timestamp.After(end) {
+				continue
+			}
+			current, ok := values[subscriptionID]
+			if !ok || timestamp.After(current.timestamp) || (timestamp.Equal(current.timestamp) && point.Value > current.value) {
+				values[subscriptionID] = subscriptionGaugeObservation{value: point.Value, timestamp: timestamp}
+			}
+		}
+	}
+	return values
 }
 
 func formatDuration(d time.Duration) string {

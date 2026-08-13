@@ -1,6 +1,9 @@
 package ports
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // RetriableError wraps a transient GCP error (quota exhaustion, service
 // unavailable) that the caller may safely retry after a back-off.
@@ -54,10 +57,13 @@ func (e *ConfirmationRequiredError) Error() string {
 }
 
 // RecommenderQuotaExhaustedError is returned when the Cloud Recommender API
-// returns ResourceExhausted (daily quota used up). Unlike RetriableError, this
-// is NOT transient — the quota resets once per day at midnight Pacific Time (PT).
+// rejects a read because a rate or daily quota window is exhausted. Callers
+// must not retry before RetryAt.
 type RecommenderQuotaExhaustedError struct {
-	Op string
+	Op            string
+	RecommenderID string
+	RetryAt       time.Time
+	Window        string
 }
 
 func (e *RecommenderQuotaExhaustedError) Error() string {

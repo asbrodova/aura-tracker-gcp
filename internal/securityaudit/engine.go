@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 const (
@@ -164,14 +165,33 @@ func (e *Engine) Audit(ctx context.Context, req models.SecurityAuditRequest) (mo
 	findings, suppressed := applySuppressions(findings, e.config.Suppressions, now)
 	report := buildReport(req.ProjectID, now, findings, suppressed, facts)
 
+	expiresAt := now.Add(cacheTTL)
+	if quotaErr, ok := recommenderQuotaError(facts.recommendationErr); ok && !quotaErr.RetryAt.IsZero() && quotaErr.RetryAt.Before(expiresAt) {
+		expiresAt = quotaErr.RetryAt
+	}
 	e.mu.Lock()
-	e.cache[req.ProjectID] = cachedReport{report: report, expiresAt: now.Add(cacheTTL)}
+	if now.Before(expiresAt) {
+		e.cache[req.ProjectID] = cachedReport{report: report, expiresAt: expiresAt}
+	} else {
+		delete(e.cache, req.ProjectID)
+	}
 	e.mu.Unlock()
 	e.log.InfoContext(ctx, "security posture audit completed",
 		"project", req.ProjectID, "audit_id", report.AuditID, "coverage", report.CoveragePercent,
 		"critical", report.Counts.Critical, "high", report.Counts.High, "medium", report.Counts.Medium, "low", report.Counts.Low,
 		"suppressed", len(report.Suppressed))
 	return report, nil
+}
+
+// recommenderQuotaError identifies quota-specific degradation while leaving
+// all other collector failures on their existing error path. A zero RetryAt is
+// still a quota error, but cannot safely shorten the report cache.
+func recommenderQuotaError(err error) (*ports.RecommenderQuotaExhaustedError, bool) {
+	var quotaErr *ports.RecommenderQuotaExhaustedError
+	if !errors.As(err, &quotaErr) || quotaErr == nil {
+		return nil, false
+	}
+	return quotaErr, true
 }
 
 func (e *Engine) collect(ctx context.Context, req models.SecurityFactsRequest) collectedFacts {

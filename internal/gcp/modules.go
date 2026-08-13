@@ -58,7 +58,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"secretmanager":      {clientSecretMgr, clientRunSvc},
 	"vpcaccess":          {clientVPCAccess},
 	"cloudsql":           {clientSQLAdmin},
-	"pubsub":             {clientPubSub},
+	"pubsub":             {clientPubSub, clientMetric}, // health inspection reads subscription backlog gauges
 	"logging":            {clientLogAdmin},
 	"monitoring":         {clientMetric, clientTrace, clientMonitoringV3, clientMonitoringV1},
 	"iam":                {clientCRM, clientIAMAdmin},

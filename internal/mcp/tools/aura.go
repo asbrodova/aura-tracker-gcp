@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -230,14 +231,33 @@ func (t *AuraTools) projectAuraSummaryHandler(ctx context.Context, _ mcp.CallToo
 		fmt.Fprintf(&sb, "\n\n⚠️ %s", warning)
 	}
 	result := mcp.NewToolResultText(sb.String())
-	// Surface the first quota note found across all resource reports (global quota, one message suffices).
-	for _, r := range summary.Resources {
-		if r.RecommenderNote != "" {
-			result.Content = append([]mcp.Content{mcp.TextContent{Type: "text", Text: "⚠️ " + r.RecommenderNote}}, result.Content...)
-			break
-		}
+	if quotaNote := projectAuraRecommenderNote(summary.Resources); quotaNote != "" {
+		result.Content = append([]mcp.Content{mcp.TextContent{Type: "text", Text: "⚠️ " + quotaNote}}, result.Content...)
 	}
 	return result, nil
+}
+
+// projectAuraRecommenderNote condenses per-resource quota state into one
+// project-level message. Quota gates are scoped by recommender, so use the
+// latest known deadline when describing when full coverage should be restored.
+func projectAuraRecommenderNote(resources []models.AuraReport) string {
+	var latestRetryAt time.Time
+	var fallback string
+	for _, resource := range resources {
+		if resource.RecommenderNote != "" && fallback == "" {
+			fallback = resource.RecommenderNote
+		}
+		if resource.RecommenderRetryAt.After(latestRetryAt) {
+			latestRetryAt = resource.RecommenderRetryAt
+		}
+	}
+	if latestRetryAt.IsZero() {
+		return fallback
+	}
+	return fmt.Sprintf(
+		"RECOMMENDER QUOTA EXHAUSTED: Recommender signals are unavailable for some resources; Aura scores use the remaining telemetry. All currently known quota windows should reopen by %s; requests resume automatically as each window resets.",
+		latestRetryAt.UTC().Format(time.RFC3339),
+	)
 }
 
 func (t *AuraTools) GKEAuraScore() server.ServerTool {

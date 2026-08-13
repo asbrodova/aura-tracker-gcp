@@ -1,10 +1,122 @@
 package securityaudit
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
+
+func TestGoogleManagedServiceAgentRequiresCanonicalIAMIdentity(t *testing.T) {
+	for _, member := range []string{
+		"serviceAccount:123456789@cloudservices.gserviceaccount.com",
+		"serviceAccount:service-123456789@gcp-sa-run.iam.gserviceaccount.com",
+		"serviceAccount:service-123456789@container-engine-robot.iam.gserviceaccount.com",
+	} {
+		if !isGoogleManagedServiceAgent(member) {
+			t.Errorf("canonical service agent %q was not recognized", member)
+		}
+	}
+	for _, member := range []string{
+		"user:service-owner@example.com",
+		"group:admins@gcp-sa-example.com",
+		"serviceAccount:service-attacker@example.com",
+		"serviceAccount:not-numeric@cloudservices.gserviceaccount.com",
+		"serviceAccount:service-not-numeric@gcp-sa-run.iam.gserviceaccount.com",
+	} {
+		if isGoogleManagedServiceAgent(member) {
+			t.Errorf("ordinary principal %q was classified as a service agent", member)
+		}
+	}
+
+	findings := evaluateIAM(models.SecurityIAMPolicyFacts{Policies: []models.SecurityIAMPolicyFact{{
+		Resource: "//cloudresourcemanager.googleapis.com/projects/p", Bindings: []models.SecurityIAMBindingFact{{
+			Role: "roles/owner", Members: []string{"user:service-owner@example.com"},
+		}},
+	}}})
+	if !hasRule(findings, "IAM-002") {
+		t.Fatalf("ordinary principal with service-like text escaped IAM-002: %v", findingRules(findings))
+	}
+}
+
+func TestDenyPrincipalMatchingPreservesIdentityType(t *testing.T) {
+	if !denyPrincipalMatches("principal://goog/subject/admin@example.com", "user:admin@example.com") {
+		t.Fatal("matching user deny principal was missed")
+	}
+	if denyPrincipalMatches("principalSet://goog/group/admin@example.com", "user:admin@example.com") {
+		t.Fatal("group deny principal was conflated with a user having the same email")
+	}
+	if denyPrincipalMatches("principal://iam.googleapis.com/projects/-/serviceAccounts/admin@example.com", "group:admin@example.com") {
+		t.Fatal("service-account deny principal was conflated with a group")
+	}
+	if !denyPrincipalMatches("principalSet://goog/public:all", "serviceAccount:runtime@example.iam.gserviceaccount.com") {
+		t.Fatal("universal deny principal did not match a named principal")
+	}
+}
+
+func TestEvaluateFirewallsHonorsSourceSelectorsAndSecureTagState(t *testing.T) {
+	base := models.FirewallSecurityFact{
+		ResourceName: "allow", Network: "default", Direction: "INGRESS", Action: "allow", EffectiveOrder: 2,
+		Allowed: []models.FirewallProtocolFact{{Protocol: "tcp", Ports: []string{"22"}}},
+	}
+	tests := []struct {
+		name   string
+		mutate func(*models.FirewallSecurityFact)
+		world  bool
+	}{
+		{name: "unrestricted", world: true, mutate: func(*models.FirewallSecurityFact) {}},
+		{name: "secure tag", mutate: func(f *models.FirewallSecurityFact) { f.SourceSecureTags = []string{"tagValues/1:EFFECTIVE"} }},
+		{name: "address group", mutate: func(f *models.FirewallSecurityFact) { f.SourceAddressGroups = []string{"addressGroups/trusted"} }},
+		{name: "fqdn", mutate: func(f *models.FirewallSecurityFact) { f.SourceFQDNs = []string{"trusted.example"} }},
+		{name: "network", mutate: func(f *models.FirewallSecurityFact) { f.SourceNetworks = []string{"networks/trusted"} }},
+		{name: "region", mutate: func(f *models.FirewallSecurityFact) { f.SourceRegionCodes = []string{"ID"} }},
+		{name: "threat intelligence", mutate: func(f *models.FirewallSecurityFact) { f.SourceThreatIntel = []string{"iplist-known-malicious-ips"} }},
+		{name: "network context", mutate: func(f *models.FirewallSecurityFact) { f.SourceNetworkContext = "INTRA_VPC" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			firewall := base
+			test.mutate(&firewall)
+			if got := hasRule(evaluateFirewalls(models.FirewallSecurityFacts{Firewalls: []models.FirewallSecurityFact{firewall}}), "FW-002"); got != test.world {
+				t.Fatalf("FW-002 present=%v, want %v", got, test.world)
+			}
+		})
+	}
+
+	targeted := base
+	targeted.TargetSecureTags = []string{"tagValues/1:EFFECTIVE"}
+	findings := evaluateFirewalls(models.FirewallSecurityFacts{Firewalls: []models.FirewallSecurityFact{targeted}})
+	for _, finding := range findings {
+		for _, evidence := range finding.Evidence {
+			if strings.Contains(evidence, "applies to all instances") {
+				t.Fatalf("secure-tag-targeted rule was described as untargeted: %+v", finding)
+			}
+		}
+	}
+
+	inactive := base
+	inactive.TargetSecureTags = []string{"tagValues/1:INEFFECTIVE"}
+	if findings := evaluateFirewalls(models.FirewallSecurityFacts{Firewalls: []models.FirewallSecurityFact{inactive}}); len(findings) != 0 {
+		t.Fatalf("rule with only ineffective targets produced findings: %+v", findings)
+	}
+}
+
+func TestIneffectiveSecureTagDenyDoesNotShadowActiveAllow(t *testing.T) {
+	allow := models.FirewallSecurityFact{
+		ResourceName: "allow", Network: "default", Direction: "INGRESS", Action: "allow", EffectiveOrder: 2,
+		SourceRanges: []string{"0.0.0.0/0"}, TargetSecureTags: []string{"tagValues/1:EFFECTIVE"},
+		Allowed: []models.FirewallProtocolFact{{Protocol: "tcp", Ports: []string{"22"}}},
+	}
+	deny := models.FirewallSecurityFact{
+		ResourceName: "deny", Network: "default", Direction: "INGRESS", Action: "deny", EffectiveOrder: 1,
+		SourceRanges: []string{"0.0.0.0/0"}, TargetSecureTags: []string{"tagValues/1:INEFFECTIVE"},
+		Denied: []models.FirewallProtocolFact{{Protocol: "all"}},
+	}
+	findings := evaluateFirewalls(models.FirewallSecurityFacts{Firewalls: []models.FirewallSecurityFact{deny, allow}})
+	if hasRule(findings, "FW-006") || !hasRule(findings, "FW-002") {
+		t.Fatalf("rules = %v, want active exposure without false shadowing", findingRules(findings))
+	}
+}
 
 func TestPublicRolesForResourceIncludesProjectAndAncestorPolicies(t *testing.T) {
 	facts := models.SecurityIAMPolicyFacts{Policies: []models.SecurityIAMPolicyFact{

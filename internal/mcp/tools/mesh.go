@@ -62,9 +62,6 @@ func (t *GKEMeshTools) GetMeshTopology() server.ServerTool {
 }
 
 func (t *GKEMeshTools) getMeshTopologyHandler(ctx context.Context, _ mcp.CallToolRequest, args models.GetGKEMeshTopologyRequest) (*mcp.CallToolResult, error) {
-	if args.LookbackHours > 168 {
-		args.LookbackHours = 168
-	}
 	t.log.InfoContext(ctx, "gcp_gke_get_mesh_topology",
 		"project", args.ProjectID, "cluster", args.ClusterName,
 		"location", args.Location, "lookback_hours", args.LookbackHours,

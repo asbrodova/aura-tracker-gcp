@@ -146,11 +146,13 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		}
 	}
 	privacyMasker := anonymize.NewProjectIDReplacer(replacements)
+	protocolGuard, hooks := newProtocolInputGuard()
 
 	serverOpts := []server.ServerOption{
 		server.WithToolCapabilities(false),
 		server.WithResourceCapabilities(false, true), // subscribe=false, listChanged=true
 		server.WithPromptCapabilities(true),          // listChanged=true
+		server.WithHooks(hooks),
 	}
 	if instructions := environmentInstructions(o.environments, o.projectIDPlaceholder); instructions != "" {
 		serverOpts = append(serverOpts, server.WithInstructions(instructions))
@@ -351,7 +353,9 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	if o.enableCostReasoning {
 		allModules = append(allModules, tools.NewCostTools(costreasoning.New(svc, log, o.costReasoningConfig), log))
 	}
-	for _, t := range FilteredRegistry(allModules, o.enabledModules) {
+	registeredTools := FilteredRegistry(allModules, o.enabledModules)
+	protocolGuard.addTools(registeredTools)
+	for _, t := range registeredTools {
 		s.AddTools(wrap(t))
 	}
 
@@ -359,7 +363,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	bqRes := resources.NewBigQueryResources(svc, log, o.environments, o.projectIDPlaceholder)
 	crRes := resources.NewCloudRunResources(svc, log, o.environments, o.projectIDPlaceholder)
 	gcsRes := resources.NewStorageResources(svc, log, o.environments, o.projectIDPlaceholder)
-	iamRes := resources.NewIAMResources(svc, log, o.environments, o.projectIDPlaceholder)
+	iamRes := resources.NewIAMResources(svc, log, o.environments, o.projectIDPlaceholder, permissionsForModules(activeModuleSet(allModules, o.enabledModules)))
 
 	configuredEnvironments := []environments.Environment{{}}
 	if o.environments != nil {
@@ -381,20 +385,26 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			wrapResource(iamRes.MyPermissions(environment)),
 		)
 	}
+	protocolGuard.addResources(staticResources)
 	s.AddResources(staticResources...)
 
-	s.AddResourceTemplates(
+	resourceTemplates := []server.ServerResourceTemplate{
 		wrapResourceTemplate(bqRes.TableListTemplate()),
 		wrapResourceTemplate(bqRes.TableSchemaTemplate()),
 		wrapResourceTemplate(crRes.ServiceSnapshotTemplate()),
 		wrapResourceTemplate(crRes.RevisionsTemplate()),
 		wrapResourceTemplate(gcsRes.BucketMetadataTemplate()),
 		wrapResourceTemplate(gcsRes.ObjectListTemplate()),
-	)
+	}
+	protocolGuard.addResourceTemplates(resourceTemplates)
+	s.AddResourceTemplates(resourceTemplates...)
 
 	// --- Prompts ---
 	prm := prompts.NewGCPPrompts(svc, log, o.environments, o.projectIDPlaceholder)
-	promptList := []server.ServerPrompt{prm.OptimizeBigQueryCosts()}
+	var promptList []server.ServerPrompt
+	if o.enabledModules == nil || o.enabledModules[ModuleMonitoring] {
+		promptList = append(promptList, prm.OptimizeBigQueryCosts())
+	}
 	if o.enabledModules == nil || o.enabledModules[ModuleSecurity] {
 		promptList = append(promptList, prm.AuditSecurityPosture())
 	}
@@ -404,6 +414,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	for i := range promptList {
 		promptList[i] = wrapPrompt(promptList[i])
 	}
+	protocolGuard.addPrompts(promptList)
 	s.AddPrompts(promptList...)
 
 	return s

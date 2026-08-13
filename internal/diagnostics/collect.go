@@ -348,8 +348,8 @@ func (e *Engine) inspectPubSubDependency(ctx context.Context, req models.Diagnos
 	metricFailures := 0
 	for _, subscription := range subscriptions {
 		subscriptionID := baseName(subscription.SubscriptionName)
-		backlog, backlogErr := e.dependencyMetricMax(ctx, req, "pubsub.googleapis.com/subscription/num_undelivered_messages", "subscription_id", subscriptionID)
-		age, ageErr := e.dependencyMetricMax(ctx, req, "pubsub.googleapis.com/subscription/oldest_unacked_message_age", "subscription_id", subscriptionID)
+		backlog, backlogErr := e.dependencyMetricCurrent(ctx, req, "pubsub.googleapis.com/subscription/num_undelivered_messages", "subscription_id", subscriptionID)
+		age, ageErr := e.dependencyMetricCurrent(ctx, req, "pubsub.googleapis.com/subscription/oldest_unacked_message_age", "subscription_id", subscriptionID)
 		if backlogErr != nil {
 			metricFailures++
 			notes = append(notes, fmt.Sprintf("Pub/Sub backlog metric for %s: %v", subscriptionID, backlogErr))
@@ -375,9 +375,16 @@ func (e *Engine) inspectPubSubDependency(ctx context.Context, req models.Diagnos
 	return "healthy", nil, notes
 }
 
-func (e *Engine) dependencyMetricMax(ctx context.Context, req models.DiagnoseIncidentRequest, metricType, label, value string) (float64, error) {
+// dependencyMetricCurrent returns the newest gauge sample inside the incident
+// window. Pub/Sub backlog metrics describe current state; taking the maximum
+// over the whole lookback incorrectly reports a recovered historical spike as
+// an active dependency failure.
+func (e *Engine) dependencyMetricCurrent(ctx context.Context, req models.DiagnoseIncidentRequest, metricType, label, value string) (float64, error) {
+	end := e.now().UTC().Truncate(time.Second)
+	start := end.Add(-time.Duration(req.LookbackMinutes) * time.Minute)
 	response, err := e.source.GetMetrics(ctx, models.GetMetricsRequest{
 		ProjectID: req.ProjectID, MetricType: metricType,
+		StartTime: start.Format(time.RFC3339), EndTime: end.Format(time.RFC3339),
 		ResourceLabels: map[string]string{label: value}, LookbackMinutes: req.LookbackMinutes,
 		AlignmentPeriodSeconds: 60, PerSeriesAligner: "ALIGN_MAX", CrossSeriesReducer: "REDUCE_MAX", MaxTimeSeries: 5,
 	})
@@ -387,15 +394,26 @@ func (e *Engine) dependencyMetricMax(ctx context.Context, req models.DiagnoseInc
 	if response.NoData || len(response.Series) == 0 {
 		return 0, fmt.Errorf("no metric data")
 	}
-	maximum := 0.0
+	latestValue := 0.0
+	latestTime := time.Time{}
+	found := false
 	for _, series := range response.Series {
 		for _, point := range series.Points {
-			if point.Value > maximum {
-				maximum = point.Value
+			pointTime, parseErr := time.Parse(time.RFC3339Nano, point.Timestamp)
+			if parseErr != nil || pointTime.Before(start) || pointTime.After(end) {
+				continue
+			}
+			if !found || pointTime.After(latestTime) || (pointTime.Equal(latestTime) && point.Value > latestValue) {
+				latestTime = pointTime
+				latestValue = point.Value
+				found = true
 			}
 		}
 	}
-	return maximum, nil
+	if !found {
+		return 0, fmt.Errorf("no metric data in the incident window")
+	}
+	return latestValue, nil
 }
 
 func topologyEvidence(report models.ServiceTopologyReport, nodeID string) string {

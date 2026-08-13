@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 const (
@@ -186,6 +187,7 @@ func (e *Engine) explainUncached(ctx context.Context, req models.ExplainCostRequ
 	}
 
 	recommendations := models.ListCostRecommendationsResponse{}
+	var recommenderRetryAt time.Time
 	if includeIdle {
 		recommendationCollection := recommendationResult{}
 		select {
@@ -195,8 +197,24 @@ func (e *Engine) explainUncached(ctx context.Context, req models.ExplainCostRequ
 		}
 		recommendations, err = recommendationCollection.response, recommendationCollection.err
 		if err != nil {
-			response.Coverage.Checks = append(response.Coverage.Checks, models.CostCoverageCheck{Name: "recommender", Status: "partial", Message: err.Error()})
-			response.Warnings = append(response.Warnings, "Cost recommendations were unavailable; idle-resource coverage is incomplete.")
+			message := err.Error()
+			if quotaErr, quotaExhausted := costRecommenderQuotaError(err); quotaExhausted {
+				retryAt := quotaErr.RetryAt.UTC()
+				recommenderRetryAt = retryAt
+				message = "Cloud Recommender quota exhausted"
+				if quotaErr.Window != "" {
+					message += fmt.Sprintf(" (%s window)", quotaErr.Window)
+				}
+				if !retryAt.IsZero() {
+					message = fmt.Sprintf("%s; retry after %s", message, retryAt.Format(time.RFC3339))
+					response.Warnings = append(response.Warnings, fmt.Sprintf("Cost recommendations are quota-limited; retry after %s. Idle-resource coverage is incomplete.", retryAt.Format(time.RFC3339)))
+				} else {
+					response.Warnings = append(response.Warnings, "Cost recommendations are quota-limited; idle-resource coverage is incomplete.")
+				}
+			} else {
+				response.Warnings = append(response.Warnings, "Cost recommendations were unavailable; idle-resource coverage is incomplete.")
+			}
+			response.Coverage.Checks = append(response.Coverage.Checks, models.CostCoverageCheck{Name: "recommender", Status: "partial", Message: message})
 			response.Warnings = append(response.Warnings, recommendations.Warnings...)
 		} else if !recommendations.Available {
 			response.Coverage.Checks = append(response.Coverage.Checks, models.CostCoverageCheck{Name: "recommender", Status: "skipped", Message: "Recommender integration is disabled"})
@@ -222,7 +240,7 @@ func (e *Engine) explainUncached(ctx context.Context, req models.ExplainCostRequ
 		response.Warnings = append(response.Warnings, "Cost analysis reached its time budget; findings use completed collectors.")
 	}
 	response.Warnings = uniqueSorted(response.Warnings)
-	e.setCached(cacheKey, response, now)
+	e.setCachedUntil(cacheKey, response, now, recommenderRetryAt)
 	e.log.InfoContext(ctx, "cost reasoning completed", "analysis_id", response.AnalysisID, "project", req.ProjectID,
 		"status", response.Status, "drivers", len(response.Drivers), "bytes_processed", facts.BytesProcessed)
 	return response, nil
@@ -300,6 +318,20 @@ func (e *Engine) getCached(key string, now time.Time) (models.ExplainCostRespons
 }
 
 func (e *Engine) setCached(key string, response models.ExplainCostResponse, now time.Time) {
+	e.setCachedUntil(key, response, now, time.Time{})
+}
+
+func (e *Engine) setCachedUntil(key string, response models.ExplainCostResponse, now, noLaterThan time.Time) {
+	expiresAt := now.Add(cacheTTL)
+	if !noLaterThan.IsZero() && noLaterThan.Before(expiresAt) {
+		expiresAt = noLaterThan
+	}
+	if !now.Before(expiresAt) {
+		e.cacheMu.Lock()
+		delete(e.cache, key)
+		e.cacheMu.Unlock()
+		return
+	}
 	e.cacheMu.Lock()
 	defer e.cacheMu.Unlock()
 	for existingKey, entry := range e.cache {
@@ -317,7 +349,15 @@ func (e *Engine) setCached(key string, response models.ExplainCostResponse, now 
 		}
 		delete(e.cache, oldestKey)
 	}
-	e.cache[key] = cacheEntry{response: response, expiresAt: now.Add(cacheTTL)}
+	e.cache[key] = cacheEntry{response: response, expiresAt: expiresAt}
+}
+
+func costRecommenderQuotaError(err error) (*ports.RecommenderQuotaExhaustedError, bool) {
+	var quotaErr *ports.RecommenderQuotaExhaustedError
+	if !errors.As(err, &quotaErr) || quotaErr == nil {
+		return nil, false
+	}
+	return quotaErr, true
 }
 
 func uniqueSorted(values []string) []string {

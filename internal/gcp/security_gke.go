@@ -89,8 +89,11 @@ func (a *gcpAdapter) collectClusterExposure(parent context.Context, projectID st
 	}
 	result.coverage = append(result.coverage, securityCoverageUnit("gke_workloads", "cluster", resource, workloadStatus, len(workloads), workloadMessage))
 
-	services, serviceErr := k8s.listServices(ctx, "")
+	services, servicesTruncated, serviceErr := k8s.listServicesBounded(ctx, "", a.securityResourceLimit())
 	services, serviceStatus, serviceMessage := boundedSecurityResources(services, serviceErr, a.securityResourceLimit())
+	if serviceErr == nil && servicesTruncated {
+		serviceStatus, serviceMessage = "truncated", fmt.Sprintf("resource safety cap reached: inspected %d services", len(services))
+	}
 	result.coverage = append(result.coverage, securityCoverageUnit("gke_services", "cluster", resource, serviceStatus, len(services), serviceMessage))
 	if serviceErr == nil {
 		for _, service := range services {
@@ -100,16 +103,22 @@ func (a *gcpAdapter) collectClusterExposure(parent context.Context, projectID st
 		}
 	}
 
-	ingresses, ingressErr := k8s.listIngresses(ctx, "")
+	ingresses, ingressesTruncated, ingressErr := k8s.listIngressesBounded(ctx, "", a.securityResourceLimit())
 	ingresses, ingressStatus, ingressMessage := boundedSecurityResources(ingresses, ingressErr, a.securityResourceLimit())
+	if ingressErr == nil && ingressesTruncated {
+		ingressStatus, ingressMessage = "truncated", fmt.Sprintf("resource safety cap reached: inspected %d ingresses and HTTPRoutes", len(ingresses))
+	}
 	result.coverage = append(result.coverage, securityCoverageUnit("gke_ingresses", "cluster", resource, ingressStatus, len(ingresses), ingressMessage))
 
-	gateways, gatewayErr := k8s.listGateways(ctx, "")
+	gateways, gatewaysTruncated, gatewayErr := k8s.listGatewaysBounded(ctx, "", a.securityResourceLimit())
 	if gatewayErr != nil && (strings.Contains(gatewayErr.Error(), "HTTP 404") || strings.Contains(gatewayErr.Error(), "HTTP 405")) {
 		gatewayErr = nil
 		gateways = []k8sGateway{}
 	}
 	gateways, gatewayStatus, gatewayMessage := boundedSecurityResources(gateways, gatewayErr, a.securityResourceLimit())
+	if gatewayErr == nil && gatewaysTruncated {
+		gatewayStatus, gatewayMessage = "truncated", fmt.Sprintf("resource safety cap reached: inspected %d gateways", len(gateways))
+	}
 	result.coverage = append(result.coverage, securityCoverageUnit("gke_gateways", "cluster", resource, gatewayStatus, len(gateways), gatewayMessage))
 
 	if ingressErr == nil {
@@ -422,8 +431,11 @@ func (a *gcpAdapter) collectClusterWorkloadIdentity(parent context.Context, proj
 	fact.AccessMode = mode
 	coverage := []models.SecurityCoverageUnit{securityCoverageUnit("kubernetes_access", "cluster", resource, "complete", 1, mode)}
 
-	serviceAccounts, saErr := k8s.listKubernetesServiceAccounts(ctx, "")
+	serviceAccounts, serviceAccountsTruncated, saErr := k8s.listKubernetesServiceAccountsBounded(ctx, "", a.securityResourceLimit())
 	serviceAccounts, saStatus, saMessage := boundedSecurityResources(serviceAccounts, saErr, a.securityResourceLimit())
+	if saErr == nil && serviceAccountsTruncated {
+		saStatus, saMessage = "truncated", fmt.Sprintf("resource safety cap reached: inspected %d service accounts", len(serviceAccounts))
+	}
 	coverage = append(coverage, securityCoverageUnit("kubernetes_service_accounts", "cluster", resource, saStatus, len(serviceAccounts), saMessage))
 	if saErr == nil {
 		for _, account := range serviceAccounts {

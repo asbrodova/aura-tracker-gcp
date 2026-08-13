@@ -89,6 +89,7 @@ func (m *ProjectIDMasker) scrubContent(content mcp.Content) (mcp.Content, error)
 	switch typed := content.(type) {
 	case mcp.TextContent:
 		typed.Text = m.ReplaceString(typed.Text)
+		typed.Annotations = m.scrubAnnotations(typed.Annotations)
 		meta, err := m.scrubMeta(typed.Meta)
 		if err != nil {
 			return nil, err
@@ -99,8 +100,11 @@ func (m *ProjectIDMasker) scrubContent(content mcp.Content) (mcp.Content, error)
 		typed.URI = m.ReplaceString(typed.URI)
 		typed.Name = m.ReplaceString(typed.Name)
 		typed.Description = m.ReplaceString(typed.Description)
+		typed.MIMEType = m.ReplaceString(typed.MIMEType)
+		typed.Annotations = m.scrubAnnotations(typed.Annotations)
 		return typed, nil
 	case mcp.EmbeddedResource:
+		typed.Annotations = m.scrubAnnotations(typed.Annotations)
 		meta, err := m.scrubMeta(typed.Meta)
 		if err != nil {
 			return nil, err
@@ -109,6 +113,7 @@ func (m *ProjectIDMasker) scrubContent(content mcp.Content) (mcp.Content, error)
 		switch resource := typed.Resource.(type) {
 		case mcp.TextResourceContents:
 			resource.URI = m.ReplaceString(resource.URI)
+			resource.MIMEType = m.ReplaceString(resource.MIMEType)
 			resource.Text = m.ReplaceString(resource.Text)
 			scrubbedMeta, scrubErr := m.scrubMap(resource.Meta)
 			if scrubErr != nil {
@@ -139,6 +144,7 @@ func (m *ProjectIDMasker) ScrubResourceContents(contents []mcp.ResourceContents)
 		switch typed := content.(type) {
 		case mcp.TextResourceContents:
 			typed.URI = m.ReplaceString(typed.URI)
+			typed.MIMEType = m.ReplaceString(typed.MIMEType)
 			typed.Text = m.ReplaceString(typed.Text)
 			meta, err := m.scrubMap(typed.Meta)
 			if err != nil {
@@ -153,6 +159,16 @@ func (m *ProjectIDMasker) ScrubResourceContents(contents []mcp.ResourceContents)
 		}
 	}
 	return out, nil
+}
+
+func (m *ProjectIDMasker) scrubAnnotations(annotations *mcp.Annotations) *mcp.Annotations {
+	if annotations == nil {
+		return nil
+	}
+	out := *annotations
+	out.Audience = append([]mcp.Role(nil), annotations.Audience...)
+	out.LastModified = m.ReplaceString(annotations.LastModified)
+	return &out
 }
 
 // ScrubPromptResult replaces project IDs in generated prompt content.

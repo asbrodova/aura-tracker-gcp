@@ -19,6 +19,9 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 	}
 
 	discovery := a.discoverRegions(ctx, req.ProjectID, regionServiceTasks)
+	if err := ctx.Err(); err != nil {
+		return models.ListTaskQueuesResponse{}, fmt.Errorf("tasks.ListTaskQueues: %w", err)
+	}
 	regions := discovery.Regions
 	if req.Region != "" && req.Region != "-" {
 		regions = []string{req.Region}
@@ -54,7 +57,12 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 			return nil
 		})
 	}
-	_ = g.Wait()
+	if err := g.Wait(); err != nil {
+		return models.ListTaskQueuesResponse{}, fmt.Errorf("tasks.ListTaskQueues: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return models.ListTaskQueuesResponse{}, fmt.Errorf("tasks.ListTaskQueues: %w", err)
+	}
 
 	if queues == nil {
 		queues = []models.TaskQueueSummary{}

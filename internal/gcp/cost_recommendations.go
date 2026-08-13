@@ -2,13 +2,12 @@ package gcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"cloud.google.com/go/recommender/apiv1/recommenderpb"
 	"google.golang.org/api/iterator"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
@@ -41,9 +40,6 @@ func (a *gcpAdapter) ListCostRecommendations(ctx context.Context, req models.Lis
 	if !costProjectIDRE.MatchString(req.ProjectID) {
 		return models.ListCostRecommendationsResponse{}, fmt.Errorf("%s: invalid project ID %q", op, req.ProjectID)
 	}
-	if a.recommenderQuotaExhausted.Load() {
-		return models.ListCostRecommendationsResponse{}, &ports.RecommenderQuotaExhaustedError{Op: op}
-	}
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 100
@@ -64,24 +60,32 @@ func (a *gcpAdapter) ListCostRecommendations(ctx context.Context, req models.Lis
 	defer cancel()
 	result := models.ListCostRecommendationsResponse{Available: true, Complete: true, Recommendations: []models.CostRecommendation{}, Warnings: []string{}}
 	failed := 0
+	limitReached := false
+	collecting := true
 	for _, recommenderID := range costRecommenderIDs {
-		if len(result.Recommendations) >= limit {
-			result.Complete = false
+		if !collecting {
 			break
 		}
-		parent := fmt.Sprintf("projects/%s/locations/-/recommenders/%s", req.ProjectID, recommenderID)
-		it := a.rec.ListRecommendations(ctx, &recommenderpb.ListRecommendationsRequest{Parent: parent, Filter: `stateInfo.state = "ACTIVE"`})
-		for len(result.Recommendations) < limit {
+		it, err := a.activeRecommendations(ctx, op, req.ProjectID, "-", recommenderID, maxInventoryPageSize)
+		if err != nil {
+			return result, err
+		}
+		for scanned := 0; ; scanned++ {
 			recommendation, err := it.Next()
 			if err == iterator.Done {
 				break
 			}
 			if err != nil {
-				if status.Code(err) == codes.ResourceExhausted {
-					a.recommenderQuotaExhausted.Store(true)
-					return result, &ports.RecommenderQuotaExhaustedError{Op: op}
+				var quotaErr *ports.RecommenderQuotaExhaustedError
+				if errors.As(err, &quotaErr) {
+					return result, err
 				}
 				failed++
+				break
+			}
+			if scanned >= maxFilteredInventoryScanItems {
+				failed++
+				result.Warnings = append(result.Warnings, fmt.Sprintf("%s scan reached the %d-recommendation safety cap", recommenderID, maxFilteredInventoryScanItems))
 				break
 			}
 			if !isCostRecommendation(recommendation, recommenderID) {
@@ -100,19 +104,25 @@ func (a *gcpAdapter) ListCostRecommendations(ctx context.Context, req models.Lis
 				Subtype: costRecommendationSubtype(recommendation, recommenderID), Service: costRecommendationService(recommenderID),
 				Description: recommendation.Description, Priority: priority, MonthlySavingsUSD: extractMonthlySavings(recommendation),
 			})
+			if len(result.Recommendations) > limit {
+				limitReached = true
+				collecting = false
+				break
+			}
 		}
 	}
-	if len(result.Recommendations) >= limit {
+	if limitReached {
+		result.Recommendations = result.Recommendations[:limit]
 		result.Complete = false
 	}
 	if failed > 0 {
 		result.Complete = false
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%d cost recommender type(s) were unavailable", failed))
 	}
-	if !result.Complete && failed == 0 {
+	if limitReached {
 		result.Warnings = append(result.Warnings, "Cost recommendation result limit reached; additional idle resources may exist.")
 	}
-	if a.costRecommendationCache != nil && failed == 0 {
+	if a.costRecommendationCache != nil && result.Complete {
 		a.costRecommendationCache.set(cacheKey, result)
 	}
 	return result, nil
@@ -130,18 +140,11 @@ func isCostRecommendation(rec *recommenderpb.Recommendation, recommenderID strin
 }
 
 func costRecommendationSubtype(rec *recommenderpb.Recommendation, recommenderID string) string {
-	if rec != nil && rec.RecommenderSubtype != "" {
-		return strings.ToLower(rec.RecommenderSubtype)
-	}
-	text := strings.ToLower(recommenderID)
-	switch {
-	case strings.Contains(text, "idle"):
-		return "idle"
-	case strings.Contains(text, "rightsize") || strings.Contains(text, "overprovisioned"):
-		return "overprovisioned"
-	default:
+	subtype := recommendationSubtype(rec, recommenderID)
+	if subtype == "other" {
 		return "cost_optimization"
 	}
+	return subtype
 }
 
 func costRecommendationService(id string) string {

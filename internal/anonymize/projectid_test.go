@@ -40,8 +40,8 @@ func TestProjectIDReplacerUsesAliasesAcrossAllTextSurfaces(t *testing.T) {
 	})
 	result := &mcp.CallToolResult{
 		Content: []mcp.Content{
-			mcp.NewTextContent("projects/company-project-123 and company-project"),
-			mcp.ResourceLink{Type: "resource_link", URI: "gcp://company-project-123/logs", Name: "company-project-123", Description: "company-project"},
+			mcp.TextContent{Type: "text", Text: "projects/company-project-123 and company-project", Annotated: mcp.Annotated{Annotations: &mcp.Annotations{LastModified: "company-project-123"}}},
+			mcp.ResourceLink{Type: "resource_link", URI: "gcp://company-project-123/logs", Name: "company-project-123", Description: "company-project", MIMEType: "application/company-project", Annotated: mcp.Annotated{Annotations: &mcp.Annotations{LastModified: "company-project-123"}}},
 		},
 		StructuredContent: map[string]any{
 			"project_id": "company-project-123",

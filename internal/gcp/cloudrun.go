@@ -33,7 +33,7 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 	it := a.runSvc.ListServices(ctx, &runpb.ListServicesRequest{Parent: parent, PageSize: maxUnpagedInventoryItems})
 
 	var services []models.ServiceSummary
-	seen := 0
+	budget := filteredInventoryBudget{resultLimit: maxUnpagedInventoryItems, scanLimit: maxFilteredInventoryScanItems}
 	truncated := false
 	for {
 		svc, err := it.Next()
@@ -43,19 +43,19 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 			}
 			return models.ListServicesResponse{}, wrapGCPError("cloudrun.ListServices", err)
 		}
-		if seen >= maxUnpagedInventoryItems {
+		include, stop := budget.consider(!isCloudFunctionRunService(svc))
+		if stop {
 			truncated = true
 			break
 		}
-		seen++
+		// Cloud Functions Gen 2 deploy on the Cloud Run runtime. Exclude them
+		// here; gcp_functions_list is the canonical tool for those resources.
+		if !include {
+			continue
+		}
 		lastMod := ""
 		if svc.UpdateTime != nil {
 			lastMod = svc.UpdateTime.AsTime().Format("2006-01-02T15:04:05Z")
-		}
-		// Cloud Functions Gen 2 deploy on the Cloud Run runtime. Exclude them
-		// here; gcp_functions_list is the canonical tool for those resources.
-		if svc.Labels["goog-managed-by"] == "cloudfunctions" {
-			continue
 		}
 		region, name := parseSvcResourceName(svc.Name)
 		services = append(services, models.ServiceSummary{
@@ -70,6 +70,10 @@ func (a *gcpAdapter) ListServices(ctx context.Context, req models.ListServicesRe
 		services = []models.ServiceSummary{}
 	}
 	return models.ListServicesResponse{Services: services, Truncated: truncated}, nil
+}
+
+func isCloudFunctionRunService(svc *runpb.Service) bool {
+	return svc != nil && svc.Labels["goog-managed-by"] == "cloudfunctions"
 }
 
 func (a *gcpAdapter) ListJobs(ctx context.Context, req models.ListJobsRequest) (models.ListJobsResponse, error) {
