@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/config"
+	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
+	gcpadapter "github.com/asbrodova/aura-tracker-gcp/internal/gcp"
 )
 
 func TestLoadEnvironmentRegistryLegacyPrecedence(t *testing.T) {
@@ -48,6 +50,18 @@ func TestLoadEnvironmentRegistryJSON(t *testing.T) {
 	}
 	if got := len(registry.Environments()); got != 2 {
 		t.Fatalf("environment count = %d", got)
+	}
+}
+
+func TestLoadEnvironmentRegistryJSONRejectsUnknownFields(t *testing.T) {
+	_, err := loadEnvironmentRegistry(config.Config{}, func(name string) string {
+		if name == "GCP_ENVIRONMENTS_JSON" {
+			return `[{"project_id":"dev-project","alias":"dev","default":true,"typo":true}]`
+		}
+		return ""
+	})
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -159,8 +173,155 @@ func setCostEnv(t *testing.T) {
 	for _, name := range []string{
 		"COST_REASONING_ENABLED", "COST_QUERY_PROJECT_ID", "BILLING_EXPORT_PROJECT_ID",
 		"BILLING_EXPORT_DATASET", "BILLING_EXPORT_TABLE", "COST_REASONING_TIMEZONE",
-		"COST_QUERY_MAX_BYTES", "COST_REASONING_HISTORY_DAYS",
+		"COST_QUERY_MAX_BYTES", "COST_REASONING_HISTORY_DAYS", "COST_REASONING_SOURCES_JSON",
 	} {
 		t.Setenv(name, "")
+	}
+}
+
+func testEnvironmentRegistry(t *testing.T) *environments.Registry {
+	t.Helper()
+	registry, err := environments.NewRegistry([]environments.Environment{
+		{ProjectID: "dev-project-123", Alias: "dev", Default: true},
+		{ProjectID: "preprod-project-123", Alias: "preprod"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func TestCompileCostReasoningSourcesRoutesAliasesAndProjectIDs(t *testing.T) {
+	registry := testEnvironmentRegistry(t)
+	sources, err := compileCostReasoningSources(config.CostReasoningConfig{
+		Enabled: true, MaxBytesBilled: 1234,
+		Sources: []config.CostReasoningSourceConfig{
+			{Environments: []string{"DEV"}, QueryProjectID: "finops-dev-123", Dataset: "dev_billing"},
+			{Environments: []string{"preprod-project-123"}, QueryProjectID: "finops-preprod-123", ExportProjectID: "billing-preprod-123", Dataset: "preprod_billing"},
+		},
+	}, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 2 || sources[0].WorkloadProjectIDs[0] != "dev-project-123" ||
+		sources[0].ExportProjectID != "finops-dev-123" || sources[1].WorkloadProjectIDs[0] != "preprod-project-123" ||
+		sources[1].Dataset != "preprod_billing" || sources[1].MaxBytesBilled != 1234 {
+		t.Fatalf("compiled sources = %+v", sources)
+	}
+}
+
+func TestCompileLegacyCostSourceCoversEveryEnvironment(t *testing.T) {
+	sources, err := compileCostReasoningSources(config.CostReasoningConfig{
+		Enabled: true, Dataset: "central_billing",
+	}, testEnvironmentRegistry(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || len(sources[0].WorkloadProjectIDs) != 2 || sources[0].QueryProjectID != "dev-project-123" {
+		t.Fatalf("legacy source = %+v", sources)
+	}
+}
+
+func TestDisabledCostModuleSkipsInvalidSourceConfiguration(t *testing.T) {
+	sources, err := compileCostReasoningSourcesIfEnabled(config.CostReasoningConfig{
+		Enabled: true,
+		// No dataset: this would fail compilation if the disabled module were validated.
+	}, testEnvironmentRegistry(t), false)
+	if err != nil || sources != nil {
+		t.Fatalf("disabled module sources = %+v, error = %v", sources, err)
+	}
+}
+
+func TestCostSourceProjectIDReplacementsMasksEveryDistinctBillingProject(t *testing.T) {
+	replacements := costSourceProjectIDReplacements([]gcpadapter.CostSourceConfig{
+		{
+			WorkloadProjectIDs: []string{"dev-project-123"},
+			CostAdapterConfig: gcpadapter.CostAdapterConfig{
+				QueryProjectID: "query-dev-123", ExportProjectID: "billing-dev-123", Dataset: "dev_billing",
+			},
+		},
+		{
+			WorkloadProjectIDs: []string{"preprod-project-123"},
+			CostAdapterConfig: gcpadapter.CostAdapterConfig{
+				QueryProjectID: "shared-finops-123", ExportProjectID: "shared-finops-123", Dataset: "preprod_billing",
+			},
+		},
+	})
+	for _, projectID := range []string{"query-dev-123", "billing-dev-123", "shared-finops-123"} {
+		if replacements[projectID] != "[COST_PROJECT_ID]" {
+			t.Fatalf("replacement for %q = %q", projectID, replacements[projectID])
+		}
+	}
+	if _, exists := replacements["dev-project-123"]; exists {
+		t.Fatal("workload project should continue to use its environment alias")
+	}
+}
+
+func TestCompileCostReasoningSourcesRejectsAmbiguousOrPartialMappings(t *testing.T) {
+	registry := testEnvironmentRegistry(t)
+	tests := []struct {
+		name    string
+		config  config.CostReasoningConfig
+		message string
+	}{
+		{"unknown", config.CostReasoningConfig{Enabled: true, Sources: []config.CostReasoningSourceConfig{{Environments: []string{"qa"}, QueryProjectID: "finops-dev-123", Dataset: "billing"}}}, "unknown environment"},
+		{"duplicate", config.CostReasoningConfig{Enabled: true, Sources: []config.CostReasoningSourceConfig{{Environments: []string{"dev"}, QueryProjectID: "finops-dev-123", Dataset: "billing"}, {Environments: []string{"DEV"}, QueryProjectID: "finops-dev-456", Dataset: "billing"}}}, "assigned to"},
+		{"partial", config.CostReasoningConfig{Enabled: true, Sources: []config.CostReasoningSourceConfig{{Environments: []string{"dev"}, QueryProjectID: "finops-dev-123", Dataset: "billing"}}}, "missing for environment"},
+		{"mixed legacy", config.CostReasoningConfig{Enabled: true, Dataset: "legacy", Sources: []config.CostReasoningSourceConfig{{Environments: []string{"dev", "preprod"}, QueryProjectID: "finops-dev-123", Dataset: "billing"}}}, "cannot be combined"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := compileCostReasoningSources(test.config, registry)
+			if err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("error = %v, want %q", err, test.message)
+			}
+		})
+	}
+}
+
+func TestApplyCostReasoningSourcesJSONIsStrictAndConflictsWithLegacy(t *testing.T) {
+	setCostEnv(t)
+	valid := `[{
+		"environments":["dev","preprod"],
+		"query_project_id":"finops-project-123",
+		"dataset":"billing"
+	}]`
+	if err := applyCostReasoningEnvWithLookup(&config.CostReasoningConfig{}, func(name string) string {
+		if name == "COST_REASONING_SOURCES_JSON" {
+			return valid
+		}
+		return ""
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, raw := range map[string]string{
+		"unknown field": `[{"environments":["dev"],"query_project_id":"finops-project-123","dataset":"billing","typo":true}]`,
+		"trailing JSON": valid + `{}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := applyCostReasoningEnvWithLookup(&config.CostReasoningConfig{}, func(env string) string {
+				if env == "COST_REASONING_SOURCES_JSON" {
+					return raw
+				}
+				return ""
+			}); err == nil {
+				t.Fatal("invalid JSON accepted")
+			}
+		})
+	}
+
+	err := applyCostReasoningEnvWithLookup(&config.CostReasoningConfig{}, func(name string) string {
+		switch name {
+		case "COST_REASONING_SOURCES_JSON":
+			return valid
+		case "BILLING_EXPORT_DATASET":
+			return "legacy"
+		default:
+			return ""
+		}
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("conflict error = %v", err)
 	}
 }

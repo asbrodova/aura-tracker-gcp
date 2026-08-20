@@ -13,6 +13,7 @@ import (
 	"google.golang.org/api/iterator"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 var (
@@ -63,14 +64,22 @@ type costHistoryRow struct {
 // export. The query is fixed by the server; callers can only supply parameters.
 func (a *gcpAdapter) CollectCostFacts(ctx context.Context, req models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
 	const op = "cost.CollectCostFacts"
-	if !a.enableCostReasoning || a.costBQ == nil {
+	if !a.enableCostReasoning {
 		return models.BillingCostFacts{}, fmt.Errorf("%s: cost reasoning is not configured", op)
 	}
 	if err := a.rateWait(ctx, op); err != nil {
 		return models.BillingCostFacts{}, err
 	}
-	if !costProjectIDRE.MatchString(strings.TrimSpace(req.ProjectID)) {
+	req.ProjectID = strings.TrimSpace(req.ProjectID)
+	if !costProjectIDRE.MatchString(req.ProjectID) {
 		return models.BillingCostFacts{}, fmt.Errorf("%s: invalid project_id %q", op, req.ProjectID)
+	}
+	source, err := a.costSourceForProject(req.ProjectID)
+	if err != nil {
+		return models.BillingCostFacts{}, err
+	}
+	if source.client == nil {
+		return models.BillingCostFacts{}, fmt.Errorf("%s: cost source client is not configured", op)
 	}
 	currentStart, currentEnd, baselineStart, baselineEnd, historyStart, err := parseCostFactTimes(req)
 	if err != nil {
@@ -88,11 +97,11 @@ func (a *gcpAdapter) CollectCostFacts(ctx context.Context, req models.CollectCos
 
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
-	tableID, meta, err := a.resolveDetailedBillingTable(ctx)
+	tableID, meta, err := a.resolveDetailedBillingTable(ctx, source)
 	if err != nil {
 		return models.BillingCostFacts{}, err
 	}
-	tableRef := fmt.Sprintf("`%s.%s.%s`", a.costConfig.ExportProjectID, a.costConfig.Dataset, tableID)
+	tableRef := costTableReference(source, tableID)
 	partitionPredicate := costPartitionPredicate(meta)
 
 	contributorParams := []bigquery.QueryParameter{
@@ -109,7 +118,7 @@ func (a *gcpAdapter) CollectCostFacts(ctx context.Context, req models.CollectCos
 
 	facts := models.BillingCostFacts{DetailedExport: true, Daily: []models.HistoricalCost{}, Facts: []models.CostFact{}, FirstSeen: []models.ResourceFirstSeen{}, Warnings: []string{}}
 	contributorSQL := buildCostContributorSQL(tableRef, partitionPredicate)
-	bytes, err := a.executeCostQuery(ctx, contributorSQL, contributorParams, func(it *bigquery.RowIterator) error {
+	bytes, err := a.executeCostQuery(ctx, source, contributorSQL, contributorParams, func(it *bigquery.RowIterator) error {
 		for {
 			var row costContributorRow
 			if err := it.Next(&row); err != nil {
@@ -143,7 +152,7 @@ func (a *gcpAdapter) CollectCostFacts(ctx context.Context, req models.CollectCos
 		historyParams = append(historyParams, bigquery.QueryParameter{Name: "partition_start", Value: historyStart})
 	}
 	historySQL := buildCostHistorySQL(tableRef, partitionPredicate)
-	bytes, err = a.executeCostQuery(ctx, historySQL, historyParams, func(it *bigquery.RowIterator) error {
+	bytes, err = a.executeCostQuery(ctx, source, historySQL, historyParams, func(it *bigquery.RowIterator) error {
 		for {
 			var row costHistoryRow
 			if err := it.Next(&row); err != nil {
@@ -184,6 +193,18 @@ func (a *gcpAdapter) CollectCostFacts(ctx context.Context, req models.CollectCos
 	return facts, nil
 }
 
+func (a *gcpAdapter) costSourceForProject(projectID string) (*costSource, error) {
+	source, ok := a.costSources[projectID]
+	if !ok || source == nil {
+		return nil, &ports.CostSourceNotConfiguredError{ProjectID: projectID}
+	}
+	return source, nil
+}
+
+func costTableReference(source *costSource, tableID string) string {
+	return fmt.Sprintf("`%s.%s.%s`", source.config.ExportProjectID, source.config.Dataset, tableID)
+}
+
 func costPartitionPredicate(meta *bigquery.TableMetadata) string {
 	if meta == nil || meta.TimePartitioning == nil {
 		return ""
@@ -215,15 +236,18 @@ func parseCostFactTimes(req models.CollectCostFactsRequest) (time.Time, time.Tim
 	return parsed[0], parsed[1], parsed[2], parsed[3], parsed[4], nil
 }
 
-func (a *gcpAdapter) resolveDetailedBillingTable(ctx context.Context) (string, *bigquery.TableMetadata, error) {
-	if !costProjectIDRE.MatchString(a.costConfig.ExportProjectID) {
-		return "", nil, fmt.Errorf("cost.resolveTable: invalid export project ID %q", a.costConfig.ExportProjectID)
+func (a *gcpAdapter) resolveDetailedBillingTable(ctx context.Context, source *costSource) (string, *bigquery.TableMetadata, error) {
+	if source == nil || source.client == nil {
+		return "", nil, errors.New("cost.resolveTable: cost source is not configured")
 	}
-	if len(a.costConfig.Dataset) > 1024 || !costDatasetIDRE.MatchString(a.costConfig.Dataset) {
-		return "", nil, fmt.Errorf("cost.resolveTable: invalid dataset ID %q", a.costConfig.Dataset)
+	if !costProjectIDRE.MatchString(source.config.ExportProjectID) {
+		return "", nil, fmt.Errorf("cost.resolveTable: invalid export project ID %q", source.config.ExportProjectID)
 	}
-	dataset := a.costBQ.DatasetInProject(a.costConfig.ExportProjectID, a.costConfig.Dataset)
-	tableID := a.costConfig.Table
+	if len(source.config.Dataset) > 1024 || !costDatasetIDRE.MatchString(source.config.Dataset) {
+		return "", nil, fmt.Errorf("cost.resolveTable: invalid dataset ID %q", source.config.Dataset)
+	}
+	dataset := source.client.DatasetInProject(source.config.ExportProjectID, source.config.Dataset)
+	tableID := source.config.Table
 	if tableID == "" {
 		var matches []string
 		it := dataset.Tables(ctx)
@@ -242,7 +266,7 @@ func (a *gcpAdapter) resolveDetailedBillingTable(ctx context.Context) (string, *
 		sort.Strings(matches)
 		switch len(matches) {
 		case 0:
-			return "", nil, fmt.Errorf("cost.resolveTable: no detailed billing export table with prefix %q found in %s.%s", detailedBillingTablePrefix, a.costConfig.ExportProjectID, a.costConfig.Dataset)
+			return "", nil, fmt.Errorf("cost.resolveTable: no detailed billing export table with prefix %q found in %s.%s", detailedBillingTablePrefix, source.config.ExportProjectID, source.config.Dataset)
 		case 1:
 			tableID = matches[0]
 		default:
@@ -271,8 +295,11 @@ func schemaHasTopLevelField(schema bigquery.Schema, name string) bool {
 	return false
 }
 
-func (a *gcpAdapter) executeCostQuery(ctx context.Context, sql string, params []bigquery.QueryParameter, consume func(*bigquery.RowIterator) error) (int64, error) {
-	dry := a.costBQ.Query(sql)
+func (a *gcpAdapter) executeCostQuery(ctx context.Context, source *costSource, sql string, params []bigquery.QueryParameter, consume func(*bigquery.RowIterator) error) (int64, error) {
+	if source == nil || source.client == nil {
+		return 0, errors.New("cost query source is not configured")
+	}
+	dry := source.client.Query(sql)
 	dry.Parameters = params
 	dry.DryRun = true
 	dry.UseLegacySQL = false
@@ -291,14 +318,14 @@ func (a *gcpAdapter) executeCostQuery(ctx context.Context, sql string, params []
 	if dryStatus.Statistics != nil {
 		estimated = dryStatus.Statistics.TotalBytesProcessed
 	}
-	if estimated > a.costConfig.MaxBytesBilled {
-		return 0, fmt.Errorf("cost query would process %d bytes, exceeding max_bytes_billed=%d", estimated, a.costConfig.MaxBytesBilled)
+	if estimated > source.config.MaxBytesBilled {
+		return 0, fmt.Errorf("cost query would process %d bytes, exceeding max_bytes_billed=%d", estimated, source.config.MaxBytesBilled)
 	}
 
-	query := a.costBQ.Query(sql)
+	query := source.client.Query(sql)
 	query.Parameters = params
 	query.UseLegacySQL = false
-	query.MaxBytesBilled = a.costConfig.MaxBytesBilled
+	query.MaxBytesBilled = source.config.MaxBytesBilled
 	query.JobTimeout = a.callTimeout
 	query.Labels = map[string]string{"aura_tracker": "cost_reasoning"}
 	job, err := query.Run(ctx)

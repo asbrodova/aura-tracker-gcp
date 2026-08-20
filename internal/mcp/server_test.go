@@ -16,6 +16,7 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/costreasoning"
 	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 // mockSvc is a no-op implementation of ports.GCPService for wiring tests.
@@ -630,7 +631,9 @@ type environmentCaptureSvc struct {
 	*mockSvc
 	logProjects     []string
 	datasetProjects []string
+	costProjects    []string
 	logError        error
+	costError       error
 }
 
 type oversizedLogSvc struct{ *mockSvc }
@@ -668,6 +671,14 @@ func (s *environmentCaptureSvc) QueryRecentLogs(_ context.Context, req models.Qu
 func (s *environmentCaptureSvc) ListDatasets(_ context.Context, req models.ListDatasetsRequest) (models.ListDatasetsResponse, error) {
 	s.datasetProjects = append(s.datasetProjects, req.ProjectID)
 	return models.ListDatasetsResponse{ProjectID: req.ProjectID, Datasets: []models.DatasetSummary{}}, nil
+}
+
+func (s *environmentCaptureSvc) CollectCostFacts(_ context.Context, req models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
+	s.costProjects = append(s.costProjects, req.ProjectID)
+	if s.costError != nil {
+		return models.BillingCostFacts{}, s.costError
+	}
+	return models.BillingCostFacts{Facts: []models.CostFact{}, Daily: []models.HistoricalCost{}, FirstSeen: []models.ResourceFirstSeen{}}, nil
 }
 
 func testEnvironmentRegistry(t *testing.T) *environments.Registry {
@@ -717,6 +728,42 @@ func TestEnvironmentAliasesRouteCaseInsensitivelyAndMaskOutputs(t *testing.T) {
 	}
 	if svc.logProjects[len(svc.logProjects)-1] != "private-dev-123" {
 		t.Fatalf("default project = %q", svc.logProjects[len(svc.logProjects)-1])
+	}
+}
+
+func TestCostEnvironmentDefaultsAndExplicitAliasesAreRoutedAndMasked(t *testing.T) {
+	svc := &environmentCaptureSvc{mockSvc: &mockSvc{}}
+	s := New(svc, slog.Default(), "test",
+		WithModules(map[string]bool{ModuleCost: true}),
+		WithCostReasoning(costreasoning.Config{}),
+		WithEnvironments(testEnvironmentRegistry(t)),
+		WithProjectIDReplacements(map[string]string{"billing-prod-789": "[COST_PROJECT_ID]"}),
+	)
+
+	defaultResponse := handleJSON(t, s, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gcp_cost_explain","arguments":{"include_idle":false,"include_traffic":false}}}`)
+	explicitResponse := handleJSON(t, s, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"gcp_cost_explain","arguments":{"project_id":"PROD","include_idle":false,"include_traffic":false}}}`)
+	if len(svc.costProjects) != 2 || svc.costProjects[0] != "private-dev-123" || svc.costProjects[1] != "private-prod-345" {
+		t.Fatalf("cost projects = %#v", svc.costProjects)
+	}
+	for name, response := range map[string]string{"default": defaultResponse, "explicit": explicitResponse} {
+		if strings.Contains(response, "private-dev-123") || strings.Contains(response, "private-prod-345") {
+			t.Fatalf("%s cost response leaked a project ID: %s", name, response)
+		}
+	}
+	if !strings.Contains(defaultResponse, `\"project_id\":\"dev\"`) || !strings.Contains(explicitResponse, `\"project_id\":\"prod\"`) {
+		t.Fatalf("cost scope aliases missing: default=%s explicit=%s", defaultResponse, explicitResponse)
+	}
+
+	svc.costError = &ports.CostSourceNotConfiguredError{ProjectID: "private-prod-345"}
+	errorResponse := handleJSON(t, s, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"gcp_cost_explain","arguments":{"project_id":"prod","detail_level":"detailed","include_idle":false,"include_traffic":false}}}`)
+	if strings.Contains(errorResponse, "private-prod-345") || !strings.Contains(errorResponse, "environment prod") {
+		t.Fatalf("cost source error was not alias-safe: %s", errorResponse)
+	}
+
+	svc.costError = errors.New("billing query failed in projects/billing-prod-789")
+	billingErrorResponse := handleJSON(t, s, `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"gcp_cost_explain","arguments":{"project_id":"prod","detail_level":"summary","include_idle":false,"include_traffic":false}}}`)
+	if strings.Contains(billingErrorResponse, "billing-prod-789") || !strings.Contains(billingErrorResponse, "[COST_PROJECT_ID]") {
+		t.Fatalf("billing project error was not privacy-safe: %s", billingErrorResponse)
 	}
 }
 

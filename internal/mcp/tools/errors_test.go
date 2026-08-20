@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -40,6 +41,17 @@ func TestHandleServiceError_NotFound(t *testing.T) {
 	}
 	if !result.IsError {
 		t.Error("expected IsError=true for not found")
+	}
+}
+
+func TestHandleServiceError_CostSourceNotConfigured(t *testing.T) {
+	result, err := handleServiceError("gcp_cost_explain", fmt.Errorf("wrapped: %w", &ports.CostSourceNotConfiguredError{ProjectID: "preprod-project-123"}))
+	if err != nil || result == nil || !result.IsError {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	content, ok := result.Content[0].(mcp.TextContent)
+	if !ok || !strings.Contains(content.Text, "preprod-project-123") {
+		t.Fatalf("content = %#v", result.Content)
 	}
 }
 

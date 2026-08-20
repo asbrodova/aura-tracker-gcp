@@ -87,6 +87,14 @@ func handleServiceError(op string, err error) (*mcp.CallToolResult, error) {
 		)), nil
 	}
 
+	var missingCostSource *ports.CostSourceNotConfiguredError
+	if errors.As(err, &missingCostSource) {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"%s: cost reasoning is not configured for environment %s",
+			op, missingCostSource.ProjectID,
+		)), nil
+	}
+
 	return nil, fmt.Errorf("%s: %w", op, err)
 }
 

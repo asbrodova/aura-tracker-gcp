@@ -45,6 +45,16 @@ func (e *NotFoundError) Error() string {
 
 func (e *NotFoundError) Unwrap() error { return e.Err }
 
+// CostSourceNotConfiguredError prevents cost requests from falling back to a
+// billing export configured for another workload project.
+type CostSourceNotConfiguredError struct {
+	ProjectID string
+}
+
+func (e *CostSourceNotConfiguredError) Error() string {
+	return fmt.Sprintf("cost reasoning is not configured for environment %s", e.ProjectID)
+}
+
 // ConfirmationRequiredError is returned by the SafetyDecorator when a mutation
 // is attempted without a valid plan confirmation.
 type ConfirmationRequiredError struct {

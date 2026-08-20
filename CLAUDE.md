@@ -52,6 +52,7 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 | `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name for the recommendations export (overrides `recommender_export.dataset` in YAML). |
 | `COST_REASONING_ENABLED` | No | Set `true` to register the read-only `gcp_cost_explain` tool. Off by default. |
+| `COST_REASONING_SOURCES_JSON` | No | Strict JSON array mapping configured environments to query/export projects and billing datasets. Mutually exclusive with YAML `sources` and legacy source settings. |
 | `COST_QUERY_PROJECT_ID` | No | Project that owns BigQuery query jobs. Defaults to `GCP_PROJECT_ID`. |
 | `BILLING_EXPORT_PROJECT_ID` | No | Project containing the detailed billing export. Defaults to the query project. |
 | `BILLING_EXPORT_DATASET` | Cost only | Required dataset containing `gcp_billing_export_resource_v1_*`. |

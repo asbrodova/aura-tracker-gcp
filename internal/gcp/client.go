@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -95,7 +96,18 @@ func WithRecommender() Option {
 func WithCostReasoning(cfg CostAdapterConfig) Option {
 	return func(a *gcpAdapter) {
 		a.enableCostReasoning = true
-		a.costConfig = cfg
+		copy := cfg
+		a.legacyCostConfig = &copy
+	}
+}
+
+// WithCostReasoningSources configures workload-project-specific Cloud Billing
+// export sources. Selection is immutable after construction and safe for
+// concurrent requests.
+func WithCostReasoningSources(sources []CostSourceConfig) Option {
+	return func(a *gcpAdapter) {
+		a.enableCostReasoning = true
+		a.costSourceConfigs = append([]CostSourceConfig(nil), sources...)
 	}
 }
 
@@ -192,7 +204,6 @@ type gcpAdapter struct {
 	assetSvc                *cloudasset.Service
 	iamV2Svc                *iamv2.Service
 	gkeHubSvc               *gkehub.Service
-	costBQ                  *bigquery.Client
 	limiter                 *rate.Limiter
 	log                     *slog.Logger
 	auraCache               *ttlCache[models.AuraReport]
@@ -208,15 +219,18 @@ type gcpAdapter struct {
 	callTimeout  time.Duration
 	graphTimeout time.Duration
 	// --- slice / map / string (16–24 bytes each) ---
-	clientOpts     []option.ClientOption
-	enabledModules map[string]bool
-	traceBackend   string
-	costConfig     CostAdapterConfig
-	securityConfig SecurityAdapterConfig
+	clientOpts        []option.ClientOption
+	enabledModules    map[string]bool
+	traceBackend      string
+	costSourceConfigs []CostSourceConfig
+	costSources       map[string]*costSource
+	costClients       map[string]*bigquery.Client
+	ownedCostClients  map[string]bool
+	legacyCostConfig  *CostAdapterConfig
+	securityConfig    SecurityAdapterConfig
 	// --- bool (1 byte, grouped at end to minimise padding) ---
 	enableRecommender   bool
 	enableCostReasoning bool
-	ownsCostBQ          bool
 }
 
 // Compile-time assertion that gcpAdapter satisfies the full composite port.
@@ -252,9 +266,19 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 	if err := validateAdapterSettings(a, projectID); err != nil {
 		return nil, fmt.Errorf("gcp: configuration: %w", err)
 	}
-	a.costConfig = normalizeCostAdapterConfig(a.costConfig, projectID)
 	if a.enableCostReasoning {
-		if err := validateCostAdapterConfig(a.costConfig); err != nil {
+		if a.legacyCostConfig != nil && len(a.costSourceConfigs) > 0 {
+			return nil, fmt.Errorf("gcp: cost reasoning: legacy and multi-source configurations cannot be combined")
+		}
+		legacy := a.legacyCostConfig != nil
+		if legacy {
+			a.costSourceConfigs = []CostSourceConfig{{
+				WorkloadProjectIDs: []string{projectID}, CostAdapterConfig: *a.legacyCostConfig,
+			}}
+		}
+		var err error
+		a.costSourceConfigs, err = normalizeCostSourceConfigs(a.costSourceConfigs, projectID, legacy)
+		if err != nil {
 			return nil, fmt.Errorf("gcp: cost reasoning: %w", err)
 		}
 	}
@@ -497,14 +521,35 @@ func New(ctx context.Context, projectID string, opts ...Option) (_ *gcpAdapter, 
 		}
 	}
 	if a.enableCostReasoning {
-		if a.costConfig.QueryProjectID == projectID && a.bq != nil {
-			a.costBQ = a.bq
-		} else {
-			a.costBQ, err = bigquery.NewClient(ctx, a.costConfig.QueryProjectID, httpOpts...)
-			if err != nil {
-				return nil, fmt.Errorf("gcp: create cost BigQuery client: %w", err)
+		a.costSources = make(map[string]*costSource)
+		a.costClients = make(map[string]*bigquery.Client)
+		a.ownedCostClients = make(map[string]bool)
+		queryProjects := make(map[string]struct{})
+		for _, source := range a.costSourceConfigs {
+			queryProjects[source.QueryProjectID] = struct{}{}
+		}
+		orderedQueryProjects := make([]string, 0, len(queryProjects))
+		for queryProjectID := range queryProjects {
+			orderedQueryProjects = append(orderedQueryProjects, queryProjectID)
+		}
+		sort.Strings(orderedQueryProjects)
+		for _, queryProjectID := range orderedQueryProjects {
+			if queryProjectID == projectID && a.bq != nil {
+				a.costClients[queryProjectID] = a.bq
+				continue
 			}
-			a.ownsCostBQ = true
+			client, createErr := bigquery.NewClient(ctx, queryProjectID, httpOpts...)
+			if createErr != nil {
+				return nil, fmt.Errorf("gcp: create cost BigQuery client for query project %q: %w", queryProjectID, createErr)
+			}
+			a.costClients[queryProjectID] = client
+			a.ownedCostClients[queryProjectID] = true
+		}
+		for _, sourceConfig := range a.costSourceConfigs {
+			source := &costSource{config: sourceConfig.CostAdapterConfig, client: a.costClients[sourceConfig.QueryProjectID]}
+			for _, workloadProjectID := range sourceConfig.WorkloadProjectIDs {
+				a.costSources[workloadProjectID] = source
+			}
 		}
 		a.costRecommendationCache = newTTLCache[models.ListCostRecommendationsResponse](12 * time.Hour)
 	}
@@ -657,9 +702,18 @@ func (a *gcpAdapter) closeClients() error {
 			errs = append(errs, fmt.Errorf("close recommender client: %w", err))
 		}
 	}
-	if a.ownsCostBQ && a.costBQ != nil {
-		if err := a.costBQ.Close(); err != nil {
-			errs = append(errs, fmt.Errorf("close cost bigquery client: %w", err))
+	costProjectIDs := make([]string, 0, len(a.ownedCostClients))
+	for queryProjectID, owned := range a.ownedCostClients {
+		if owned {
+			costProjectIDs = append(costProjectIDs, queryProjectID)
+		}
+	}
+	sort.Strings(costProjectIDs)
+	for _, queryProjectID := range costProjectIDs {
+		if client := a.costClients[queryProjectID]; client != nil {
+			if err := client.Close(); err != nil {
+				errs = append(errs, fmt.Errorf("close cost bigquery client for query project %q: %w", queryProjectID, err))
+			}
 		}
 	}
 	if a.bq != nil {

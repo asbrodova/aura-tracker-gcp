@@ -194,6 +194,21 @@ func TestExplainCacheAvoidsRepeatedBillingQuery(t *testing.T) {
 	}
 }
 
+func TestExplainCacheIsIsolatedByProject(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
+	source := &fakeSource{facts: models.BillingCostFacts{Facts: []models.CostFact{{Dimension: "total", Key: "total"}}}}
+	engine := New(source, nil, Config{}, WithClock(func() time.Time { return now }))
+	for _, projectID := range []string{"dev-project-123", "preprod-project-123"} {
+		if _, err := engine.Explain(context.Background(), models.ExplainCostRequest{ProjectID: projectID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if source.factCalls != 2 {
+		t.Fatalf("billing fact calls = %d, want 2 distinct project cache entries", source.factCalls)
+	}
+}
+
 func TestResponseCacheIsBoundedAndPurgesExpiredEntries(t *testing.T) {
 	now := time.Date(2026, 8, 7, 12, 0, 0, 0, time.UTC)
 	engine := New(nil, nil, Config{})

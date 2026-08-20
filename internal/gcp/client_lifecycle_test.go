@@ -73,3 +73,32 @@ func TestValidateAdapterSettings(t *testing.T) {
 		t.Fatal("invalid project ID was accepted")
 	}
 }
+
+func TestCostClientsAreReusedByQueryProject(t *testing.T) {
+	adapter, err := New(context.Background(), "valid-project",
+		WithModules(map[string]bool{}),
+		WithClientOptions(option.WithoutAuthentication(), option.WithEndpoint("localhost:1")),
+		WithCostReasoningSources([]CostSourceConfig{
+			{WorkloadProjectIDs: []string{"dev-project-123"}, CostAdapterConfig: CostAdapterConfig{QueryProjectID: "shared-finops-123", Dataset: "dev_billing"}},
+			{WorkloadProjectIDs: []string{"preprod-project-123"}, CostAdapterConfig: CostAdapterConfig{QueryProjectID: "shared-finops-123", Dataset: "preprod_billing"}},
+			{WorkloadProjectIDs: []string{"prod-project-123"}, CostAdapterConfig: CostAdapterConfig{QueryProjectID: "valid-project", Dataset: "prod_billing"}},
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := adapter.Close(); err != nil {
+			t.Errorf("Close() error: %v", err)
+		}
+	}()
+	if len(adapter.costClients) != 2 || len(adapter.ownedCostClients) != 1 {
+		t.Fatalf("cost clients=%d owned=%d", len(adapter.costClients), len(adapter.ownedCostClients))
+	}
+	if adapter.costSources["dev-project-123"].client != adapter.costSources["preprod-project-123"].client {
+		t.Fatal("sources with the same query project did not reuse a client")
+	}
+	if adapter.costSources["prod-project-123"].client != adapter.bq {
+		t.Fatal("startup-project BigQuery client was not reused")
+	}
+}
