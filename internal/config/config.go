@@ -18,17 +18,30 @@ type RecommenderBQExportConfig struct {
 	Dataset string `yaml:"dataset"` // BigQuery dataset name to write recommendations into
 }
 
+// CostReasoningSourceConfig maps one or more configured environments to a
+// Cloud Billing detailed-export source.
+type CostReasoningSourceConfig struct {
+	Environments    []string `yaml:"environments" json:"environments"`
+	QueryProjectID  string   `yaml:"query_project_id" json:"query_project_id"`
+	ExportProjectID string   `yaml:"export_project_id" json:"export_project_id"`
+	Dataset         string   `yaml:"dataset" json:"dataset"`
+	Table           string   `yaml:"table" json:"table"`
+}
+
 // CostReasoningConfig controls the optional, read-only billing analysis tool.
 // The export project can differ from the project being analysed.
 type CostReasoningConfig struct {
-	Enabled         bool   `yaml:"enabled"`
-	QueryProjectID  string `yaml:"query_project_id"`
-	ExportProjectID string `yaml:"export_project_id"`
-	Dataset         string `yaml:"dataset"`
-	Table           string `yaml:"table"`
-	Timezone        string `yaml:"timezone"`
-	HistoryDays     int    `yaml:"history_days"`
-	MaxBytesBilled  int64  `yaml:"max_bytes_billed"`
+	Enabled        bool                        `yaml:"enabled" json:"enabled"`
+	Timezone       string                      `yaml:"timezone" json:"timezone"`
+	HistoryDays    int                         `yaml:"history_days" json:"history_days"`
+	MaxBytesBilled int64                       `yaml:"max_bytes_billed" json:"max_bytes_billed"`
+	Sources        []CostReasoningSourceConfig `yaml:"sources" json:"sources"`
+
+	// Deprecated: use Sources. These fields remain for one compatibility cycle.
+	QueryProjectID  string `yaml:"query_project_id" json:"query_project_id"`
+	ExportProjectID string `yaml:"export_project_id" json:"export_project_id"`
+	Dataset         string `yaml:"dataset" json:"dataset"`
+	Table           string `yaml:"table" json:"table"`
 }
 
 // SecurityAuditSuppressionConfig describes one time-bounded accepted risk.

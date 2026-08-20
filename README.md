@@ -491,7 +491,7 @@ RECOMMENDER_ENABLED=true \
 bash scripts/setup-iam.sh
 ```
 
-For tighter production access, grant `roles/bigquery.dataViewer` only on the billing dataset instead of the whole export project. The workload service account must be grantable in each referenced project.
+For tighter production access, grant `roles/bigquery.dataViewer` only on each billing dataset instead of its whole export project. The single Aura identity needs workload viewer permissions in every mapped environment, `roles/bigquery.jobUser` in every unique query project, and data-viewer access to every export dataset. The current setup script remains single-source; apply additional project and dataset grants manually for multi-environment routing.
 
 The query path is bounded: every statement is dry-run first, rejected above `COST_QUERY_MAX_BYTES`, then executed with the same BigQuery maximum-bytes limit. BigQuery performs aggregation and ranking before rows reach the process; responses are cached for 15 minutes. The default limit is 5 GiB per statement, and one uncached analysis normally executes two statements.
 
@@ -858,7 +858,8 @@ Re-running the script is safe: it keeps an existing service account and reconcil
 | `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Aura Scores include idle/over-provisioned signals with estimated monthly USD savings. Successful results are cached for 12 h. Per-recommender quota gates preserve valid cache hits, block uncached reads until an RFC3339 `retry_at`, and resume automatically. Gate state is process-local. Requires the Recommender Viewer role. |
 | `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to register the `gcp_export_recommendations_to_bq` tool. Off by default. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name used by `gcp_export_recommendations_to_bq`. Overrides `recommender_export.dataset` in `~/.aura-tracker.yaml`. |
-| `COST_REASONING_ENABLED` | No | Set `true` to register `gcp_cost_explain`. Off by default; `BILLING_EXPORT_DATASET` is then required. |
+| `COST_REASONING_ENABLED` | No | Set `true` to register `gcp_cost_explain`. Off by default; configure either `COST_REASONING_SOURCES_JSON` or the legacy billing-export settings. |
+| `COST_REASONING_SOURCES_JSON` | No | Strict JSON array mapping environment aliases/project IDs to billing sources. Cannot be combined with YAML `sources` or legacy source fields/environment variables. |
 | `COST_QUERY_PROJECT_ID` | No | Project that owns chargeable BigQuery query jobs. Defaults to `GCP_PROJECT_ID`. |
 | `BILLING_EXPORT_PROJECT_ID` | No | Project containing the detailed Cloud Billing export dataset. Defaults to `COST_QUERY_PROJECT_ID`. |
 | `BILLING_EXPORT_DATASET` | When cost reasoning is enabled | Dataset containing `gcp_billing_export_resource_v1_*`. |
@@ -928,6 +929,33 @@ security_audit:
 ```
 
 The legacy `GCP_PROJECT_ID` environment variable takes precedence over the legacy YAML `project_id`. The new `environments` list cannot be combined with either legacy setting, so ambiguous configuration fails at startup. Unknown YAML fields and invalid anonymization modes or boolean environment values are rejected rather than silently ignored.
+
+Cost reasoning can route each environment to a different detailed billing export. Every configured environment must appear exactly once; selectors may be aliases (case-insensitive) or configured project IDs:
+
+```yaml
+cost_reasoning:
+  enabled: true
+  timezone: Asia/Makassar
+  history_days: 90
+  max_bytes_billed: 5368709120
+  sources:
+    - environments: [dev]
+      query_project_id: finops-dev
+      export_project_id: billing-dev
+      dataset: cloud_billing
+    - environments: [prod]
+      query_project_id: finops-prod
+      export_project_id: billing-prod
+      dataset: cloud_billing
+```
+
+One central export is expressed as a shared source with `environments: [dev, prod]`. The query still filters `project.id` using the selected workload project, so environments do not share results. If `sources` is omitted, the legacy scalar fields and environment variables remain supported and define one source shared by all configured environments. Aura never falls back to another environment's source when a mapping is absent.
+
+For container deployments, `COST_REASONING_SOURCES_JSON` accepts the same source objects as a strict JSON array:
+
+```json
+[{"environments":["dev"],"query_project_id":"finops-dev","export_project_id":"billing-dev","dataset":"cloud_billing"},{"environments":["prod"],"query_project_id":"finops-prod","export_project_id":"billing-prod","dataset":"cloud_billing"}]
+```
 
 Container deployments can provide the same list as JSON:
 

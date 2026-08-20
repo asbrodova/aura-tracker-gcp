@@ -1,12 +1,15 @@
 package gcp
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"cloud.google.com/go/bigquery"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
+	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
 
 func TestParseCostFactTimesRejectsOverlappingPeriods(t *testing.T) {
@@ -18,6 +21,50 @@ func TestParseCostFactTimesRejectsOverlappingPeriods(t *testing.T) {
 	}
 	if _, _, _, _, _, err := parseCostFactTimes(request); err == nil {
 		t.Fatal("parseCostFactTimes() accepted overlapping current and baseline periods")
+	}
+}
+
+func TestNormalizeCostSourcesRejectsDuplicateWorkloadMapping(t *testing.T) {
+	t.Parallel()
+	_, err := NormalizeCostReasoningSources([]CostSourceConfig{
+		{WorkloadProjectIDs: []string{"dev-project-123"}, CostAdapterConfig: CostAdapterConfig{QueryProjectID: "finops-project-123", Dataset: "dev_billing"}},
+		{WorkloadProjectIDs: []string{"dev-project-123"}, CostAdapterConfig: CostAdapterConfig{QueryProjectID: "finops-project-456", Dataset: "other_billing"}},
+	}, "dev-project-123")
+	if err == nil || !strings.Contains(err.Error(), "more than one") {
+		t.Fatalf("duplicate mapping error = %v", err)
+	}
+}
+
+func TestCollectCostFactsDoesNotFallbackForUnmappedProject(t *testing.T) {
+	t.Parallel()
+	adapter := &gcpAdapter{enableCostReasoning: true, costSources: map[string]*costSource{}}
+	_, err := adapter.CollectCostFacts(context.Background(), models.CollectCostFactsRequest{ProjectID: "preprod-project-123"})
+	var missing *ports.CostSourceNotConfiguredError
+	if !errors.As(err, &missing) || missing.ProjectID != "preprod-project-123" {
+		t.Fatalf("error = %T %v", err, err)
+	}
+}
+
+func TestCostSourceSelectionKeepsExportDatasetsIsolated(t *testing.T) {
+	t.Parallel()
+	adapter := &gcpAdapter{costSources: map[string]*costSource{
+		"dev-project-123":     {config: CostAdapterConfig{ExportProjectID: "billing-dev-123", Dataset: "dev_billing"}},
+		"preprod-project-123": {config: CostAdapterConfig{ExportProjectID: "billing-preprod-123", Dataset: "preprod_billing"}},
+	}}
+	dev, err := adapter.costSourceForProject("dev-project-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	preprod, err := adapter.costSourceForProject("preprod-project-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableID := "gcp_billing_export_resource_v1_ABC"
+	if got := costTableReference(dev, tableID); got != "`billing-dev-123.dev_billing."+tableID+"`" {
+		t.Fatalf("dev table reference = %q", got)
+	}
+	if got := costTableReference(preprod, tableID); got != "`billing-preprod-123.preprod_billing."+tableID+"`" {
+		t.Fatalf("preprod table reference = %q", got)
 	}
 }
 

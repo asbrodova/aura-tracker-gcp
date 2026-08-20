@@ -41,3 +41,39 @@ func TestLoadWithoutHomeTreatsUserConfigAsOptional(t *testing.T) {
 		t.Fatalf("Load() without HOME returned %v", err)
 	}
 }
+
+func TestLoadCostReasoningSourcesAndRejectsUnknownNestedFields(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	writeUserConfig(t, `environments:
+  - project_id: dev-project-123
+    alias: dev
+    default: true
+cost_reasoning:
+  enabled: true
+  sources:
+    - environments: [dev]
+      query_project_id: finops-project-123
+      export_project_id: billing-project-123
+      dataset: cloud_billing
+`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.CostReasoning.Sources) != 1 || cfg.CostReasoning.Sources[0].Environments[0] != "dev" {
+		t.Fatalf("sources = %+v", cfg.CostReasoning.Sources)
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	writeUserConfig(t, `project_id: dev-project-123
+cost_reasoning:
+  sources:
+    - environments: [dev]
+      query_project_id: finops-project-123
+      dataset: cloud_billing
+      dataset_typo: rejected
+`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "dataset_typo") {
+		t.Fatalf("unknown nested field error = %v", err)
+	}
+}

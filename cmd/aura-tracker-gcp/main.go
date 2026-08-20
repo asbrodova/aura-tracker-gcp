@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -73,6 +72,14 @@ func run() error {
 		return fmt.Errorf("environment config: %w", err)
 	}
 	projectID := environmentRegistry.Default().ProjectID
+	if err := applyCostReasoningEnv(&userCfg.CostReasoning); err != nil {
+		return fmt.Errorf("cost reasoning config: %w", err)
+	}
+	costModuleEnabled := userCfg.CostReasoning.Enabled && (enabledModules == nil || enabledModules[mcpserver.ModuleCost])
+	costSources, err := compileCostReasoningSourcesIfEnabled(userCfg.CostReasoning, environmentRegistry, costModuleEnabled)
+	if err != nil {
+		return fmt.Errorf("cost reasoning config: %w", err)
+	}
 
 	ctx := context.Background()
 	securityCfg := securityAuditConfig(userCfg.SecurityAudit)
@@ -111,25 +118,25 @@ For automation, use an attached service account, Workload Identity, or service-a
 		log.Info("recommender integration enabled (set RECOMMENDER_ENABLED=false to disable)")
 	}
 
-	if err := applyCostReasoningEnv(&userCfg.CostReasoning); err != nil {
-		return fmt.Errorf("cost reasoning config: %w", err)
-	}
-	costModuleEnabled := userCfg.CostReasoning.Enabled && (enabledModules == nil || enabledModules[mcpserver.ModuleCost])
 	if costModuleEnabled {
-		if strings.TrimSpace(userCfg.CostReasoning.Dataset) == "" {
-			return errors.New("cost_reasoning.dataset or BILLING_EXPORT_DATASET is required when cost reasoning is enabled")
-		}
-		if userCfg.CostReasoning.Timezone != "" {
-			if _, err := time.LoadLocation(userCfg.CostReasoning.Timezone); err != nil {
-				return fmt.Errorf("invalid cost reasoning timezone %q: %w", userCfg.CostReasoning.Timezone, err)
+		adapterOpts = append(adapterOpts, gcpadapter.WithCostReasoningSources(costSources))
+		queryProjects := make(map[string]struct{})
+		explicitTables := 0
+		for _, source := range costSources {
+			queryProjects[source.QueryProjectID] = struct{}{}
+			if source.Table != "" {
+				explicitTables++
 			}
 		}
-		adapterOpts = append(adapterOpts, gcpadapter.WithCostReasoning(gcpadapter.CostAdapterConfig{
-			QueryProjectID: userCfg.CostReasoning.QueryProjectID, ExportProjectID: userCfg.CostReasoning.ExportProjectID,
-			Dataset: userCfg.CostReasoning.Dataset, Table: userCfg.CostReasoning.Table,
-			MaxBytesBilled: userCfg.CostReasoning.MaxBytesBilled,
-		}))
-		log.Info("cost reasoning enabled", "export_project", userCfg.CostReasoning.ExportProjectID, "dataset", userCfg.CostReasoning.Dataset)
+		log.Info("cost reasoning enabled",
+			"mapped_environments", len(environmentRegistry.Environments()),
+			"environment_aliases", environmentRegistry.DisplayNames(),
+			"sources", len(costSources), "query_clients", len(queryProjects),
+			"explicit_table_sources", explicitTables, "auto_discovery_sources", len(costSources)-explicitTables)
+	} else if userCfg.CostReasoning.Enabled {
+		log.Info("cost reasoning disabled by module filter")
+	} else {
+		log.Info("cost reasoning disabled")
 	}
 
 	// RECOMMENDER_BQ_EXPORT_ENABLED/DATASET override yaml config.
@@ -202,22 +209,26 @@ For automation, use an attached service account, Workload Identity, or service-a
 		mcpserver.WithModules(enabledModules),
 		mcpserver.WithEnvironments(environmentRegistry),
 	}
+	projectIDReplacements := costSourceProjectIDReplacements(costSources)
 	maskProjectID, err := readBoolEnv("ANONYMIZE_PROJECT_ID", false, os.Getenv)
 	if err != nil {
 		return err
 	}
 	if maskProjectID {
-		replacements := make(map[string]string)
+		maskedUnaliasedProject := false
 		for _, environment := range environmentRegistry.Environments() {
 			if environment.Alias == "" {
-				replacements[environment.ProjectID] = "[GCP_PROJECT_ID]"
+				projectIDReplacements[environment.ProjectID] = "[GCP_PROJECT_ID]"
+				maskedUnaliasedProject = true
 			}
 		}
-		mcpOpts = append(mcpOpts, mcpserver.WithProjectIDReplacements(replacements))
-		if len(replacements) > 0 {
+		if maskedUnaliasedProject {
 			mcpOpts = append(mcpOpts, mcpserver.WithProjectIDPlaceholder("your-project"))
 		}
 		log.Info("project ID masking enabled")
+	}
+	if len(projectIDReplacements) > 0 {
+		mcpOpts = append(mcpOpts, mcpserver.WithProjectIDReplacements(projectIDReplacements))
 	}
 	if userCfg.RecommenderExport.Enabled {
 		mcpOpts = append(mcpOpts, mcpserver.WithRecommenderExport(userCfg.RecommenderExport.Dataset))
@@ -336,7 +347,7 @@ func loadEnvironmentRegistry(userCfg config.Config, getenv func(string) string) 
 		if legacyEnvProject != "" || userCfg.ProjectID != "" || len(userCfg.Environments) > 0 {
 			return nil, errors.New("GCP_ENVIRONMENTS_JSON cannot be combined with GCP_PROJECT_ID, project_id, or environments in ~/.aura-tracker.yaml")
 		}
-		if err := json.Unmarshal([]byte(rawEnvironments), &configured); err != nil {
+		if err := decodeStrictJSON([]byte(rawEnvironments), &configured); err != nil {
 			return nil, fmt.Errorf("parse GCP_ENVIRONMENTS_JSON: %w", err)
 		}
 	case len(userCfg.Environments) > 0:
@@ -367,10 +378,17 @@ func loadEnvironmentRegistry(userCfg config.Config, getenv func(string) string) 
 }
 
 func applyCostReasoningEnv(cfg *config.CostReasoningConfig) error {
+	return applyCostReasoningEnvWithLookup(cfg, os.Getenv)
+}
+
+func applyCostReasoningEnvWithLookup(cfg *config.CostReasoningConfig, getenv func(string) string) error {
 	if cfg == nil {
 		return errors.New("configuration is nil")
 	}
-	if value := os.Getenv("COST_REASONING_ENABLED"); value != "" {
+	if getenv == nil {
+		return errors.New("environment lookup is nil")
+	}
+	if value := getenv("COST_REASONING_ENABLED"); value != "" {
 		switch value {
 		case "true":
 			cfg.Enabled = true
@@ -390,19 +408,39 @@ func applyCostReasoningEnv(cfg *config.CostReasoningConfig) error {
 		{"BILLING_EXPORT_TABLE", &cfg.Table},
 		{"COST_REASONING_TIMEZONE", &cfg.Timezone},
 	}
+	legacyEnvConfigured := false
+	for _, name := range []string{"COST_QUERY_PROJECT_ID", "BILLING_EXPORT_PROJECT_ID", "BILLING_EXPORT_DATASET", "BILLING_EXPORT_TABLE"} {
+		if strings.TrimSpace(getenv(name)) != "" {
+			legacyEnvConfigured = true
+		}
+	}
+	rawSourcesJSON := strings.TrimSpace(getenv("COST_REASONING_SOURCES_JSON"))
+	if rawSourcesJSON != "" {
+		if len(cfg.Sources) > 0 || hasLegacyCostFields(*cfg) || legacyEnvConfigured {
+			return errors.New("COST_REASONING_SOURCES_JSON cannot be combined with YAML sources or legacy cost source fields/environment variables")
+		}
+		if err := decodeStrictJSON([]byte(rawSourcesJSON), &cfg.Sources); err != nil {
+			return fmt.Errorf("parse COST_REASONING_SOURCES_JSON: %w", err)
+		}
+		if len(cfg.Sources) == 0 {
+			return errors.New("COST_REASONING_SOURCES_JSON must contain at least one source")
+		}
+	} else if len(cfg.Sources) > 0 && (hasLegacyCostFields(*cfg) || legacyEnvConfigured) {
+		return errors.New("cost_reasoning.sources cannot be combined with legacy cost source fields/environment variables")
+	}
 	for _, override := range stringOverrides {
-		if value := os.Getenv(override.name); value != "" {
+		if value := getenv(override.name); value != "" {
 			*override.target = value
 		}
 	}
-	if value := os.Getenv("COST_QUERY_MAX_BYTES"); value != "" {
+	if value := getenv("COST_QUERY_MAX_BYTES"); value != "" {
 		parsed, err := strconv.ParseInt(value, 10, 64)
 		if err != nil || parsed <= 0 {
 			return fmt.Errorf("COST_QUERY_MAX_BYTES must be a positive integer")
 		}
 		cfg.MaxBytesBilled = parsed
 	}
-	if value := os.Getenv("COST_REASONING_HISTORY_DAYS"); value != "" {
+	if value := getenv("COST_REASONING_HISTORY_DAYS"); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 14 || parsed > 366 {
 			return fmt.Errorf("COST_REASONING_HISTORY_DAYS must be between 14 and 366")
