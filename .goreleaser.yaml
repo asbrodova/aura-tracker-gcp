@@ -63,7 +63,7 @@ homebrew_casks:
       email: bot@goreleaser.com
     homepage: https://github.com/asbrodova/aura-tracker-gcp
     description: "MCP server exposing GCP infrastructure operations as LLM-callable tools."
-    license: MIT
+    license: Apache-2.0
 
 changelog:
   sort: asc
