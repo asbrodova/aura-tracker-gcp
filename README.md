@@ -2,15 +2,15 @@
 
 [![CI](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml/badge.svg)](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml)
 [![Latest release](https://img.shields.io/github/v/release/asbrodova/aura-tracker-gcp)](https://github.com/asbrodova/aura-tracker-gcp/releases/latest)
-[![Go Report Card](https://goreportcard.com/badge/github.com/asbrodova/aura-tracker-gcp)](https://goreportcard.com/report/github.com/asbrodova/aura-tracker-gcp)
-[![Go Reference](https://pkg.go.dev/badge/github.com/asbrodova/aura-tracker-gcp.svg)](https://pkg.go.dev/github.com/asbrodova/aura-tracker-gcp)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 **The open-source intelligence layer for Google Cloud.**
 
 Ask a question in plain English. Aura investigates live GCP inventory, metrics, logs, IAM, topology, recommendations, and billing data—then returns a prioritized answer with evidence.
 
-It is an open-source, model-agnostic [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server written in Go. Use it with Claude Desktop, Claude Code, Cowork, or any MCP-compatible client.
+Aura is an open-source, model-agnostic GCP intelligence engine. It combines live cloud access with deterministic investigation workflows for incidents, security, architecture, environment drift, and cost.
+
+Claude Desktop, Claude Code, Cowork, and other AI clients connect to Aura through [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
 
 **73 tools · 30 modules · 10 resources · multi-environment routing · preview-before-change safety**
 
