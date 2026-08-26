@@ -10,19 +10,21 @@ Ask a question in plain English. Aura investigates live GCP inventory, metrics, 
 
 Aura is an open-source, model-agnostic GCP intelligence engine. It combines live cloud access with deterministic investigation workflows for incidents, security, architecture, environment drift, and cost.
 
-Claude Desktop, Claude Code, Cowork, and other AI clients connect to Aura through [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
+Codex, Claude Desktop, Claude Code, Cowork, and other AI clients connect to Aura through [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
 
-**73 tools · 30 modules · 10 resources · multi-environment routing · preview-before-change safety**
+**73 tools across 30 modules · 10 context resources · multi-environment routing · preview-before-change safety**
 
 ![Aura Tracker GCP diagnoses failing scheduled Cloud Run jobs from one natural-language question](docs/aura-cloud-run-diagnosis.gif)
 
-**[Install in five minutes](#quick-start)** · **[Try real questions](#questions-worth-asking)** · **[Read the wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)** · **[View releases](https://github.com/asbrodova/aura-tracker-gcp/releases)**
+**[Install in five minutes](#quick-start)** · **[Try real questions](#try-asking-aura)** · **[Read the wiki](https://github.com/asbrodova/aura-tracker-gcp/wiki)** · **[View releases](https://github.com/asbrodova/aura-tracker-gcp/releases)**
 
 > If Aura saves you a round of console-hopping, consider [starring the repository](https://github.com/asbrodova/aura-tracker-gcp). It helps other GCP engineers discover the project.
 
-## One question. One investigation. One useful answer.
+## Try asking Aura
 
-GCP incidents rarely live inside one product page. A failed scheduled workload may require Cloud Scheduler, Cloud Run Jobs, execution history, and Logging. A cost increase may require billing exports, Asset Inventory, Monitoring, and Recommender.
+These are starting points, not a fixed command list. Ask naturally, add the environment when it matters, and follow up on anything Aura finds.
+
+GCP problems rarely live inside one product page. A failed scheduled workload may require Cloud Scheduler, Cloud Run Jobs, execution history, and Logging. A cost increase may require billing exports, Asset Inventory, Monitoring, and Recommender.
 
 Aura follows those relationships for you.
 
@@ -33,6 +35,9 @@ Aura follows those relationships for you.
 | “Is this project secure?” | IAM inheritance and deny policies → service accounts → secrets metadata → public endpoints → firewalls → GKE identity | A severity-ranked audit, security score, remediation, and explicit coverage gaps |
 | “What changed between dev and preprod?” | Symmetric collection across supported services | Field-level drift without silently treating either environment as the baseline |
 | “Show me how this system is connected.” | Runtime inventory → topology → dependencies | Mermaid, Graphviz DOT, JSON, or rendered SVG architecture output |
+| “What is unhealthy in dev right now, and what should I investigate first?” | Resource health → metrics → recommendations → Aura Score | A worst-first project triage with evidence |
+| “Where are our monitoring blind spots?” | Runtime inventory → metrics → logs → alerts → SLO coverage | Unmonitored workloads and concrete observability gaps |
+| “Which workloads depend on this Pub/Sub topic?” | Pub/Sub → Eventarc → Cloud Run and Functions → serverless graph | Producers, consumers, triggers, and the surrounding event path |
 
 ## Why engineers use Aura
 
@@ -111,9 +116,20 @@ Use that exact path in your client configuration. On an Apple Silicon Mac it is 
 
 Common configuration locations:
 
+- Codex app, CLI, and IDE extension: `~/.codex/config.toml` or project-scoped `.codex/config.toml`
 - Claude Desktop on macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Claude Code: `.claude/settings.json` or `~/.claude/settings.json`
 - Other clients: point the MCP stdio server at the Aura binary
+
+For Codex, you can add Aura directly from the terminal:
+
+```bash
+codex mcp add aura-tracker-gcp \
+  --env GCP_PROJECT_ID=your-gcp-project-id \
+  -- /opt/homebrew/bin/aura-tracker-gcp
+```
+
+See the official [Codex MCP setup](https://developers.openai.com/codex/mcp) for app, CLI, IDE, and `config.toml` options.
 
 Restart the client after saving the file.
 
@@ -142,9 +158,9 @@ xattr -d com.apple.quarantine "$(which aura-tracker-gcp)"
 
 Then restart the MCP client.
 
-## Questions worth asking
+## More questions to try
 
-These are deliberately written like real engineering questions, not API calls.
+Copy one into your connected AI client, or use it as the beginning of a deeper investigation. These are deliberately written like real engineering questions, not API calls.
 
 ### Reliability and incident response
 
@@ -156,6 +172,12 @@ These are deliberately written like real engineering questions, not API calls.
 
 > Check whether my scheduled Cloud Run jobs are actually succeeding.
 
+> Give me a quick health check for dev. Show what is healthy, what is not, and the three things I should investigate first.
+
+> What changed shortly before latency and 5xx errors increased?
+
+> Find workloads that have no useful alerts, uptime checks, or SLO coverage.
+
 ### Security and access
 
 > Audit dev for the most important security gaps. Prioritize what I should fix first and tell me what you could not verify.
@@ -163,6 +185,12 @@ These are deliberately written like real engineering questions, not API calls.
 > Which services are publicly reachable, and is that exposure consistent with IAM and firewall configuration?
 
 > What can the current identity inspect in this project, and which Aura checks will fail because of missing permissions?
+
+> Which service accounts have user-managed keys or unexpectedly broad access?
+
+> Trace how a public request could reach this service through networking and IAM.
+
+> Check GKE identity configuration for risky workload-to-service-account mappings.
 
 ### Cost and efficiency
 
@@ -172,6 +200,12 @@ These are deliberately written like real engineering questions, not API calls.
 
 > Find idle or over-provisioned resources and estimate the available monthly savings.
 
+> Compare dev and preprod cost by service, SKU, and resource. Explain the largest differences.
+
+> Which Recommender findings could save the most money, and which ones need validation before acting?
+
+> Are BigQuery workloads showing expensive query patterns or optimization opportunities?
+
 ### Architecture and drift
 
 > Compare dev and preprod. Show only differences that could cause incidents or unexpected cost.
@@ -179,6 +213,22 @@ These are deliberately written like real engineering questions, not API calls.
 > Generate a Mermaid architecture diagram for the serverless request path from Eventarc through Cloud Run and Pub/Sub.
 
 > Show the dependencies around this Cloud Run service, including data stores, queues, secrets, and networking.
+
+> Trace the full event path from this Pub/Sub topic to every Eventarc trigger, Cloud Run service, and function.
+
+> Inventory the databases in preprod and show which runtimes appear to depend on each one.
+
+> Which resources are missing owner, environment, or cost-center labels?
+
+### Platform inventory and delivery
+
+> What is deployed in this project across GKE, Cloud Run, Functions, workflows, jobs, and data stores?
+
+> Show me outdated GKE versions, risky node-pool configuration, and workload placement problems.
+
+> Review Artifact Registry and Cloud Build for supply-chain or artifact-hygiene gaps.
+
+> Which enabled Google Cloud APIs appear relevant to Aura checks, and where will permissions or disabled APIs limit the investigation?
 
 ## Multi-environment GCP intelligence
 
