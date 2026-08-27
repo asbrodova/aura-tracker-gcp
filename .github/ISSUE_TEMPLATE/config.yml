@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/asbrodova/aura-tracker-gcp/security/advisories/new
+    about: Report suspected vulnerabilities privately instead of opening a public issue.
+  - name: Read the documentation
+    url: https://github.com/asbrodova/aura-tracker-gcp/wiki
+    about: Check installation, configuration, modules, cost reasoning, and security guidance.
