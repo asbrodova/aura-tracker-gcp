@@ -4,13 +4,15 @@ Thank you for improving this project. This guide covers the dev loop, architectu
 
 ## Governance and maintainer approval
 
-Contributions are welcome through pull requests. Repository ownership remains with [@asbrodova](https://github.com/asbrodova):
+Contributions are welcome through pull requests.
 
-- Contributors may propose changes, review code, and respond to feedback, but they must not merge pull requests.
-- Only `@asbrodova`, the repository owner and code owner, decides when a pull request is approved and merges it into `main`.
-- Passing CI is required for consideration, but a green pull request is not approval to merge.
-- Only `@asbrodova` creates or pushes `v*` tags and publishes Aura Tracker GCP releases.
-- Contributors must not create release tags, publish GitHub releases, or update release assets.
+### Maintainer approval
+
+All pull requests require maintainer review and are merged by [@asbrodova](https://github.com/asbrodova). Passing CI confirms that automated checks succeeded; it does not constitute approval.
+
+### Releases
+
+Version tags and official Aura Tracker GCP releases are created and published exclusively by [@asbrodova](https://github.com/asbrodova).
 
 ## Prerequisites
 
@@ -84,6 +86,5 @@ Both mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) 
 - One logical change per PR; keep diffs reviewable
 - All automated checks must be green: Test, Lint, GoReleaser config check, Vulnerability and secret scan, and the configured CodeQL analyses
 - Update `README.md` if you changed tools, env vars, or architecture
-- Address review feedback and resolve conversations; do not merge the pull request yourself
-- The maintainer performs the final squash merge after explicit approval
-- Do not create or push a `v*` tag; release tags and releases are maintainer-only
+- Address review feedback and resolve conversations; the maintainer handles the final squash merge
+- Leave version tagging and release publication to the maintainer
