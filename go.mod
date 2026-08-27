@@ -1,6 +1,6 @@
 module github.com/asbrodova/aura-tracker-gcp
 
-go 1.26.6
+go 1.26.7
 
 require (
 	cloud.google.com/go/bigquery v1.76.0

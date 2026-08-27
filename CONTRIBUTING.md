@@ -4,7 +4,7 @@ Thank you for improving this project. This guide covers the dev loop, architectu
 
 ## Prerequisites
 
-- The Go version declared in `go.mod` (currently Go 1.26.6 or newer; check with `go version`)
+- The Go version declared in `go.mod` (currently Go 1.26.7 or newer; check with `go version`)
 - `gcloud` CLI authenticated: `gcloud auth application-default login`
 - `GCP_PROJECT_ID` set to a project you control for manual smoke tests
 
