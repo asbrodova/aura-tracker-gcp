@@ -12,7 +12,7 @@ Aura is an open-source, model-agnostic GCP intelligence engine. It combines live
 
 Codex, Claude Desktop, Claude Code, Cowork, and other AI clients connect to Aura through [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
 
-**73 tools across 30 modules · 10 context resources · multi-environment routing · preview-before-change safety**
+**73 zero-configuration tools · 29 immediately active tool modules · 10 context-resource definitions · multi-environment routing · preview-before-change safety**
 
 ![Aura Tracker GCP diagnoses failing scheduled Cloud Run jobs from one natural-language question](docs/aura-cloud-run-diagnosis.gif)
 
@@ -75,11 +75,19 @@ Homebrew is the fastest path on macOS and Linux:
 brew install --cask asbrodova/tap/aura-tracker-gcp
 ```
 
-You can also download a binary from the [latest release](https://github.com/asbrodova/aura-tracker-gcp/releases/latest), install with Go, or run the published container.
+You can also download a binary from the [latest release](https://github.com/asbrodova/aura-tracker-gcp/releases/latest), install with Go, or build a local image from the repository `Dockerfile`.
 
 ```bash
 go install github.com/asbrodova/aura-tracker-gcp/cmd/aura-tracker-gcp@latest
 ```
+
+```bash
+git clone https://github.com/asbrodova/aura-tracker-gcp.git
+cd aura-tracker-gcp
+docker build -t aura-tracker-gcp:local .
+```
+
+Aura does not currently publish an official container image.
 
 ### 2. Authenticate
 
@@ -305,7 +313,7 @@ See [Cost Reasoning](https://github.com/asbrodova/aura-tracker-gcp/wiki/Cost-Rea
 | **Platform inventory** | Cloud Functions, Eventarc, Scheduler, Workflows, Tasks, Pub/Sub, Cloud SQL, Storage, Spanner, AlloyDB, Firestore, Memorystore, Artifact Registry, Cloud Build, and Service Directory |
 | **Safe changes** | Preview-and-confirm GKE node-pool scaling and Cloud Run traffic updates |
 
-The default server exposes 73 tools across 30 module flags. Cost reasoning and recommendation export are separately controlled integrations. Four static and six templated MCP resources expose BigQuery schemas, Cloud Run snapshots, Storage metadata, and IAM permissions before the model chooses a tool.
+The zero-configuration server exposes 73 tools across 29 immediately active tool modules. Cost reasoning is the 30th selectable module and adds a 74th tool only when its billing-export prerequisites are configured; the separately opt-in recommendation export can add a 75th tool. Four static resources per environment and six URI templates expose BigQuery schemas, Cloud Run snapshots, Storage metadata, and IAM permissions before the model chooses a tool.
 
 Browse the complete [module reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/Module-Reference), [resource reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/MCP-Resources-Reference), and [built-in workflows](https://github.com/asbrodova/aura-tracker-gcp/wiki/Built-in-Prompts-and-Workflows).
 
