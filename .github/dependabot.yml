@@ -8,6 +8,10 @@ updates:
       go-dependencies:
         patterns:
           - "*"
+        exclude-patterns:
+          # mcp-go updates need isolated compatibility testing. Mixing them
+          # with Google SDK updates hides protocol and routing regressions.
+          - "github.com/mark3labs/mcp-go"
 
   - package-ecosystem: github-actions
     directory: /

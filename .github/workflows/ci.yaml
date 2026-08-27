@@ -70,6 +70,15 @@ jobs:
           version: v2.17.1
           args: check
 
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Build local image
+        run: docker build --tag aura-tracker-gcp:ci .
+
   security:
     name: Vulnerability and secret scan
     runs-on: ubuntu-latest
