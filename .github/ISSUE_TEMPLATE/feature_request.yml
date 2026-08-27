@@ -1,0 +1,74 @@
+name: Feature request
+description: Propose a GCP intelligence workflow or product improvement
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before prescribing an implementation. Real GCP workflows help shape both the open-source engine and the future managed Aura experience.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to understand, investigate, automate, or avoid?
+      placeholder: Today I need to switch between several GCP pages and manually correlate ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired_experience
+    attributes:
+      label: Desired Aura experience
+      description: Show how you would naturally ask for it and what a useful answer should contain.
+      placeholder: |
+        I would ask: "..."
+
+        A useful answer would include: ...
+    validations:
+      required: true
+
+  - type: input
+    id: gcp_services
+    attributes:
+      label: Relevant GCP services
+      placeholder: GKE, Cloud Run, Eventarc, Pub/Sub, BigQuery, Cloud SQL
+
+  - type: dropdown
+    id: product_area
+    attributes:
+      label: Where would this be most useful?
+      options:
+        - Open-source self-hosted engine
+        - Future managed Aura Cloud experience
+        - Both
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternative
+      description: What tools, console pages, scripts, or manual process do you use today?
+
+  - type: dropdown
+    id: contribution
+    attributes:
+      label: Would you be interested in contributing?
+      options:
+        - Yes
+        - Maybe, with guidance
+        - No
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues for a similar request.
+          required: true
+        - label: This request contains no credentials or sensitive GCP information.
+          required: true

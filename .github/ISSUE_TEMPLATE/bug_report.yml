@@ -1,0 +1,118 @@
+name: Bug report
+description: Report reproducible incorrect behavior in Aura Tracker GCP
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Aura Tracker GCP.
+
+        Do not include service-account keys, access tokens, secret values, billing data, private logs, or sensitive project identifiers. Report suspected vulnerabilities through [GitHub private vulnerability reporting](https://github.com/asbrodova/aura-tracker-gcp/security/advisories/new), not this public form.
+
+  - type: input
+    id: version
+    attributes:
+      label: Aura version
+      description: Run `aura-tracker-gcp --version` or provide the commit SHA.
+      placeholder: v1.2.2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: installation
+    attributes:
+      label: Installation method
+      options:
+        - Homebrew
+        - GitHub release binary
+        - go install
+        - Container image
+        - Built from source
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      placeholder: macOS 15 arm64, Ubuntu 24.04 amd64, or similar
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: AI client
+      description: Include the client version when known.
+      placeholder: Codex app, Claude Desktop, Claude Code, Cowork, or another client
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport
+      options:
+        - Local stdio
+        - Remote SSE
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: modules
+    attributes:
+      label: Enabled modules
+      description: Enter `default` if you did not pass `--modules`.
+      placeholder: default, or incident,security,drift
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the incorrect behavior and its impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include the natural-language request and the smallest reproducible sequence. Replace project IDs with aliases or placeholders.
+      placeholder: |
+        1. Configure ...
+        2. Ask ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Add relevant errors, logs, or configuration after removing credentials, project IDs, billing data, and private resource names.
+      render: shell
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I checked that this is reproducible with the latest release or current `main`.
+          required: true
+        - label: I searched existing issues for a duplicate.
+          required: true
+        - label: I removed credentials and sensitive GCP information from this report.
+          required: true
