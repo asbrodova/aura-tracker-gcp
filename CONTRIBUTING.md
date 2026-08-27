@@ -84,7 +84,7 @@ Both mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) 
 ## Submitting a PR
 
 - One logical change per PR; keep diffs reviewable
-- All automated checks must be green: Test, Lint, GoReleaser config check, Vulnerability and secret scan, and the configured CodeQL analyses
+- All automated checks must be green: Test, Lint, Docker build, GoReleaser config check, Vulnerability and secret scan, and the configured CodeQL analyses
 - Update `README.md` if you changed tools, env vars, or architecture
 - Address review feedback and resolve conversations; the maintainer handles the final squash merge
 - Leave version tagging and release publication to the maintainer
