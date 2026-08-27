@@ -126,7 +126,7 @@ func sanitizeSVG(source string) (string, error) {
 					return "", fmt.Errorf("unsafe SVG attribute %q", attrName)
 				}
 				attrValue := strings.ToLower(strings.TrimSpace(attr.Value))
-				if strings.HasPrefix(attrValue, "javascript:") || strings.HasPrefix(attrValue, "data:") || strings.HasPrefix(attrValue, "http:") || strings.HasPrefix(attrValue, "https:") {
+				if strings.HasPrefix(attrValue, "javascript:") || strings.HasPrefix(attrValue, "vbscript:") || strings.HasPrefix(attrValue, "data:") || strings.HasPrefix(attrValue, "http:") || strings.HasPrefix(attrValue, "https:") {
 					return "", fmt.Errorf("unsafe external SVG attribute value")
 				}
 			}

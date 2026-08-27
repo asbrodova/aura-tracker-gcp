@@ -35,6 +35,7 @@ archives:
           - zip
     files:
       - README.md
+      - LICENSE
 
 checksum:
   name_template: checksums.txt
@@ -62,7 +63,7 @@ homebrew_casks:
       name: goreleaserbot
       email: bot@goreleaser.com
     homepage: https://github.com/asbrodova/aura-tracker-gcp
-    description: "MCP server exposing GCP infrastructure operations as LLM-callable tools."
+    description: "Self-hosted GCP intelligence engine for incidents, security, architecture, drift, and cost."
     license: Apache-2.0
 
 changelog:

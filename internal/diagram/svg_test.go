@@ -21,10 +21,13 @@ func TestSanitizeSVGAcceptsGraphvizShape(t *testing.T) {
 
 func TestSanitizeSVGRejectsActiveOrExternalContent(t *testing.T) {
 	for name, input := range map[string]string{
-		"script":   `<svg><script>alert(1)</script></svg>`,
-		"handler":  `<svg><g onclick="alert(1)"/></svg>`,
-		"external": `<svg><use href="https://evil.example/image.svg"/></svg>`,
-		"image":    `<svg><image/></svg>`,
+		"script":            `<svg><script>alert(1)</script></svg>`,
+		"handler":           `<svg><g onclick="alert(1)"/></svg>`,
+		"external":          `<svg><use href="https://evil.example/image.svg"/></svg>`,
+		"image":             `<svg><image/></svg>`,
+		"javascript scheme": `<svg><g aria-label="javascript:alert(1)"/></svg>`,
+		"vbscript scheme":   `<svg><g aria-label="vbscript:msgbox(1)"/></svg>`,
+		"data scheme":       `<svg><g aria-label="data:text/html,unsafe"/></svg>`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := sanitizeSVG(input); err == nil {
