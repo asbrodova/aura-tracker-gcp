@@ -232,6 +232,16 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 					return mcp.NewToolResultError(validationErr.Error()), nil
 				}
 				req.Params.Arguments = args
+				// mcp-go v1 binds typed handler arguments from RawArguments (the
+				// wire bytes) whenever they are present. Re-encode the resolved,
+				// validated map into it; otherwise handlers would bind the
+				// caller's original selector (an alias or the placeholder) and
+				// send it to GCP as a project ID.
+				raw, err := json.Marshal(args)
+				if err != nil {
+					return mcp.NewToolResultError("tool arguments could not be encoded"), nil
+				}
+				req.Params.RawArguments = raw
 			}
 			result, err := orig(middleware.WithCorrelationID(ctx), req)
 			if err != nil {
