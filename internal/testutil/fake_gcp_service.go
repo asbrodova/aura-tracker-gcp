@@ -160,6 +160,9 @@ type FakeGCPService struct {
 	ListCostRecommendationsFunc func(context.Context, models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error)
 	ListCreatedAssetsFunc       func(context.Context, models.ListCreatedAssetsRequest) (models.ListCreatedAssetsResponse, error)
 
+	// Recommender export
+	ExportRecommendationsToBQFunc func(context.Context, models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error)
+
 	// Additional Aura scores (added in main after branch cut)
 	GetGKEAuraScoreFunc func(context.Context, models.GetGKEAuraScoreRequest) (models.GKEAuraReport, error)
 	GetGCSAuraScoreFunc func(context.Context, models.GetGCSAuraScoreRequest) (models.GCSAuraReport, error)
@@ -645,7 +648,10 @@ func (f *FakeGCPService) GetGCSAuraScore(ctx context.Context, req models.GetGCSA
 	}
 	return models.GCSAuraReport{}, nil
 }
-func (f *FakeGCPService) ExportRecommendationsToBQ(_ context.Context, _ models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+func (f *FakeGCPService) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
+	if f.ExportRecommendationsToBQFunc != nil {
+		return f.ExportRecommendationsToBQFunc(ctx, req)
+	}
 	return models.ExportRecommendationsToBQResponse{}, nil
 }
 
