@@ -316,13 +316,14 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	}
 
 	// --- Tools ---
+	iamTools := tools.NewIAMTools(svc, log)
 	allModules := []ToolModule{
 		tools.NewGKETools(svc, log),
 		tools.NewCloudRunTools(svc, log),
 		tools.NewPubSubTools(svc, log),
 		tools.NewLoggingTools(svc, log),
 		tools.NewMonitoringTools(svc, log),
-		tools.NewIAMTools(svc, log),
+		iamTools,
 		tools.NewTopologyTools(svc, log),
 		tools.NewAuraTools(svc, log),
 		tools.NewStorageTools(svc, log),
@@ -353,6 +354,10 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	if o.enableCostReasoning {
 		allModules = append(allModules, tools.NewCostTools(costreasoning.New(svc, log, o.costReasoningConfig), log))
 	}
+	// One capability catalog backs both gcp_iam_test_permissions (when the caller
+	// omits "permissions") and the gcp://{project}/iam/my-permissions resource.
+	permissionCatalog := permissionsForModules(activeModuleSet(allModules, o.enabledModules))
+	iamTools.SetDefaultPermissions(permissionCatalog)
 	registeredTools := FilteredRegistry(allModules, o.enabledModules)
 	protocolGuard.addTools(registeredTools)
 	for _, t := range registeredTools {
@@ -363,7 +368,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	bqRes := resources.NewBigQueryResources(svc, log, o.environments, o.projectIDPlaceholder)
 	crRes := resources.NewCloudRunResources(svc, log, o.environments, o.projectIDPlaceholder)
 	gcsRes := resources.NewStorageResources(svc, log, o.environments, o.projectIDPlaceholder)
-	iamRes := resources.NewIAMResources(svc, log, o.environments, o.projectIDPlaceholder, permissionsForModules(activeModuleSet(allModules, o.enabledModules)))
+	iamRes := resources.NewIAMResources(svc, log, o.environments, o.projectIDPlaceholder, permissionCatalog)
 
 	configuredEnvironments := []environments.Environment{{}}
 	if o.environments != nil {
