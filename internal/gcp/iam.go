@@ -129,20 +129,18 @@ func (a *gcpAdapter) TestPermissions(ctx context.Context, req models.TestPermiss
 	ctx, cancel := a.withTimeout(ctx)
 	defer cancel()
 
-	resp, err := a.crm.Projects.TestIamPermissions(
-		req.ProjectID,
-		&cloudresourcemanager.TestIamPermissionsRequest{
-			Permissions: req.Permissions,
-		},
-	).Context(ctx).Do()
+	allowed, err := testPermissionsInBatches(req.Permissions, func(batch []string) ([]string, error) {
+		resp, err := a.crm.Projects.TestIamPermissions(
+			req.ProjectID,
+			&cloudresourcemanager.TestIamPermissionsRequest{Permissions: batch},
+		).Context(ctx).Do()
+		if err != nil {
+			return nil, err
+		}
+		return resp.Permissions, nil
+	})
 	if err != nil {
 		return models.TestPermissionsResponse{}, wrapGCPError("iam.TestPermissions", err)
-	}
-
-	// Build a set of allowed permissions from the response.
-	allowed := make(map[string]bool, len(resp.Permissions))
-	for _, p := range resp.Permissions {
-		allowed[p] = true
 	}
 
 	results := make([]models.PermissionResult, 0, len(req.Permissions))
@@ -193,4 +191,25 @@ func resolveCallerIdentity(ctx context.Context, limiter *rate.Limiter) string {
 		return ""
 	}
 	return strings.TrimSpace(string(email))
+}
+
+// maxTestIAMPermissionsPerCall is the projects.testIamPermissions request limit.
+const maxTestIAMPermissionsPerCall = 100
+
+// testPermissionsInBatches probes permissions in API-sized batches and returns
+// the set the caller holds. The default probe is the enabled-module capability
+// catalog, which can exceed one request's limit as modules are added.
+func testPermissionsInBatches(permissions []string, test func(batch []string) ([]string, error)) (map[string]bool, error) {
+	allowed := make(map[string]bool, len(permissions))
+	for start := 0; start < len(permissions); start += maxTestIAMPermissionsPerCall {
+		end := min(start+maxTestIAMPermissionsPerCall, len(permissions))
+		granted, err := test(permissions[start:end])
+		if err != nil {
+			return nil, err
+		}
+		for _, permission := range granted {
+			allowed[permission] = true
+		}
+	}
+	return allowed, nil
 }

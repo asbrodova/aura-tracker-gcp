@@ -14,12 +14,21 @@ import (
 
 // IAMTools provides MCP tool definitions and handlers for IAM operations.
 type IAMTools struct {
-	svc ports.IAMService
-	log *slog.Logger
+	svc                ports.IAMService
+	log                *slog.Logger
+	defaultPermissions []string
 }
 
 func NewIAMTools(svc ports.IAMService, log *slog.Logger) *IAMTools {
 	return &IAMTools{svc: svc, log: log}
+}
+
+// SetDefaultPermissions sets the permissions probed when a caller omits
+// "permissions". The server passes the capability catalog of the enabled
+// modules, so the tool and the gcp://{project}/iam/my-permissions resource
+// report the same set.
+func (t *IAMTools) SetDefaultPermissions(permissions []string) {
+	t.defaultPermissions = append([]string(nil), permissions...)
 }
 
 func (t *IAMTools) Name() string { return "iam" }
@@ -37,7 +46,7 @@ func (t *IAMTools) TestPermissions() server.ServerTool {
 		mcp.WithDescription("Test which IAM permissions the service account holds on the project. Call before mutations to pre-check access."),
 		mcp.WithString("project_id", mcp.Description("GCP project ID to test permissions against. Omit to use the server default.")),
 		mcp.WithArray("permissions",
-			mcp.Description("Permissions to test. Omit to check the server's standard read and mutation permission set."),
+			mcp.Description("Permissions to test. Omit to check every permission the enabled modules and MCP resources use."),
 			mcp.WithStringItems(),
 			mcp.UniqueItems(true),
 			mcp.MaxItems(100),
@@ -62,7 +71,10 @@ func (t *IAMTools) testPermissionsHandler(ctx context.Context, _ mcp.CallToolReq
 		"permission_count", len(args.Permissions),
 	)
 	if len(args.Permissions) == 0 {
-		args.Permissions = defaultPermissionsToCheck()
+		args.Permissions = append([]string(nil), t.defaultPermissions...)
+	}
+	if len(args.Permissions) == 0 {
+		return mcp.NewToolResultError("gcp_iam_test_permissions: no default permission set is configured; pass permissions explicitly"), nil
 	}
 	resp, err := t.svc.TestPermissions(ctx, args)
 	if err != nil {
@@ -149,49 +161,5 @@ func (t *IAMTools) ListServiceAccounts() server.ServerTool {
 			}
 			return result, nil
 		}),
-	}
-}
-
-// defaultPermissionsToCheck returns a useful set of GCP permissions to probe
-// when the caller does not specify an explicit list.
-func defaultPermissionsToCheck() []string {
-	return []string{
-		// Phase 1 — core services
-		"container.clusters.list",
-		"container.clusters.get",
-		"container.clusters.update",
-		"run.services.list",
-		"run.services.get",
-		"run.services.update",
-		"pubsub.topics.list",
-		"pubsub.topics.get",
-		"logging.logEntries.list",
-		"monitoring.timeSeries.list",
-		"resourcemanager.projects.getIamPolicy",
-		// Phase 2 — GKE workloads
-		"container.namespaces.get",
-		// Phase 2 — networking
-		"compute.forwardingRules.list",
-		"compute.networks.list",
-		"compute.subnetworks.list",
-		"compute.networkEndpointGroups.list",
-		// Phase 2 — data stores
-		"spanner.instances.list",
-		"alloydb.clusters.list",
-		"datastore.databases.list",
-		"redis.instances.list",
-		// Phase 2 — supply chain
-		"artifactregistry.repositories.list",
-		"cloudbuild.builds.list",
-		"servicedirectory.namespaces.list",
-		// Phase 2 — IAM
-		"iam.serviceAccounts.list",
-		// Phase 2 — monitoring completions
-		"monitoring.alertPolicies.list",
-		"monitoring.uptimeCheckConfigs.list",
-		// Phase 2 — tagging
-		"resourcemanager.tagBindings.list",
-		// Phase 2 — traces
-		"cloudtrace.traces.list",
 	}
 }
