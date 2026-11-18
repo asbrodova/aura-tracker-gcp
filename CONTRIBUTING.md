@@ -16,7 +16,7 @@ Version tags and official Aura Tracker GCP releases are created and published ex
 
 ## Prerequisites
 
-- The Go version declared in `go.mod` (currently Go 1.27.3 or newer; check with `go version`)
+- The Go version declared in `go.mod` (currently Go 1.27.4 or newer; check with `go version`)
 - `gcloud` CLI authenticated: `gcloud auth application-default login`
 - `GCP_PROJECT_ID` set to a project you control for manual smoke tests
 
