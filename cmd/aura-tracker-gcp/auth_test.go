@@ -283,6 +283,31 @@ func TestSSESessionBindingUsesImmutableSubject(t *testing.T) {
 	}
 }
 
+// TestSSESessionBindingRejectsNonCanonicalSignatureEncoding pins the cause of
+// a 1-in-16 flake in the test above: changing only the unused low bits of the
+// signature's last base64 character must not yield an accepted session ID.
+func TestSSESessionBindingRejectsNonCanonicalSignatureEncoding(t *testing.T) {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	binding := testSessionBinding()
+	owner := requestmeta.WithPrincipal(context.Background(), requestmeta.Principal{Issuer: googleIssuerHTTPS, Subject: "subject-owner", Audience: "https://service.example"})
+	for range 32 {
+		sessionID, err := binding.NewSessionID(owner, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := strings.IndexByte(alphabet, sessionID[len(sessionID)-1])
+		if last < 0 || last&0x03 != 0 {
+			t.Fatalf("session ID %q does not end in a canonical base64 character", sessionID)
+		}
+		for low := 1; low < 4; low++ {
+			variant := sessionID[:len(sessionID)-1] + string(alphabet[last|low])
+			if binding.Authorize(owner, variant) {
+				t.Fatalf("non-canonical variant %q of %q was authorized", variant, sessionID)
+			}
+		}
+	}
+}
+
 func TestCanonicalGoogleIdentityIssuerTreatsDocumentedAliasesAsOneIssuer(t *testing.T) {
 	for _, issuer := range []string{googleIssuerHTTP, googleIssuerHTTPS} {
 		canonical, ok := canonicalGoogleIdentityIssuer(issuer)
