@@ -7,8 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/sync/errgroup"
-
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -71,7 +70,7 @@ func (a *gcpAdapter) ExportServerlessGraph(ctx context.Context, req models.Expor
 	}
 
 	regionFilter := req.Region
-	g, gctx := errgroup.WithContext(outerCtx)
+	g, gctx := safego.WithContext(outerCtx)
 
 	g.Go(func() error {
 		r, err := a.ListServices(gctx, models.ListServicesRequest{ProjectID: req.ProjectID, Region: regionFilter})

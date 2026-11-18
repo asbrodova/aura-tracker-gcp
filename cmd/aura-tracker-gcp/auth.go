@@ -139,6 +139,12 @@ func isLoopbackHostname(host string) bool {
 	}
 }
 
+// sessionIDEncoding decodes session IDs strictly. A 32-byte signature is 43
+// base64 characters whose last character carries 2 unused bits; the lenient
+// decoder ignores them, so four different strings decoded to the same
+// signature and an altered session ID could still be accepted.
+var sessionIDEncoding = base64.RawURLEncoding.Strict()
+
 type sseSessionBinding struct {
 	key [sha256.Size]byte
 }
@@ -175,11 +181,11 @@ func (b *sseSessionBinding) Authorize(ctx context.Context, sessionID string) boo
 	if len(parts) != 2 {
 		return false
 	}
-	nonce, err := base64.RawURLEncoding.DecodeString(parts[0])
+	nonce, err := sessionIDEncoding.DecodeString(parts[0])
 	if err != nil || len(nonce) != 18 {
 		return false
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	signature, err := sessionIDEncoding.DecodeString(parts[1])
 	if err != nil || len(signature) != sha256.Size {
 		return false
 	}

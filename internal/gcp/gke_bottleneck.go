@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -32,7 +31,7 @@ func (a *gcpAdapter) GetClusterBottlenecks(ctx context.Context, req models.GetCl
 		logSummary     models.QueryRecentLogsResponse
 	)
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 
 	g.Go(func() error {
 		var err error

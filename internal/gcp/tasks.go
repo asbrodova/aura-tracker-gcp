@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	cloudtaskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
-	"golang.org/x/sync/errgroup"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -28,7 +28,7 @@ func (a *gcpAdapter) ListTaskQueues(ctx context.Context, req models.ListTaskQueu
 		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var queues []models.TaskQueueSummary

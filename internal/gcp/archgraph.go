@@ -8,9 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/asbrodova/aura-tracker-gcp/internal/gcp/resolution"
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -134,7 +133,7 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 	// ────────────────────────────────────────────────────────────────────
 	// Batch 1 — Core listing (all resources, parallel)
 	// ────────────────────────────────────────────────────────────────────
-	b1, b1ctx := errgroup.WithContext(outerCtx)
+	b1, b1ctx := safego.WithContext(outerCtx)
 	b1.SetLimit(batch1Concurrency)
 
 	// Phase 1 listers
@@ -611,7 +610,7 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 	mu.Unlock()
 
 	if len(clusters) > 0 {
-		b2, b2ctx := errgroup.WithContext(outerCtx)
+		b2, b2ctx := safego.WithContext(outerCtx)
 		b2.SetLimit(batch2Concurrency)
 
 		for _, cl := range clusters {
@@ -715,7 +714,7 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 	// ────────────────────────────────────────────────────────────────────
 	// Batch 3 — Observability signals
 	// ────────────────────────────────────────────────────────────────────
-	b3, b3ctx := errgroup.WithContext(outerCtx)
+	b3, b3ctx := safego.WithContext(outerCtx)
 	b3.SetLimit(batch2Concurrency)
 
 	b3.Go(func() error {

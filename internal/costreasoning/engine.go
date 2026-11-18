@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
@@ -149,6 +150,7 @@ func (e *Engine) explainUncached(ctx context.Context, req models.ExplainCostRequ
 	needsAssetEvidence := len(facts.FirstSeen) > 0
 	if needsAssetEvidence {
 		go func() {
+			defer safego.Recover(func(err error) { assetResults <- assetResult{err: err} })
 			assets, assetErr := e.source.ListCreatedAssets(ctx, models.ListCreatedAssetsRequest{
 				ProjectID: req.ProjectID, StartTime: windows.currentStart.Format(time.RFC3339),
 				EndTime: windows.currentEnd.Format(time.RFC3339), Limit: req.MaxResults * 10,
@@ -160,6 +162,7 @@ func (e *Engine) explainUncached(ctx context.Context, req models.ExplainCostRequ
 	recommendationResults := make(chan recommendationResult, 1)
 	if includeIdle {
 		go func() {
+			defer safego.Recover(func(err error) { recommendationResults <- recommendationResult{err: err} })
 			recommendations, recommendationErr := e.source.ListCostRecommendations(ctx, models.ListCostRecommendationsRequest{ProjectID: req.ProjectID, Limit: req.MaxResults * 10})
 			recommendationResults <- recommendationResult{response: recommendations, err: recommendationErr}
 		}()

@@ -9,8 +9,8 @@ import (
 
 	"cloud.google.com/go/pubsub/v2/apiv1/pubsubpb"
 	runpb "cloud.google.com/go/run/apiv2/runpb"
-	"golang.org/x/sync/errgroup"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -61,7 +61,7 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 	edges := append([]models.TopologyEdge(nil), direct.edges...)
 	var warns []string
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	var subscriptions []*pubsubpb.Subscription
 	var subscriptionsErr error
 	g.Go(func() error {

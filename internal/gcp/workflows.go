@@ -9,8 +9,8 @@ import (
 
 	workflowspb "cloud.google.com/go/workflows/apiv1/workflowspb"
 	executionspb "cloud.google.com/go/workflows/executions/apiv1/executionspb"
-	"golang.org/x/sync/errgroup"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -29,7 +29,7 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var workflows []models.WorkflowSummary

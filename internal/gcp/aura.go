@@ -12,11 +12,11 @@ import (
 
 	containerpb "cloud.google.com/go/container/apiv1/containerpb"
 	monitoringpb "cloud.google.com/go/monitoring/apiv3/v2/monitoringpb"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
@@ -281,7 +281,7 @@ func (a *gcpAdapter) GetProjectAuraSummary(ctx context.Context, req models.Proje
 
 	// Fan-out: score every resource concurrently.
 	reports := make([]models.AuraReport, len(resources))
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.SetLimit(auraSummaryConcurrency)
 	for i, r := range resources {
 		g.Go(func() error {
@@ -384,7 +384,7 @@ func (a *gcpAdapter) fetchCloudRunSignals(ctx context.Context, projectID, name, 
 		quotaRetryAt                                   time.Time
 	)
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 
 	g.Go(func() error {
 		v, err := a.fetchRateMetric(gctx, projectID,
@@ -465,7 +465,7 @@ func (a *gcpAdapter) fetchCloudSQLSignals(ctx context.Context, projectID, instan
 	var idleInsights, overprovisionedInsights []recommenderInsight
 	var idleQuotaRetryAt, overprovisionedQuotaRetryAt time.Time
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.Go(func() error {
 		cpuUtil, cpuErr = a.fetchMeanMetric(gctx, projectID, `cloudsql.googleapis.com/database/cpu/utilization`, baseFilter, 60)
 		return nil
@@ -551,7 +551,7 @@ func (a *gcpAdapter) fetchBigQuerySignals(ctx context.Context, projectID, datase
 	var failedJobs, totalJobs, slotsAlloc, storageBytes float64
 	var failedJobsErr, totalJobsErr, slotsErr, storageErr error
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.Go(func() error {
 		failedJobs, failedJobsErr = a.fetchMeanMetric(gctx, projectID,
 			`bigquery.googleapis.com/job_count`,
@@ -600,7 +600,7 @@ func (a *gcpAdapter) fetchGKESignals(ctx context.Context, projectID, clusterName
 	var nodeCPU, nodeMem, restartRate, ctrlHealth float64
 	var nodeCPUErr, nodeMemErr, restartErr, ctrlErr error
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 
 	g.Go(func() error {
 		nodeCPU, nodeCPUErr = a.fetchMeanMetric(gctx, projectID,
@@ -672,7 +672,7 @@ func (a *gcpAdapter) fetchGKESignalsRich(ctx context.Context, projectID, cluster
 	var channelName, currentVersion string
 	var serverChannels map[string]string // channel name → latest default version
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 
 	g.Go(func() error {
 		v, err := a.fetchMeanMetric(gctx, projectID, `kubernetes.io/node/cpu/allocatable_utilization`, clusterFilter, 60)

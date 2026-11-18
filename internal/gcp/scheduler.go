@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	schedulerpb "cloud.google.com/go/scheduler/apiv1/schedulerpb"
-	"golang.org/x/sync/errgroup"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -28,7 +28,7 @@ func (a *gcpAdapter) ListSchedulerJobs(ctx context.Context, req models.ListSched
 		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var jobs []models.SchedulerJobSummary
