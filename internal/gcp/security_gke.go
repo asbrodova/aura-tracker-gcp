@@ -13,6 +13,7 @@ import (
 	"google.golang.org/api/cloudasset/v1"
 	"google.golang.org/api/iterator"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -45,6 +46,11 @@ func (a *gcpAdapter) collectGKEPublicServiceSecurityFacts(ctx context.Context, p
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer safego.Recover(func(err error) {
+				outcomes <- securityClusterExposureResult{coverage: []models.SecurityCoverageUnit{
+					securityCoverageUnit("kubernetes_access", "cluster", securityClusterResource(projectID, cluster), "error", 0, err.Error()),
+				}}
+			})
 			select {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()
@@ -66,8 +72,12 @@ func (a *gcpAdapter) collectGKEPublicServiceSecurityFacts(ctx context.Context, p
 	})
 }
 
+func securityClusterResource(projectID string, cluster *containerpb.Cluster) string {
+	return fmt.Sprintf("projects/%s/locations/%s/clusters/%s", projectID, cluster.GetLocation(), cluster.GetName())
+}
+
 func (a *gcpAdapter) collectClusterExposure(parent context.Context, projectID string, cluster *containerpb.Cluster) securityClusterExposureResult {
-	resource := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", projectID, cluster.Location, cluster.Name)
+	resource := securityClusterResource(projectID, cluster)
 	result := securityClusterExposureResult{}
 	ctx, cancel := context.WithTimeout(parent, a.securityClusterTimeout())
 	defer cancel()
@@ -253,8 +263,15 @@ func (a *gcpAdapter) collectWorkloadIdentitySecurityFacts(ctx context.Context, p
 	for _, cluster := range response.Clusters {
 		cluster := cluster
 		wg.Add(1)
+		// A panicking cluster reports an error coverage unit and no fact: a
+		// half-filled fact would read as "Workload Identity disabled".
 		go func() {
 			defer wg.Done()
+			defer safego.Recover(func(err error) {
+				outcomes <- outcome{coverage: []models.SecurityCoverageUnit{
+					securityCoverageUnit("kubernetes_access", "cluster", securityClusterResource(projectID, cluster), "error", 0, err.Error()),
+				}}
+			})
 			select {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()
@@ -270,7 +287,9 @@ func (a *gcpAdapter) collectWorkloadIdentitySecurityFacts(ctx context.Context, p
 	wg.Wait()
 	close(outcomes)
 	for item := range outcomes {
-		result.Clusters = append(result.Clusters, item.cluster)
+		if item.cluster.ResourceName != "" {
+			result.Clusters = append(result.Clusters, item.cluster)
+		}
 		result.Coverage = append(result.Coverage, item.coverage...)
 	}
 	a.enrichAnnotatedGSAs(ctx, projectID, &result)

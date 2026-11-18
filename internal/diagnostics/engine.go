@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -120,6 +121,9 @@ func (e *Engine) Diagnose(ctx context.Context, req models.DiagnoseIncidentReques
 	sem := make(chan struct{}, 4)
 	for i, target := range scope.Targets {
 		go func(index int, target models.IncidentTarget) {
+			defer safego.Recover(func(err error) {
+				results <- indexedServiceData{index: index, data: serviceData{target: target, warnings: []string{"service evidence collection failed: " + err.Error()}}}
+			})
 			select {
 			case sem <- struct{}{}:
 				defer func() { <-sem }()

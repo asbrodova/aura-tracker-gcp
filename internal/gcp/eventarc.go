@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	eventarcpb "cloud.google.com/go/eventarc/apiv1/eventarcpb"
-	"golang.org/x/sync/errgroup"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -28,7 +28,7 @@ func (a *gcpAdapter) ListTriggers(ctx context.Context, req models.ListTriggersRe
 		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var triggers []models.TriggerSummary

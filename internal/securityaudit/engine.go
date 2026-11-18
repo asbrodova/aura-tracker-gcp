@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 	"github.com/asbrodova/aura-tracker-gcp/ports"
 )
@@ -202,6 +203,11 @@ func (e *Engine) collect(ctx context.Context, req models.SecurityFactsRequest) c
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			defer safego.Recover(func(err error) {
+				mu.Lock()
+				out.errors[category] = err
+				mu.Unlock()
+			})
 			if err := fn(); err != nil {
 				mu.Lock()
 				out.errors[category] = err
@@ -254,6 +260,7 @@ func (e *Engine) collect(ctx context.Context, req models.SecurityFactsRequest) c
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		defer safego.Recover(func(err error) { out.recommendationErr = err })
 		value, err := e.source.ListSecurityRecommendations(ctx, req)
 		if err == nil {
 			out.recommendations = value

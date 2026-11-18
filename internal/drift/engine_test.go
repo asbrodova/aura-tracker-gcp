@@ -429,3 +429,48 @@ func TestArrayComparisonMatchesNamedObjectsAndSetMembers(t *testing.T) {
 		}
 	}
 }
+
+type panickingCollector struct{ fakeCollector }
+
+func (p *panickingCollector) Collect(ctx context.Context, req CollectionRequest) (CollectionResult, error) {
+	if req.ProjectID == "prod" {
+		panic("unexpected API response shape")
+	}
+	return p.fakeCollector.Collect(ctx, req)
+}
+
+func TestCollectorPanicIsReportedAsCoverageError(t *testing.T) {
+	collector := &panickingCollector{fakeCollector{components: []string{"cloudrun"}, results: map[string]CollectionResult{
+		"dev/cloudrun": {Resources: []Resource{{Component: "cloudrun", ResourceType: "cloudrun.service", Name: "api", Config: map[string]any{}}}},
+	}}}
+	done := make(chan struct{})
+	var response models.CompareEnvironmentsResponse
+	var err error
+	go func() {
+		defer close(done)
+		response, err = New(collector, nil, WithTimeout(5*time.Second)).Compare(context.Background(), models.CompareEnvironmentsRequest{EnvironmentA: "dev", EnvironmentB: "prod"})
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Compare did not return after a collector panic")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.CoverageStatus != "partial" {
+		t.Fatalf("coverage status = %q, want partial; response = %+v", response.CoverageStatus, response)
+	}
+	var found bool
+	for _, coverage := range response.Coverage {
+		if coverage.Environment == "prod" && coverage.Status == "error" {
+			found = true
+			if strings.Contains(coverage.Message, "unexpected API response shape") {
+				t.Fatalf("coverage message leaks the panic value: %q", coverage.Message)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no error coverage for the panicking environment: %+v", response.Coverage)
+	}
+}

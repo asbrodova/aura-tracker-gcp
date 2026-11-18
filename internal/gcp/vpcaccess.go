@@ -7,8 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"golang.org/x/sync/errgroup"
-
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -30,7 +29,7 @@ func (a *gcpAdapter) ListVPCConnectors(ctx context.Context, req models.ListVPCCo
 		discovery = regionDiscovery{Regions: regions, Source: "request", Complete: true}
 	}
 
-	g, gctx := errgroup.WithContext(ctx)
+	g, gctx := safego.WithContext(ctx)
 	g.SetLimit(regionalFanoutConcurrency)
 	var mu sync.Mutex
 	var connectors []models.VPCConnectorSummary

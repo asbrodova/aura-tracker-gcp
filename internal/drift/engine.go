@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -101,6 +102,9 @@ func (e *Engine) Compare(ctx context.Context, req models.CompareEnvironmentsRequ
 	for _, component := range components {
 		for _, projectID := range []string{req.EnvironmentA, req.EnvironmentB} {
 			go func(component, projectID string) {
+				defer safego.Recover(func(err error) {
+					results <- collected{component: component, projectID: projectID, err: err}
+				})
 				select {
 				case sem <- struct{}{}:
 					defer func() { <-sem }()

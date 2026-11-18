@@ -143,7 +143,8 @@ func (t *GKETools) getClusterBottlenecksHandler(ctx context.Context, _ mcp.CallT
 func (t *GKETools) ScaleDeployment() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_scale_deployment",
 		mcp.WithDescription(
-			"Scale a GKE node pool. "+
+			"Resize a GKE node pool to node_count nodes. "+
+				"Despite the tool name, this does not change Kubernetes Deployment replica counts. "+
 				"Mutation: dry_run=true → plan_id preview; confirm_plan_id=<id> executes (TTL 10 min). "+
 				"Idempotent: same count → no_change_needed=true.",
 		),

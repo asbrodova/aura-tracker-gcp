@@ -259,6 +259,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			}
 			return result, nil
 		}
+		wrapped.Handler = recoverToolPanic(log, t.Tool.Name, wrapped.Handler)
 		return wrapped
 	}
 	wrapResource := func(resource server.ServerResource) server.ServerResource {
@@ -278,6 +279,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			}
 			return enforceResourceContentsLimit(scrubbed)
 		}
+		resource.Handler = recoverResourcePanic(log, resource.Resource.Name, resource.Handler)
 		return resource
 	}
 	wrapResourceTemplate := func(resource server.ServerResourceTemplate) server.ServerResourceTemplate {
@@ -297,6 +299,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			}
 			return enforceResourceContentsLimit(scrubbed)
 		}
+		resource.Handler = recoverResourcePanic(log, resource.Template.Name, resource.Handler)
 		return resource
 	}
 	wrapPrompt := func(prompt server.ServerPrompt) server.ServerPrompt {
@@ -312,6 +315,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			}
 			return anonymize.ScrubPromptResult(ctx, o.anonymizer, scrubbed)
 		}
+		prompt.Handler = recoverPromptPanic(log, prompt.Prompt.Name, prompt.Handler)
 		return prompt
 	}
 

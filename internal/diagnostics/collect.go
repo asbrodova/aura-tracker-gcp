@@ -10,8 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
+	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
@@ -49,7 +48,7 @@ func (e *Engine) collectService(ctx context.Context, req models.DiagnoseIncident
 	totalLookback := req.LookbackMinutes + req.BaselineMinutes
 	results := make(chan collectorResult, 8)
 	var mu sync.Mutex
-	g, groupCtx := errgroup.WithContext(ctx)
+	g, groupCtx := safego.WithContext(ctx)
 
 	run := func(name string, fn func(context.Context) (string, error)) {
 		g.Go(func() error {

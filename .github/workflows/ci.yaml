@@ -47,6 +47,11 @@ jobs:
         run: |
           mod="$(awk '$1 == "go" { print $2 }' go.mod)"
           builder="$(sed -n 's/^FROM golang:\([0-9.]*\)-alpine.*/\1/p' Dockerfile)"
+          # The builder must stay pinned to a full image digest.
+          if ! grep -Eq '^FROM golang:[0-9.]+-alpine@sha256:[0-9a-f]{64} AS builder$' Dockerfile; then
+            echo "::error file=Dockerfile::builder image must be pinned as golang:<version>-alpine@sha256:<64 hex digits>"
+            exit 1
+          fi
           # Same major.minor, and the builder must not be older than go.mod
           # (an older builder silently downloads a different toolchain).
           if [ "${mod%.*}" != "${builder%.*}" ] || [ "$(printf '%s\n%s\n' "$mod" "$builder" | sort -V | head -n1)" != "$mod" ]; then
