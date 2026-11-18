@@ -26,6 +26,9 @@ func (a *gcpAdapter) ListTopics(ctx context.Context, req models.ListTopicsReques
 	defer cancel()
 
 	project := fmt.Sprintf("projects/%s", req.ProjectID)
+	if a.pubsub == nil {
+		return models.ListTopicsResponse{}, errClientNotInitialized("pubsub.ListTopics", clientPubSub)
+	}
 	it := a.pubsub.TopicAdminClient.ListTopics(ctx, &pubsubpb.ListTopicsRequest{
 		Project: project, PageSize: maxUnpagedInventoryItems,
 	})
@@ -91,6 +94,9 @@ func (a *gcpAdapter) InspectTopicHealth(ctx context.Context, req models.InspectT
 
 	topicName := fmt.Sprintf("projects/%s/topics/%s", req.ProjectID, req.TopicName)
 
+	if a.pubsub == nil {
+		return models.TopicHealthReport{}, errClientNotInitialized("pubsub.InspectTopicHealth", clientPubSub)
+	}
 	_, err := a.pubsub.TopicAdminClient.GetTopic(ctx, &pubsubpb.GetTopicRequest{Topic: topicName})
 	if err != nil {
 		if isGRPCNotFound(err) {

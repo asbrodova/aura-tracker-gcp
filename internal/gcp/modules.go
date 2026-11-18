@@ -1,5 +1,7 @@
 package gcp
 
+import "fmt"
+
 // clientKey identifies a named GCP client slot in gcpAdapter.
 type clientKey string
 
@@ -68,6 +70,7 @@ var moduleClientDeps = map[string][]clientKey{
 	"datastores":         {clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore},
 	"supplychain":        {clientArtifactRegistry, clientCloudBuild, clientServiceDirectory},
 	"coverage":           {clientRunSvc, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
+	"serverlessgraph":    {clientRunSvc, clientRunJobs, clientFunctionsV1, clientEventarc, clientScheduler, clientWorkflows, clientTasks, clientSecretMgr, clientVPCAccess, clientSQLAdmin, clientPubSub}, // ExportServerlessGraph fans out to every serverless collector
 	"archgraph":          {clientRunSvc, clientRunJobs, clientFunctionsV1, clientEventarc, clientScheduler, clientWorkflows, clientWorkflowExec, clientTasks, clientSecretMgr, clientVPCAccess, clientSQLAdmin, clientPubSub, clientSpanner, clientAlloyDB, clientFirestore, clientMemorystore, clientArtifactRegistry, clientCloudBuild, clientServiceDirectory, clientCompute, clientAPIGateway, clientIAMAdmin, clientClusterMgr, clientMetric, clientTrace, clientMonitoringV3, clientLogAdmin},
 	"tagging":            {clientCRMv3},
 	"incident":           {clientRunSvc, clientRunRevisions, clientLogAdmin, clientMetric, clientPubSub, clientSQLAdmin, clientVPCAccess},
@@ -104,4 +107,22 @@ func neededClients(enabled map[string]bool) map[clientKey]bool {
 		}
 	}
 	return out
+}
+
+// HasModuleClientDeps reports whether module declares the GCP clients its
+// tools need. Every selectable MCP module must have an entry: a module without
+// one starts with only the always-on resource clients, so selecting it alone
+// (for example --modules=serverlessgraph) leaves the clients its collectors
+// call uninitialized.
+func HasModuleClientDeps(module string) bool {
+	_, ok := moduleClientDeps[module]
+	return ok
+}
+
+// errClientNotInitialized is returned instead of dereferencing an SDK client
+// that was not constructed because no enabled module declared it in
+// moduleClientDeps. Collectors that fan out across services record it as a
+// partial-coverage error; it must never become a nil-pointer panic.
+func errClientNotInitialized(op string, client clientKey) error {
+	return fmt.Errorf("%s: %s client is not initialized for the enabled modules", op, client)
 }

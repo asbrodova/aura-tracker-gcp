@@ -66,6 +66,9 @@ func (a *gcpAdapter) QueryRecentLogs(ctx context.Context, req models.QueryRecent
 		return models.QueryRecentLogsResponse{}, fmt.Errorf("logging.QueryRecentLogs: %w", err)
 	}
 
+	if a.logAdmin == nil {
+		return models.QueryRecentLogsResponse{}, errClientNotInitialized("logging.QueryRecentLogs", clientLogAdmin)
+	}
 	it := a.logAdmin.Entries(ctx,
 		logadmin.ProjectIDs([]string{req.ProjectID}),
 		logadmin.Filter(filter),

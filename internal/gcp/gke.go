@@ -18,6 +18,9 @@ func (a *gcpAdapter) ListClusters(ctx context.Context, req models.ListClustersRe
 	defer cancel()
 
 	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, req.Location)
+	if a.clusterMgr == nil {
+		return models.ListClustersResponse{}, errClientNotInitialized("gke.ListClusters", clientClusterMgr)
+	}
 	resp, err := a.clusterMgr.ListClusters(ctx, &containerpb.ListClustersRequest{Parent: parent})
 	if err != nil {
 		return models.ListClustersResponse{}, wrapGCPError("gke.ListClusters", err)
@@ -47,6 +50,9 @@ func (a *gcpAdapter) GetClusterDetails(ctx context.Context, req models.GetCluste
 	defer cancel()
 
 	name := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", req.ProjectID, req.Location, req.ClusterName)
+	if a.clusterMgr == nil {
+		return models.ClusterDetails{}, errClientNotInitialized("gke.GetClusterDetails", clientClusterMgr)
+	}
 	c, err := a.clusterMgr.GetCluster(ctx, &containerpb.GetClusterRequest{Name: name})
 	if err != nil {
 		return models.ClusterDetails{}, wrapGCPError("gke.GetClusterDetails", err)
@@ -180,6 +186,9 @@ func (a *gcpAdapter) ScaleDeployment(ctx context.Context, req models.ScaleDeploy
 		"projects/%s/locations/%s/clusters/%s/nodePools/%s",
 		req.ProjectID, req.Location, req.ClusterName, req.NodePoolName,
 	)
+	if a.clusterMgr == nil {
+		return models.ScaleDeploymentResponse{}, errClientNotInitialized("gke.ScaleDeployment", clientClusterMgr)
+	}
 	np, err := a.clusterMgr.GetNodePool(ctx, &containerpb.GetNodePoolRequest{Name: npName})
 	if err != nil {
 		return models.ScaleDeploymentResponse{}, wrapGCPError("gke.ScaleDeployment.get", err)

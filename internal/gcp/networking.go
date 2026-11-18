@@ -25,6 +25,9 @@ func (a *gcpAdapter) ListLoadBalancers(ctx context.Context, req models.ListLoadB
 	truncated := false
 
 	// Global forwarding rules (always included when region is unspecified or "global")
+	if a.computeSvc == nil {
+		return models.ListLoadBalancersResponse{}, errClientNotInitialized("networking.ListLoadBalancers", clientCompute)
+	}
 	if req.Region == "" || req.Region == "global" {
 		err := a.computeSvc.GlobalForwardingRules.List(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 			Context(ctx).Pages(ctx, func(page *compute.ForwardingRuleList) error {
@@ -118,6 +121,9 @@ func (a *gcpAdapter) ListURLMaps(ctx context.Context, req models.ListURLMapsRequ
 	var maps []models.URLMapSummary
 	truncated := false
 
+	if a.computeSvc == nil {
+		return models.ListURLMapsResponse{}, errClientNotInitialized("networking.ListURLMaps", clientCompute)
+	}
 	if req.Region == "" || req.Region == "global" {
 		err := a.computeSvc.UrlMaps.List(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 			Context(ctx).Pages(ctx, func(page *compute.UrlMapList) error {
@@ -181,6 +187,9 @@ func (a *gcpAdapter) ListNEGs(ctx context.Context, req models.ListNEGsRequest) (
 
 	var negs []models.NEGSummary
 
+	if a.computeSvc == nil {
+		return models.ListNEGsResponse{}, errClientNotInitialized("networking.ListNEGs", clientCompute)
+	}
 	err := a.computeSvc.NetworkEndpointGroups.AggregatedList(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *compute.NetworkEndpointGroupAggregatedList) error {
 		for scopeKey, scopedList := range page.Items {
@@ -240,6 +249,9 @@ func (a *gcpAdapter) ListAPIGateways(ctx context.Context, req models.ListAPIGate
 	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, location)
 
 	var gateways []models.APIGatewaySummary
+	if a.apiGatewaySvc == nil {
+		return models.ListAPIGatewaysResponse{}, errClientNotInitialized("networking.ListAPIGateways", clientAPIGateway)
+	}
 	err := a.apiGatewaySvc.Projects.Locations.Gateways.List(parent).
 		PageSize(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *apigateway.ApigatewayListGatewaysResponse) error {
@@ -296,6 +308,9 @@ func (a *gcpAdapter) ListVPCNetworks(ctx context.Context, req models.ListVPCNetw
 	defer cancel()
 
 	var networks []models.VPCNetworkSummary
+	if a.computeSvc == nil {
+		return models.ListVPCNetworksResponse{}, errClientNotInitialized("networking.ListVPCNetworks", clientCompute)
+	}
 	err := a.computeSvc.Networks.List(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *compute.NetworkList) error {
 		for _, n := range page.Items {
@@ -337,6 +352,9 @@ func (a *gcpAdapter) ListVPCSubnets(ctx context.Context, req models.ListVPCSubne
 	defer cancel()
 
 	var subnets []models.VPCSubnetSummary
+	if a.computeSvc == nil {
+		return models.ListVPCSubnetsResponse{}, errClientNotInitialized("networking.ListVPCSubnets", clientCompute)
+	}
 	err := a.computeSvc.Subnetworks.AggregatedList(req.ProjectID).MaxResults(maxUnpagedInventoryItems).
 		Context(ctx).Pages(ctx, func(page *compute.SubnetworkAggregatedList) error {
 		for scopeKey, scopedList := range page.Items {
@@ -389,6 +407,9 @@ func (a *gcpAdapter) ListPSCEndpoints(ctx context.Context, req models.ListPSCEnd
 	defer cancel()
 
 	var endpoints []models.PSCEndpointSummary
+	if a.computeSvc == nil {
+		return models.ListPSCEndpointsResponse{}, errClientNotInitialized("networking.ListPSCEndpoints", clientCompute)
+	}
 	call := a.computeSvc.ForwardingRules.AggregatedList(req.ProjectID).
 		Filter(`purpose="PRIVATE_SERVICE_CONNECT"`).
 		MaxResults(maxUnpagedInventoryItems)

@@ -38,6 +38,9 @@ func (a *gcpAdapter) ListTraceDependencyEdges(ctx context.Context, req models.Li
 	tracesScanned := 0
 	nextPageToken := ""
 
+	if a.traceClient == nil {
+		return models.ListTraceDependencyEdgesResponse{}, errClientNotInitialized("trace.ListTraceDependencyEdges", clientTrace)
+	}
 	for page := 0; page < maxTraceDependencyPages; page++ {
 		call := a.traceClient.Projects.Traces.List(req.ProjectID).
 			StartTime(startTime).
