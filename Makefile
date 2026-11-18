@@ -2,7 +2,7 @@ BINARY      := aura-tracker-gcp
 VERSION     ?= $(shell git describe --tags --dirty --always 2>/dev/null || echo "dev")
 LDFLAGS     := -ldflags="-X main.version=$(VERSION) -s -w"
 TESTFLAGS   := -race
-LINT_VERSION := v2.12.2
+LINT_VERSION := v2.15.0
 
 .DEFAULT_GOAL := help
 
@@ -35,8 +35,13 @@ smoke: ## Verify MCP protocol compliance and print tool count (no GCP credential
 	@go test -run TestToolsListProtocolCompliance -v ./internal/mcp/ 2>&1 \
 	  | grep -E "PASS|FAIL|tools registered|^ok|^---"
 
-install-lint: ## Install golangci-lint if not present
-	@test -f $(GOLANGCI_LINT) || \
+# A stale binary cannot type-check newer Go standard libraries ("export data
+# version ... is greater than maximum supported version"), so reinstall
+# whenever the installed version differs from LINT_VERSION.
+LINT_VERSION_RE := $(subst .,\.,$(patsubst v%,%,$(LINT_VERSION)))
+
+install-lint: ## Install golangci-lint $(LINT_VERSION) if missing or a different version
+	@$(GOLANGCI_LINT) version 2>/dev/null | grep -Eq 'version v?$(LINT_VERSION_RE)( |$$)' || \
 	  curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
 	  | sh -s -- -b "$$(go env GOPATH)/bin" $(LINT_VERSION)
 

@@ -35,13 +35,24 @@ jobs:
 
       - name: Enforce coverage floor
         env:
-          MIN_COVERAGE: "35.0"
+          MIN_COVERAGE: "40.0"
         run: |
           total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
           awk -v total="$total" -v minimum="$MIN_COVERAGE" 'BEGIN { if (total + 0 < minimum + 0) { printf "coverage %.1f%% is below %.1f%%\n", total, minimum; exit 1 } }'
 
       - name: Test IAM setup script
         run: bash scripts/setup-iam_test.sh
+
+      - name: Check Dockerfile Go version matches go.mod
+        run: |
+          mod="$(awk '$1 == "go" { print $2 }' go.mod)"
+          builder="$(sed -n 's/^FROM golang:\([0-9.]*\)-alpine.*/\1/p' Dockerfile)"
+          # Same major.minor, and the builder must not be older than go.mod
+          # (an older builder silently downloads a different toolchain).
+          if [ "${mod%.*}" != "${builder%.*}" ] || [ "$(printf '%s\n%s\n' "$mod" "$builder" | sort -V | head -n1)" != "$mod" ]; then
+            echo "::error file=Dockerfile::builder golang:${builder} does not match go ${mod} in go.mod"
+            exit 1
+          fi
 
   lint:
     name: Lint
@@ -56,7 +67,7 @@ jobs:
 
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.12.2
+          version: v2.15.0
           args: --timeout=5m
 
   goreleaser-check:
@@ -93,7 +104,7 @@ jobs:
           cache: true
 
       - name: Scan reachable Go vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
       - name: Scan repository and history for secrets
         uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0 (Node 24)
