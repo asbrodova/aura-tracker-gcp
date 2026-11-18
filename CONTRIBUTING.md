@@ -37,15 +37,19 @@ Use this client-neutral checklist. See the [architecture and contributing guide]
 
 1. Add request/response structs to `pkg/models/<domain>.go`
 2. Add the method signature to `ports/gcp_service.go`
-3. Implement the method on `gcpAdapter` in `internal/gcp/<domain>.go`
-4. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`
-5. Register it in `GetTools()` on the domain's `*Tools` struct
-6. Add focused tests for the adapter, handler, schema, routing, and error behavior that changed
+3. Implement the method on `gcpAdapter` in `internal/gcp/<domain>.go`. Return `errClientNotInitialized` when the SDK client is nil, and start goroutines only through `internal/safego`
+4. Add the method to `SafetyDecorator` in `internal/safety/decorator.go`: a one-line pass-through for reads, the full dry-run/confirm flow for mutations
+5. Add a `<Method>Func` field to `internal/testutil/FakeGCPService` and call it from the fake method
+6. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`
+7. Register it in `GetTools()` on the domain's `*Tools` struct
+8. Add focused tests for the adapter, handler, schema, routing, and error behavior that changed
+
+Guard tests fail if steps 3–5 are skipped: `internal/safety/decorator_guard_test.go`, `internal/testutil/fake_gcp_service_test.go`, `internal/safego/usage_test.go`, and the per-module matrix in `cmd/aura-tracker-gcp/module_matrix_test.go`.
 
 When adding a new domain, also update every integration surface:
 
-1. `internal/gcp/modules.go` for GCP client construction and module selection
-2. `internal/mcp/registry.go` for server registration
+1. `internal/gcp/modules.go` for GCP client construction and module selection (every module needs a `moduleClientDeps` entry)
+2. `internal/mcp/registry.go` and `internal/mcp/server.go` for module registration
 3. `internal/mcp/permissions.go` for the domain's permission requirements
 4. `scripts/setup-iam.sh` for matching API and IAM setup
 
@@ -66,7 +70,7 @@ Every GCP error must flow through this chain — do not break it:
 ```
 GCP SDK error
   → wrapGCPError("domain.Method", err)    [internal/gcp/errors.go]
-  → PermissionDeniedError / NotFoundError / RetriableError
+  → PermissionDeniedError / NotFoundError / RetriableError / RecommenderQuotaExhaustedError
   → handleServiceError("tool_name", err)  [internal/mcp/tools/errors.go]
   → mcp.NewToolResultError(json) or mcp.NewToolResultError(msg)
   → LLM receives IsError: true + structured ToolError JSON
@@ -76,10 +80,12 @@ Avoid returning raw GCP SDK errors to the MCP layer — the LLM cannot act on gR
 
 ## Mutation tools
 
-Both mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`) use the two-step HITL safety pattern. Any new mutation tool must:
+The three mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`) use the two-step human-in-the-loop safety pattern enforced by `SafetyDecorator`. Any new mutation tool must:
 
-1. Support `dry_run: true` that returns a description without executing
-2. Return `no_change_needed: true` when the resource is already at the requested state
+1. Support `dry_run: true` that returns a preview and a `plan_id` without executing
+2. Execute only with `confirm_plan_id`, replaying the stored dry-run request with a state guard so a resource that changed since the preview is refused
+3. Return `no_change_needed: true` when the resource is already at the requested state
+4. Have a request type with `DryRun` and `ConfirmPlanID` fields; the decorator guard test treats any request with `DryRun` as a mutation
 
 ## Submitting a PR
 

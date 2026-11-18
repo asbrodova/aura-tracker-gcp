@@ -22,7 +22,7 @@ const (
 	ModuleCloudSQL        = "cloudsql"
 	ModuleServerlessGraph = "serverlessgraph"
 
-	// Phase 2 modules
+	// Platform and reasoning modules
 	ModuleGKEWorkloads = "gke_workloads"
 	ModuleGKEMesh      = "gke_mesh"
 	ModuleNetworking   = "networking"
@@ -47,7 +47,7 @@ var AllModules = []string{
 	ModuleFunctions, ModuleEventarc, ModuleScheduler,
 	ModuleWorkflows, ModuleTasks, ModuleSecretManager,
 	ModuleVPCAccess, ModuleCloudSQL, ModuleServerlessGraph,
-	// Phase 2
+	// Platform and reasoning
 	ModuleGKEWorkloads, ModuleGKEMesh, ModuleNetworking, ModuleDatastores, ModuleSupplyChain,
 	ModuleCoverage, ModuleArchGraph, ModuleTagging,
 	ModuleIncident,

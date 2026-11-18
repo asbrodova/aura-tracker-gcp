@@ -29,8 +29,3 @@ linters:
       - source: "defer resp\\.Body\\.Close"
         linters: [errcheck]
 
-      # Phase 2 skeleton — DLP adapter is intentionally incomplete.
-      - path: "internal/gcp/dlp\\.go"
-        linters: [unused]
-      - path: "internal/anonymize/dlp\\.go"
-        linters: [unused]

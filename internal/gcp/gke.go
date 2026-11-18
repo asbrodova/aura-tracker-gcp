@@ -166,10 +166,9 @@ func (a *gcpAdapter) GetClusterDetails(ctx context.Context, req models.GetCluste
 	return details, nil
 }
 
-// ScaleDeployment scales a GKE node pool to the requested node count.
-// Note: scaling individual Kubernetes Deployments requires k8s.io/client-go
-// (see CLAUDE.md Phase 2). This implementation uses the GKE management API
-// to resize a node pool, which is the most common infrastructure-level scaling.
+// ScaleDeployment resizes a GKE node pool to the requested node count through
+// the GKE management API. Despite the name it does not scale Kubernetes
+// Deployments; the method name is kept for client compatibility.
 func (a *gcpAdapter) ScaleDeployment(ctx context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
 	if err := a.rateWait(ctx, "gke.ScaleDeployment"); err != nil {
 		return models.ScaleDeploymentResponse{}, err
