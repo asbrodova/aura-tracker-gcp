@@ -14,8 +14,8 @@ type Mode string
 
 const (
 	ModeLocal Mode = "local" // regex-only, no GCP call
-	ModeDLP   Mode = "dlp"   // GCP DLP API only (Phase 2)
-	ModeBoth  Mode = "both"  // local first, then DLP (Phase 2)
+	ModeDLP   Mode = "dlp"   // GCP DLP API only
+	ModeBoth  Mode = "both"  // local first, then DLP
 )
 
 // Config is the top-level schema loaded from the YAML config file.
@@ -45,7 +45,7 @@ type PatternConfig struct {
 	ReplacementTemplate string `yaml:"replacement_template"`
 }
 
-// DLPConfig holds GCP DLP backend settings (Phase 2).
+// DLPConfig holds GCP DLP backend settings.
 type DLPConfig struct {
 	// ProjectID to bill DLP requests against. Defaults to GCP_PROJECT_ID.
 	ProjectID string `yaml:"project_id"`

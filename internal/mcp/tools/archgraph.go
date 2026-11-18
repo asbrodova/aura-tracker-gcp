@@ -124,8 +124,8 @@ func architectureDiagramResult(response models.ArchitectureDiagramResponse) *mcp
 func (t *ArchGraphTools) ExportArchitectureGraph() server.ServerTool {
 	tool := mcp.NewTool("gcp_export_architecture_graph",
 		mcp.WithDescription(
-			"Export a full project-wide architecture graph fusing Phase 1 (serverless/event-driven) "+
-				"and Phase 2 (GKE workloads, networking, data stores, supply chain, and observability) resources. "+
+			"Export a full project-wide architecture graph fusing serverless and event-driven resources "+
+				"with GKE workloads, networking, data stores, supply chain, and observability resources. "+
 				"Runs a 3-batch parallel fan-out across all GCP listers, infers service-to-service edges via "+
 				"the resolution engine (K8s selectors, mesh telemetry, and Cloud Trace spans), "+
 				"and returns a single diagram-ready JSON with nodes, edges, and groups. "+

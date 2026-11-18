@@ -21,7 +21,19 @@ GCP_PROJECT_ID=my-project go run ./cmd/aura-tracker-gcp
 # Smoke-test tools/list
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' \
   | GCP_PROJECT_ID=my-project go run ./cmd/aura-tracker-gcp
+
+# Make targets (all of build, test, lint and smoke must pass before a PR)
+make build        # ./aura-tracker-gcp with the version stamped in
+make test         # go test -race ./...
+make lint         # golangci-lint at the pinned version; reinstalls on version mismatch
+make smoke        # protocol compliance + "N tools registered", no GCP credentials needed
+make test-cover   # coverage.out + coverage.html
+
+# Hexagon boundary check: must print nothing
+go list -deps ./internal/mcp/... | grep cloud.google.com
 ```
+
+The Go version is the one in `go.mod`; the Dockerfile builder must match its major.minor and be pinned by `@sha256` digest (CI enforces both).
 
 ## Architecture
 
@@ -37,6 +49,13 @@ internal/mcp/  NEVER imports internal/gcp/
 `go build ./internal/mcp/...` compiles zero GCP SDK code.
 
 Application-layer engines live between MCP and the port: `internal/diagnostics` for incidents, `internal/costreasoning` for cost explanations, `internal/securityaudit` for deterministic security posture findings and scoring, `internal/diagram` for architecture scoping and deterministic rendering, and `internal/drift` for symmetric cross-environment configuration comparison. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
+
+`cmd/` wraps the adapter in `internal/safety.SafetyDecorator` (the dry-run → confirm gate for mutations) before handing it to the MCP server. The repository's wiki is a separate git repo, checked out at `wiki/` and git-ignored here.
+
+### Panic containment
+
+- Every tool, resource and prompt handler is wrapped by `internal/mcp/recovery.go`. A panic becomes a generic error for that one request; the panic value and stack go to the server log only, because a recovered panic bypasses the project-ID privacy filters.
+- Goroutines go through `internal/safego`: `safego.WithContext` instead of `errgroup.WithContext`, and `defer safego.Recover(func(err error) { ... })` as the first defer of a raw `go func()`. `internal/safego/usage_test.go` fails on a direct `errgroup` import or an unprotected goroutine under `internal/`.
 
 ## Environment Variables
 
@@ -61,6 +80,16 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 | `COST_REASONING_HISTORY_DAYS` | No | Billing history window, 14–366 days. Default 90. |
 | `COST_QUERY_MAX_BYTES` | No | Per-statement BigQuery bytes-billed ceiling. Default 5 GiB. |
 | `GRAPHVIZ_DOT_PATH` | No | Path to Graphviz `dot` for SVG architecture diagrams. Mermaid and Graphviz DOT source do not require it. |
+| `SAFETY_ENABLED` | No | Default `true`: mutations require dry-run → confirm. `false` is rejected when `MCP_TRANSPORT=sse`. |
+| `TRACE_BACKEND` | No | `trace` (default) or `monitoring`: source for trace-based dependency edges. |
+| `GRAPH_TIMEOUT_SECONDS` | No | Budget for architecture/serverless graph collection, 1–3600. Default 120. |
+| `MCP_TRANSPORT` | No | Empty for stdio (default) or `sse` for the HTTP/SSE server. |
+| `PORT` | SSE only | Listen port, default 8080 (Cloud Run sets it). |
+| `MCP_BASE_URL` | SSE only | Public absolute URL of the server. Defaults to `http://localhost:$PORT` with a warning; non-loopback URLs must be `https`. |
+| `MCP_AUTH_MODE` | SSE only | `required` (default): Google ID token on every request. `disabled` is allowed only with a loopback `MCP_BASE_URL` and then binds to 127.0.0.1. |
+| `MCP_AUTH_AUDIENCE` | SSE only | Expected token audience. Defaults to the origin (plus base path) of `MCP_BASE_URL`. |
+| `MCP_AUTH_ALLOWED_EMAILS` | SSE only | Comma-separated allowlist of verified caller emails. A public URL needs this or `MCP_AUTH_ALLOW_ANY_VALID_TOKEN=true`. |
+| `MCP_AUTH_ALLOW_ANY_VALID_TOKEN` | SSE only | `true` accepts any valid Google ID token for the audience. Explicit opt-in. |
 
 ## User Config File
 
@@ -114,7 +143,7 @@ security_audit:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Phase 1: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Phase 2: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Correlation/reasoning: `incident`, `security`, `drift`, `cost`; `cost` also requires `COST_REASONING_ENABLED=true`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
+| `--modules` | *(all)* | Comma-separated list of tool modules to enable. Serverless and core: `gke`, `cloudrun`, `pubsub`, `logging`, `monitoring`, `iam`, `topology`, `aura`, `storage`, `functions`, `eventarc`, `scheduler`, `workflows`, `tasks`, `secretmanager`, `vpcaccess`, `cloudsql`, `serverlessgraph`. Platform: `gke_workloads`, `gke_mesh`, `networking`, `datastores`, `supplychain`, `coverage`, `archgraph`, `tagging`. Correlation/reasoning: `incident`, `security`, `drift`, `cost`; `cost` also requires `COST_REASONING_ENABLED=true`. Opt-in only (not part of the default set): `recommender_export`, which also needs `RECOMMENDER_BQ_EXPORT_ENABLED=true`. Use `none` for zero tools (resources and non-module prompts remain). Each excluded module also skips its GCP client connection at startup. |
 | `--version` | — | Print version and exit. |
 
 ## README Hygiene
@@ -127,39 +156,55 @@ Stage README changes in the same commit as the code that required them.
 
 ## Adding a New Tool
 
-1. Add input/output structs to `pkg/models/<domain>.go`
-2. Add the method signature to `ports/gcp_service.go`
-3. Implement the method on `gcpAdapter` in `internal/gcp/<domain>.go`
-   - Call `a.rateWait(ctx, "domain.Method")` first
-   - Call `a.withTimeout(ctx)` and `defer cancel()`
-   - Wrap errors with `wrapGCPError("domain.Method", err)`
-4. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`
-   - Use `mcp.NewTypedToolHandler(t.handlerFunc)` for automatic arg binding
-   - Call `handleServiceError(toolName, err)` on service errors
-   - Declare `mcp.Required()` parameters before optional ones in `mcp.NewTool(...)` — the mcp-go library preserves declaration order in the JSON Schema, so required fields appear first in the LLM's context window
-5. Add the tool to `GetTools()` on the domain's `*Tools` struct (in the same file)
-6. If adding a new domain, also add it to `internal/gcp/modules.go` (`moduleClientDeps`) and `internal/mcp/registry.go` (`AllModules`)
+1. **Models**: request/response structs in `pkg/models/<domain>.go` (JSON tags, no SDK types).
+2. **Port**: method on the domain sub-interface in `ports/gcp_service.go`.
+3. **Adapter**: implement on `gcpAdapter` in `internal/gcp/<domain>.go`:
+   - `a.rateWait(ctx, "domain.Method")` first, then `ctx, cancel := a.withTimeout(ctx); defer cancel()`;
+   - return `errClientNotInitialized(op, clientX)` if the SDK client is nil (modules construct only the clients they declare);
+   - exhaust pagination or expose an opaque `next_page_token`; bound fan-out and report partial coverage explicitly;
+   - fan out with `safego.WithContext`, never a bare `errgroup` or `go func()`;
+   - wrap errors with `wrapGCPError("domain.Method", err)`.
+4. **Safety decorator**: add the method to `internal/safety/decorator.go`. Reads are one-line pass-throughs; a request with a `DryRun` field is a mutation and needs the full preview/confirm logic (`decorator_guard_test.go` enforces both).
+5. **Test fake**: add `<Method>Func` to `internal/testutil/FakeGCPService` and have the method call it (`fake_gcp_service_test.go` enforces this); update `internal/mcp/tools/mock_test.go` if handler tests use it.
+6. **MCP tool**: definition and handler in `internal/mcp/tools/<domain>.go`:
+   - `mcp.NewTypedToolHandler(t.handlerFunc)` for typed argument binding;
+   - declare `mcp.Required()` parameters before optional ones (mcp-go keeps declaration order in the JSON Schema, so required fields come first in the model's context);
+   - put bounds in the schema and re-validate in the adapter; set `ReadOnlyHint` / `DestructiveHint` / `IdempotentHint`;
+   - on error `return handleServiceError(toolName, err)`; return structured JSON.
+7. **Register**: add it to `GetTools()` on the domain's `*Tools` struct.
+8. **New domain only**: `internal/gcp/modules.go` (`moduleClientDeps`: every module needs an entry, or `--modules=<name>` starts without its clients), `internal/mcp/registry.go` (constant + `AllModules`), `internal/mcp/server.go` (`allModules`), `internal/mcp/permissions.go` (`modulePermissions`), `scripts/setup-iam.sh` and `setup-iam_test.sh`. Consider whether `archgraph`, `drift` or `security` should collect it.
+9. **Tests**: adapter helpers, handler, schema (`read_schema_test.go` / `mutation_schema_test.go`), routing and error behaviour. The module-matrix test (`cmd/aura-tracker-gcp/module_matrix_test.go`) exercises every tool with only its module enabled.
+10. **Docs in the same PR**: README (counts, tables, example prompts) and the wiki (per-module parameter table mirroring every `mcp.With*`, `Module-Reference`, counts on `Home`, `_Sidebar.md`, IAM requirements).
 
 ## Error Handling Rules
 
-| GCP error | Adapter output | Handler output | LLM sees |
-|-----------|---------------|----------------|----------|
-| `codes.PermissionDenied` | `*PermissionDeniedError` | `mcp.NewToolResultError(...)` | `IsError: true` + message |
-| `codes.NotFound` | `*NotFoundError` | `mcp.NewToolResultError(...)` | `IsError: true` + message |
-| Any other error | wrapped `error` | `return nil, err` | JSON-RPC -32603 |
+`wrapGCPError` (`internal/gcp/errors.go`) maps SDK errors to typed port errors; `handleServiceError` (`internal/mcp/tools/errors.go`) maps those to tool results.
+
+| Adapter error | LLM sees |
+|---------------|----------|
+| `*PermissionDeniedError` (REST 401/403, gRPC PermissionDenied/Unauthenticated) | `IsError: true` + `ToolError` JSON with `missing_iam_permissions` |
+| `*RecommenderQuotaExhaustedError` | `IsError: true` + `ToolError` JSON, `retriable: true`, `retry_at` |
+| `*RetriableError` (REST 408/429/5xx, transient gRPC) | `IsError: true` + `ToolError` JSON, `retriable: true` |
+| `*NotFoundError` | `IsError: true` + message |
+| `*ConfirmationRequiredError` (safety decorator) | `IsError: true` + how to dry-run/confirm |
+| `*CostSourceNotConfiguredError` | `IsError: true` + message |
+| Any other error | JSON-RPC -32603, message passed through the project-ID masker |
 
 ## Rate Limiting & Timeouts
 
-- Rate limiter: 10 rps, burst 20 (token bucket via `golang.org/x/time/rate`)
-- Placed at the port boundary in `gcpAdapter` — every GCP API call is throttled here
-- Call timeout: 30s per method, applied inside the adapter
-- For `GetClusterBottlenecks`: the 30s budget is shared across all 4 fan-out goroutines via `errgroup.WithContext`
+- One token bucket per adapter, 10 rps with burst 20 (`gcpadapter.WithRateLimit(10, 20)` in `cmd/`; not configurable at runtime).
+- It is enforced on every outgoing request, not per adapter method: `internal/gcp/transport.go` wraps the shared HTTP client (`rateLimitedRoundTripper`) and adds unary and stream gRPC interceptors, so pagination, retries and nested collectors each count. `a.rateWait` only checks for a cancelled context.
+- Call timeout: 30s per adapter method via `a.withTimeout(ctx)`. Graph collection has its own budget (`GRAPH_TIMEOUT_SECONDS`, default 120s).
 
 ## Mutation Tools (Safe-Apply Pattern)
 
-Both mutation tools support `dry_run: true`:
-- Returns a description of what WOULD happen without executing
-- Idempotent: operation at current state → `no_change_needed: true`
+Three tools change state: `gcp_gke_scale_deployment` (resizes a GKE **node pool**), `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`. `SafetyDecorator` enforces, for each:
+
+1. `dry_run: true` returns a preview and a `plan_id` (TTL 10 minutes). An operation already at the requested state returns `no_change_needed: true` and no plan.
+2. `confirm_plan_id: <id>` executes the stored dry-run request, not the confirm call's arguments. The plan is bound to the caller identity and session, and leased so only one confirm can run it at a time. Scale and traffic changes carry a state guard (the previewed node count or the service ETag), so a resource that changed since the preview is refused; exports carry the plan ID as their execution ID.
+3. Neither flag returns `ConfirmationRequiredError` without calling GCP.
+
+`SAFETY_ENABLED=false` removes the gate for local stdio use only.
 
 ## Anonymization Engine
 
@@ -173,9 +218,15 @@ PII/credential scrubbing runs as middleware on every tool result, applied before
 | `internal/anonymize/config.go` | `Config` struct, `LoadConfig()` (YAML + env-var override) |
 | `internal/anonymize/local.go` | `LocalScrubber`: built-in regexes, JSON walker, per-call token registry |
 | `internal/anonymize/middleware.go` | `WrapHandler(tool, a)` — wraps any `server.ServerTool` handler |
-| `internal/anonymize/dlp.go` | `DLPAnonymizer` skeleton (Phase 2; compile-time interface check only) |
+| `internal/anonymize/dlp.go` | `DLPAnonymizer`: Cloud DLP inspection in chunks of at most 500 KB, offset-based masking |
+| `internal/anonymize/chain.go` | `ChainedAnonymizer`: local regexes first, then DLP (`mode: both`) |
+| `internal/anonymize/projectid.go` | Project-ID masker that enforces environment aliases on every MCP surface (always on, independent of `ANONYMIZE_ENABLED`) |
 | `ports/dlp_service.go` | `DLPService` secondary port interface |
-| `internal/gcp/dlp.go` | `dlpAdapter` skeleton (Phase 2) |
+| `internal/gcp/dlp.go` | `dlpAdapter`: rate-limited DLP `InspectContent` client |
+
+### Modes
+
+`mode: local` (default, regex only, no GCP call), `mode: dlp` (Cloud DLP only), `mode: both` (local, then DLP). DLP settings live under `dlp:` in the YAML config: `project_id` (defaults to the server project) and `info_types`.
 
 ### Enabling
 
@@ -206,5 +257,4 @@ Custom patterns are appended via the `patterns:` list in the YAML config.
 
 ## Notes
 
-`gcp_gke_scale_deployment` resizes GKE **node pools** via the GKE management API.
-Scaling individual **Kubernetes Deployments** requires `k8s.io/client-go` (significant dep addition) and is not currently implemented.
+`gcp_gke_scale_deployment` resizes GKE **node pools** via the GKE management API, despite its name. Scaling individual Kubernetes Deployments is not implemented.

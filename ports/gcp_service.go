@@ -23,7 +23,7 @@ type GKEService interface {
 	ScaleDeployment(ctx context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error)
 }
 
-// GKEWorkloadService covers Kubernetes workload introspection (Phase 2).
+// GKEWorkloadService covers Kubernetes workload introspection.
 type GKEWorkloadService interface {
 	ListGKEWorkloads(ctx context.Context, req models.ListGKEWorkloadsRequest) (models.ListGKEWorkloadsResponse, error)
 	GetGKEWorkloadDetails(ctx context.Context, req models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error)
@@ -32,12 +32,12 @@ type GKEWorkloadService interface {
 	ListGKENetworkPolicies(ctx context.Context, req models.ListGKENetworkPoliciesRequest) (models.ListGKENetworkPoliciesResponse, error)
 }
 
-// GKEMeshService covers service mesh topology (Phase 2).
+// GKEMeshService covers service mesh topology.
 type GKEMeshService interface {
 	GetGKEMeshTopology(ctx context.Context, req models.GetGKEMeshTopologyRequest) (models.GKEMeshTopologyResponse, error)
 }
 
-// NetworkingService covers VPC, load balancers, and API gateways (Phase 2).
+// NetworkingService covers VPC, load balancers, and API gateways.
 type NetworkingService interface {
 	ListLoadBalancers(ctx context.Context, req models.ListLoadBalancersRequest) (models.ListLoadBalancersResponse, error)
 	ListURLMaps(ctx context.Context, req models.ListURLMapsRequest) (models.ListURLMapsResponse, error)
@@ -177,7 +177,7 @@ type ServerlessGraphService interface {
 	ExportServerlessGraph(ctx context.Context, req models.ExportServerlessGraphRequest) (models.ServerlessGraph, error)
 }
 
-// DatastoreService covers managed databases: Spanner, AlloyDB, Firestore, Memorystore (Phase 2).
+// DatastoreService covers managed databases: Spanner, AlloyDB, Firestore, Memorystore.
 type DatastoreService interface {
 	ListSpannerInstances(ctx context.Context, req models.ListSpannerInstancesRequest) (models.ListSpannerInstancesResponse, error)
 	ListAlloyDBClusters(ctx context.Context, req models.ListAlloyDBClustersRequest) (models.ListAlloyDBClustersResponse, error)
@@ -185,7 +185,7 @@ type DatastoreService interface {
 	ListMemorystoreInstances(ctx context.Context, req models.ListMemorystoreInstancesRequest) (models.ListMemorystoreInstancesResponse, error)
 }
 
-// SupplyChainService covers Artifact Registry, Cloud Build, and Service Directory (Phase 2).
+// SupplyChainService covers Artifact Registry, Cloud Build, and Service Directory.
 type SupplyChainService interface {
 	ListArtifactRegistryRepos(ctx context.Context, req models.ListArtifactRegistryReposRequest) (models.ListArtifactRegistryReposResponse, error)
 	ListArtifactRegistryImages(ctx context.Context, req models.ListArtifactRegistryImagesRequest) (models.ListArtifactRegistryImagesResponse, error)
