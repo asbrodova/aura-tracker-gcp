@@ -82,10 +82,10 @@ func sweepArguments(tool mcp.Tool) map[string]any {
 		}
 		switch property["type"] {
 		case "string":
-			switch {
-			case name == "project_id" || name == "project":
+			switch name {
+			case "project_id", "project":
 				args[name] = "test-project"
-			case name == "region" || name == "location":
+			case "region", "location":
 				args[name] = "us-central1"
 			default:
 				args[name] = "sweep"
