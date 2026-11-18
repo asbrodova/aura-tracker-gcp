@@ -240,6 +240,9 @@ func (a *gcpAdapter) ListMetricDescriptors(ctx context.Context, req models.ListM
 		pbReq.Filter = req.Filter
 	}
 
+	if a.metric == nil {
+		return models.ListMetricDescriptorsResponse{}, errClientNotInitialized("monitoring.ListMetricDescriptors", clientMetric)
+	}
 	it := a.metric.ListMetricDescriptors(ctx, pbReq)
 	var rawDescriptors []*metricpb.MetricDescriptor
 	nextPageToken, err := iterator.NewPager(it, pageSize, req.PageToken).NextPage(&rawDescriptors)
@@ -452,6 +455,9 @@ func (a *gcpAdapter) GetMetrics(ctx context.Context, req models.GetMetricsReques
 		return models.GetMetricsResponse{}, fmt.Errorf("monitoring.GetMetrics: group_by_fields requires aggregation")
 	}
 
+	if a.metric == nil {
+		return models.GetMetricsResponse{}, errClientNotInitialized("monitoring.GetMetrics", clientMetric)
+	}
 	it := a.metric.ListTimeSeries(ctx, listReq)
 
 	series := make([]models.MetricSeries, 0)

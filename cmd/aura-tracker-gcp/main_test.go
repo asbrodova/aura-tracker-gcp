@@ -7,6 +7,7 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/internal/config"
 	"github.com/asbrodova/aura-tracker-gcp/internal/environments"
 	gcpadapter "github.com/asbrodova/aura-tracker-gcp/internal/gcp"
+	mcpserver "github.com/asbrodova/aura-tracker-gcp/internal/mcp"
 )
 
 func TestLoadEnvironmentRegistryLegacyPrecedence(t *testing.T) {
@@ -323,5 +324,18 @@ func TestApplyCostReasoningSourcesJSONIsStrictAndConflictsWithLegacy(t *testing.
 	})
 	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
 		t.Fatalf("conflict error = %v", err)
+	}
+}
+
+// TestEverySelectableModuleDeclaresGCPClients cross-checks the MCP module
+// registry against the adapter's moduleClientDeps. A module without an entry
+// starts with only the always-on resource clients when selected alone, which
+// is how --modules=serverlessgraph crashed the server on a nil client.
+func TestEverySelectableModuleDeclaresGCPClients(t *testing.T) {
+	modules := append([]string{mcpserver.ModuleRecommenderExport}, mcpserver.AllModules...)
+	for _, module := range modules {
+		if !gcpadapter.HasModuleClientDeps(module) {
+			t.Errorf("module %q has no moduleClientDeps entry in internal/gcp/modules.go", module)
+		}
 	}
 }

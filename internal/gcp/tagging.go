@@ -23,6 +23,9 @@ func (a *gcpAdapter) ListTaggedResources(ctx context.Context, req models.ListTag
 	var resources []models.TaggedResourceSummary
 	pageToken := ""
 	truncated := false
+	if a.crmV3Svc == nil {
+		return models.ListTaggedResourcesResponse{}, errClientNotInitialized("tagging.ListTaggedResources", clientCRMv3)
+	}
 	for {
 		call := a.crmV3Svc.TagBindings.List().
 			Parent(parent).

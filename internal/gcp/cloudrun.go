@@ -88,6 +88,9 @@ func (a *gcpAdapter) ListJobs(ctx context.Context, req models.ListJobsRequest) (
 		loc = "-"
 	}
 	parent := fmt.Sprintf("projects/%s/locations/%s", req.ProjectID, loc)
+	if a.runJobs == nil {
+		return models.ListJobsResponse{}, errClientNotInitialized("cloudrun.ListJobs", clientRunJobs)
+	}
 	it := a.runJobs.ListJobs(ctx, &runpb.ListJobsRequest{Parent: parent, PageSize: maxUnpagedInventoryItems})
 
 	var jobs []models.JobSummary
@@ -142,6 +145,9 @@ func (a *gcpAdapter) GetJobDetails(ctx context.Context, req models.GetJobDetails
 	defer cancel()
 
 	name := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", req.ProjectID, req.Region, req.JobName)
+	if a.runJobs == nil {
+		return models.JobDetails{}, errClientNotInitialized("cloudrun.GetJobDetails", clientRunJobs)
+	}
 	job, err := a.runJobs.GetJob(ctx, &runpb.GetJobRequest{Name: name})
 	if err != nil {
 		return models.JobDetails{}, wrapGCPError("cloudrun.GetJobDetails", err)
@@ -204,6 +210,9 @@ func (a *gcpAdapter) ListJobExecutions(ctx context.Context, req models.ListJobEx
 		limit = 20
 	}
 	parent := fmt.Sprintf("projects/%s/locations/%s/jobs/%s", req.ProjectID, req.Region, req.JobName)
+	if a.runExecs == nil {
+		return models.ListJobExecutionsResponse{}, errClientNotInitialized("cloudrun.ListJobExecutions", clientRunJobs)
+	}
 	it := a.runExecs.ListExecutions(ctx, &runpb.ListExecutionsRequest{
 		Parent:   parent,
 		PageSize: int32(limit),
