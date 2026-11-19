@@ -33,11 +33,19 @@ jobs:
       - name: Test
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
+      # Raise MIN_COVERAGE when the total settles higher; keep 1-2 points of
+      # headroom so small refactors do not fail CI.
       - name: Enforce coverage floor
         env:
-          MIN_COVERAGE: "40.0"
+          MIN_COVERAGE: "55.0"
         run: |
           total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
+          if [ -z "$total" ]; then
+            echo "::error::no total line in the coverage report"
+            exit 1
+          fi
+          echo "coverage ${total}% (floor ${MIN_COVERAGE}%)"
+          echo "### Coverage: ${total}% (floor ${MIN_COVERAGE}%)" >> "$GITHUB_STEP_SUMMARY"
           awk -v total="$total" -v minimum="$MIN_COVERAGE" 'BEGIN { if (total + 0 < minimum + 0) { printf "coverage %.1f%% is below %.1f%%\n", total, minimum; exit 1 } }'
 
       - name: Test IAM setup script

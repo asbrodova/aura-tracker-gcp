@@ -29,7 +29,7 @@ make lint      # golangci-lint (auto-installs on first run)
 make smoke     # stdio round-trip: prints "OK — N tools registered"
 ```
 
-All four must pass before opening a PR.
+All four must pass before opening a PR. CI also fails if total test coverage drops below the floor in `.github/workflows/ci.yaml` (`MIN_COVERAGE`, currently 55%); the Test job prints the total. Check it locally with `go test -race -coverprofile=coverage.out ./... && go tool cover -func=coverage.out | tail -1`.
 
 ## Adding a new tool
 
