@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	cloudtaskspb "cloud.google.com/go/cloudtasks/apiv2/cloudtaskspb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/safego"
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
@@ -103,12 +104,42 @@ func (a *gcpAdapter) listTaskQueuesForRegion(ctx context.Context, projectID, reg
 			return queues, true, nil
 		}
 		_, name := parseTaskQueueResourceName(q.Name)
-		queues = append(queues, models.TaskQueueSummary{
-			Name:   name,
-			Region: region,
-			State:  q.State.String(),
-		})
+		queues = append(queues, taskQueueSummary(q, name, region))
 	}
+}
+
+// taskQueueSummary maps a queue, including the dispatch rate, retry and
+// logging settings that environment drift compares.
+func taskQueueSummary(q *cloudtaskspb.Queue, name, region string) models.TaskQueueSummary {
+	summary := models.TaskQueueSummary{Name: name, Region: region, State: q.GetState().String()}
+	if limits := q.GetRateLimits(); limits != nil {
+		summary.RateLimits = &models.TaskQueueRateLimits{
+			MaxDispatchesPerSecond:  limits.GetMaxDispatchesPerSecond(),
+			MaxBurstSize:            limits.GetMaxBurstSize(),
+			MaxConcurrentDispatches: limits.GetMaxConcurrentDispatches(),
+		}
+	}
+	if retry := q.GetRetryConfig(); retry != nil {
+		summary.RetryConfig = &models.TaskQueueRetryConfig{
+			MaxAttempts:      retry.GetMaxAttempts(),
+			MaxRetryDuration: protoDurationString(retry.GetMaxRetryDuration()),
+			MinBackoff:       protoDurationString(retry.GetMinBackoff()),
+			MaxBackoff:       protoDurationString(retry.GetMaxBackoff()),
+			MaxDoublings:     retry.GetMaxDoublings(),
+		}
+	}
+	if logging := q.GetStackdriverLoggingConfig(); logging != nil {
+		ratio := logging.GetSamplingRatio()
+		summary.LoggingSamplingRatio = &ratio
+	}
+	return summary
+}
+
+func protoDurationString(value *durationpb.Duration) string {
+	if value == nil {
+		return ""
+	}
+	return value.AsDuration().String()
 }
 
 // parseTaskQueueResourceName extracts region and name from:

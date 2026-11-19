@@ -26,6 +26,14 @@ type GetResourceIAMBindingsRequest struct {
 type IAMBinding struct {
 	Role    string   `json:"role"`
 	Members []string `json:"members"`
+	// Condition is set for a conditional role binding (IAM Conditions).
+	Condition *IAMCondition `json:"condition,omitempty"`
+}
+
+// IAMCondition is the condition attached to a conditional role binding.
+type IAMCondition struct {
+	Title      string `json:"title,omitempty"`
+	Expression string `json:"expression"`
 }
 
 type GetResourceIAMBindingsResponse struct {

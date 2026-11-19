@@ -2,6 +2,8 @@ package gcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -40,7 +42,7 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 	for _, r := range regions {
 		r := r
 		g.Go(func() error {
-			items, regionTruncated, rerr := a.listWorkflowsForRegion(gctx, req.ProjectID, r, perRegionLimit)
+			items, regionTruncated, rerr := a.listWorkflowsForRegion(gctx, req.ProjectID, r, perRegionLimit, req.RequireSourceHash)
 			mu.Lock()
 			defer mu.Unlock()
 			if rerr != nil {
@@ -78,7 +80,7 @@ func (a *gcpAdapter) ListWorkflows(ctx context.Context, req models.ListWorkflows
 	return models.ListWorkflowsResponse{Workflows: workflows, Errors: errs, Truncated: truncated}, nil
 }
 
-func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, region string, limit int) ([]models.WorkflowSummary, bool, error) {
+func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, region string, limit int, requireSource bool) ([]models.WorkflowSummary, bool, error) {
 	if a.workflowsClient == nil {
 		return nil, false, fmt.Errorf("workflows client is not initialized")
 	}
@@ -108,16 +110,41 @@ func (a *gcpAdapter) listWorkflowsForRegion(ctx context.Context, projectID, regi
 		if wf.UpdateTime != nil {
 			lastMod = wf.UpdateTime.AsTime().Format(tsFormat)
 		}
-		workflows = append(workflows, models.WorkflowSummary{
-			Name:         name,
-			Region:       region,
-			State:        wf.State.String(),
-			RevisionID:   wf.RevisionId,
-			Description:  wf.Description,
-			LastModified: lastMod,
-			Labels:       wf.Labels,
-		})
+		if requireSource && wf.GetSourceContents() == "" {
+			full, getErr := a.workflowsClient.GetWorkflow(ctx, &workflowspb.GetWorkflowRequest{Name: wf.GetName()})
+			if getErr != nil {
+				return nil, false, wrapGCPError("workflows.get", getErr)
+			}
+			wf = full
+		}
+		workflows = append(workflows, workflowSummary(wf, name, region, lastMod))
 	}
+}
+
+// workflowSummary maps a workflow, including the settings environment drift
+// compares. The definition is reduced to a SHA-256 and environment
+// variables to their names, so neither the source nor values are returned.
+func workflowSummary(wf *workflowspb.Workflow, name, region, lastModified string) models.WorkflowSummary {
+	summary := models.WorkflowSummary{
+		Name: name, Region: region, State: wf.GetState().String(), RevisionID: wf.GetRevisionId(),
+		Description: wf.GetDescription(), LastModified: lastModified, Labels: wf.GetLabels(),
+		ServiceAccount: wf.GetServiceAccount(), CryptoKeyName: wf.GetCryptoKeyName(),
+	}
+	if level := wf.GetCallLogLevel(); level != workflowspb.Workflow_CALL_LOG_LEVEL_UNSPECIFIED {
+		summary.CallLogLevel = level.String()
+	}
+	if level := wf.GetExecutionHistoryLevel(); level != workflowspb.ExecutionHistoryLevel_EXECUTION_HISTORY_LEVEL_UNSPECIFIED {
+		summary.ExecutionHistoryLevel = level.String()
+	}
+	for key := range wf.GetUserEnvVars() {
+		summary.UserEnvVarNames = append(summary.UserEnvVarNames, key)
+	}
+	sort.Strings(summary.UserEnvVarNames)
+	if source := wf.GetSourceContents(); source != "" {
+		sum := sha256.Sum256([]byte(source))
+		summary.SourceSHA256 = hex.EncodeToString(sum[:])
+	}
+	return summary
 }
 
 func (a *gcpAdapter) ListWorkflowExecutions(ctx context.Context, req models.ListWorkflowExecutionsRequest) (models.ListWorkflowExecutionsResponse, error) {

@@ -3,6 +3,8 @@ package drift
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
@@ -274,7 +276,7 @@ func (c *GCPCollector) collectIAM(ctx context.Context, req CollectionRequest) (C
 	if err != nil {
 		return CollectionResult{}, err
 	}
-	result := CollectionResult{Resources: []Resource{}, Partial: true, Warnings: []string{"service-account configuration is compared; project and resource IAM bindings are not yet included"}}
+	result := CollectionResult{Resources: []Resource{}}
 	for _, value := range accounts.ServiceAccounts {
 		name := value.Email
 		if value.Name != "" {
@@ -287,5 +289,63 @@ func (c *GCPCollector) collectIAM(ctx context.Context, req CollectionRequest) (C
 	if accounts.Truncated {
 		result.Warnings = append(result.Warnings, "service-account page limit reached; additional pages were not compared")
 	}
+
+	policy, err := c.source.GetResourceIAMBindings(ctx, models.GetResourceIAMBindingsRequest{
+		ProjectID: req.ProjectID, URN: fmt.Sprintf("urn:gcp:project:global:%s:%s", req.ProjectID, req.ProjectID),
+	})
+	if err != nil {
+		result.Partial = true
+		result.Warnings = append(result.Warnings, fmt.Sprintf("project IAM policy: %v", err))
+		return result, nil
+	}
+	for _, binding := range projectBindingResources(policy.Bindings) {
+		if includeResource(req, binding.Name, "") {
+			result.Resources = append(result.Resources, binding)
+		}
+	}
 	return result, nil
+}
+
+// Google-managed service agents and default accounts embed the project
+// number, which differs between environments even when the setup is the
+// same, so it is replaced like the project ID is.
+var projectNumberMember = regexp.MustCompile(`^(serviceAccount:)(service-|)\d+(@|-compute@)`)
+
+// projectBindingResources turns a project IAM policy into one drift
+// resource per role (and condition). Members are sorted and service-agent
+// project numbers normalized, so the same grants compare equal.
+func projectBindingResources(bindings []models.IAMBinding) []Resource {
+	byName := make(map[string]map[string]bool)
+	conditions := make(map[string]*models.IAMCondition)
+	for _, binding := range bindings {
+		name := binding.Role
+		if binding.Condition != nil {
+			label := binding.Condition.Title
+			if label == "" {
+				label = binding.Condition.Expression
+			}
+			name += " [condition: " + label + "]"
+			conditions[name] = binding.Condition
+		}
+		if byName[name] == nil {
+			byName[name] = make(map[string]bool)
+		}
+		for _, member := range binding.Members {
+			byName[name][projectNumberMember.ReplaceAllString(member, "${1}${2}$${PROJECT_NUMBER}${3}")] = true
+		}
+	}
+	out := make([]Resource, 0, len(byName))
+	for name, members := range byName {
+		sorted := make([]string, 0, len(members))
+		for member := range members {
+			sorted = append(sorted, member)
+		}
+		sort.Strings(sorted)
+		config := map[string]any{"members": sorted}
+		if condition := conditions[name]; condition != nil {
+			config["condition_expression"] = condition.Expression
+		}
+		out = append(out, Resource{Component: "iam", ResourceType: "iam.project_binding", Name: name, Config: configMap(config)})
+	}
+	return out
 }
