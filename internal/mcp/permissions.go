@@ -107,7 +107,7 @@ var modulePermissions = map[string][]string{
 		[]string{"cloudsql.instances.list", "secretmanager.secrets.list"},
 	),
 	ModuleTagging:  {"resourcemanager.tagBindings.list"},
-	ModuleIncident: mergePermissionLists(permissionsRun, permissionsPubSub, permissionsObservability, []string{"cloudsql.instances.list", "vpcaccess.connectors.list"}),
+	ModuleIncident: mergePermissionLists(permissionsRun, permissionsPubSub, permissionsObservability, permissionsFunctions, permissionsGKE, []string{"cloudsql.instances.list", "vpcaccess.connectors.list"}),
 	ModuleCost:     permissionsCost,
 	ModuleSecurity: mergePermissionLists(permissionsSecurity, permissionsGKE, permissionsFunctions, []string{"run.services.list"}),
 	ModuleDrift: mergePermissionLists(

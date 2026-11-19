@@ -185,6 +185,8 @@ Copy one into your connected AI client, or use it as the beginning of a deeper i
 
 > Production is failing. Correlate recent deployments, 5xx errors, latency, logs, dependencies, and infrastructure changes. Rank the likely causes and show the evidence.
 
+> The checkout Deployment on our prod GKE cluster keeps restarting. Diagnose it: unavailable replicas, OOM kills, failed scheduling, or a bad rollout?
+
 > Are any GKE clusters or node pools showing bottlenecks, version drift, or autoscaling problems?
 
 > Which Pub/Sub subscriptions are building backlog, and what downstream services consume them?
