@@ -73,13 +73,21 @@ func (a *gcpAdapter) fetchResourceBindings(ctx context.Context, selectedProject,
 		if resource != project {
 			return nil, fmt.Errorf("project URN resource must match its project segment")
 		}
-		resp, err := a.crm.Projects.GetIamPolicy(project, &cloudresourcemanager.GetIamPolicyRequest{}).Context(ctx).Do()
+		// Policy version 3 returns conditional bindings with their
+		// conditions instead of a "_withcond_" role placeholder.
+		resp, err := a.crm.Projects.GetIamPolicy(project, &cloudresourcemanager.GetIamPolicyRequest{
+			Options: &cloudresourcemanager.GetPolicyOptions{RequestedPolicyVersion: 3},
+		}).Context(ctx).Do()
 		if err != nil {
 			return nil, err
 		}
 		out := make([]models.IAMBinding, 0, len(resp.Bindings))
 		for _, b := range resp.Bindings {
-			out = append(out, models.IAMBinding{Role: b.Role, Members: b.Members})
+			binding := models.IAMBinding{Role: b.Role, Members: b.Members}
+			if b.Condition != nil && b.Condition.Expression != "" {
+				binding.Condition = &models.IAMCondition{Title: b.Condition.Title, Expression: b.Condition.Expression}
+			}
+			out = append(out, binding)
 		}
 		return out, nil
 

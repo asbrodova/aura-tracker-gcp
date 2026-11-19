@@ -148,15 +148,20 @@ func (c *GCPCollector) collectScheduler(ctx context.Context, req CollectionReque
 }
 
 func (c *GCPCollector) collectWorkflows(ctx context.Context, req CollectionRequest) (CollectionResult, error) {
-	response, err := c.source.ListWorkflows(ctx, models.ListWorkflowsRequest{ProjectID: req.ProjectID})
+	response, err := c.source.ListWorkflows(ctx, models.ListWorkflowsRequest{ProjectID: req.ProjectID, RequireSourceHash: true})
 	if err != nil {
 		return CollectionResult{}, err
 	}
 	result := CollectionResult{Resources: []Resource{}}
 	for _, workflow := range response.Workflows {
-		if includeResource(req, workflow.Name, workflow.Region) {
-			result.Resources = append(result.Resources, resource("workflows", "workflows.workflow", workflow.Name, workflow.Region, "", workflow))
+		if !includeResource(req, workflow.Name, workflow.Region) {
+			continue
 		}
+		if workflow.SourceSHA256 == "" {
+			result.Partial = true
+			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %s: its definition was not returned, so the source was not compared", bareName(workflow.Name)))
+		}
+		result.Resources = append(result.Resources, resource("workflows", "workflows.workflow", workflow.Name, workflow.Region, "", workflow))
 	}
 	partial, warnings := toolErrors(response.Errors)
 	mergePartial(&result, partial, warnings)
@@ -169,7 +174,7 @@ func (c *GCPCollector) collectTasks(ctx context.Context, req CollectionRequest) 
 	if err != nil {
 		return CollectionResult{}, err
 	}
-	result := CollectionResult{Resources: []Resource{}, Partial: true, Warnings: []string{"queue presence is compared, but rate and retry settings are not exposed by the current Cloud Tasks collector"}}
+	result := CollectionResult{Resources: []Resource{}}
 	for _, queue := range response.Queues {
 		if includeResource(req, queue.Name, queue.Region) {
 			result.Resources = append(result.Resources, resource("tasks", "cloudtasks.queue", queue.Name, queue.Region, "", queue))
@@ -217,7 +222,7 @@ func (c *GCPCollector) collectCloudSQL(ctx context.Context, req CollectionReques
 	if err != nil {
 		return CollectionResult{}, err
 	}
-	result := CollectionResult{Resources: []Resource{}, Partial: true, Warnings: []string{"Cloud SQL tier, version, region, and labels are compared; advanced instance settings require a future detailed collector"}}
+	result := CollectionResult{Resources: []Resource{}}
 	for _, instance := range response.Instances {
 		if includeResource(req, instance.Name, instance.Region) {
 			result.Resources = append(result.Resources, resource("cloudsql", "cloudsql.instance", instance.Name, instance.Region, "", instance))

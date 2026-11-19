@@ -61,6 +61,7 @@ type DataSource interface {
 	ListSLOs(context.Context, models.ListSLOsRequest) (models.ListSLOsResponse, error)
 	ListDashboards(context.Context, models.ListDashboardsRequest) (models.ListDashboardsResponse, error)
 	ListServiceAccounts(context.Context, models.ListServiceAccountsRequest) (models.ListServiceAccountsResponse, error)
+	GetResourceIAMBindings(context.Context, models.GetResourceIAMBindingsRequest) (models.GetResourceIAMBindingsResponse, error)
 }
 
 var supportedComponents = []string{
