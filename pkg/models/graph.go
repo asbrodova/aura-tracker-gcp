@@ -90,6 +90,7 @@ const (
 	EdgeServedBy       = "served_by"        // service → Service Directory namespace
 	EdgeBoundToSA      = "bound_to_sa"      // workload → IAM service account
 	EdgeGrantedOn      = "granted_on"       // IAM binding: principal → resource
+	EdgeNetworkFlow    = "network_flow"     // source workload → destination workload/Service (VPC Flow Logs)
 )
 
 // Evidence constants — how an edge was discovered.
@@ -226,9 +227,10 @@ type ExportArchitectureGraphRequest struct {
 	IncludeExternal bool     `json:"include_external,omitempty"` // include external_endpoint nodes
 	MaxDepth        int      `json:"max_depth,omitempty"`        // BFS depth cap; 0 = unlimited
 	MaxNodes        int      `json:"max_nodes,omitempty"`        // hard node cap; 0 = unlimited
-	// EnableFlowLogInference is retained for source compatibility only. The
-	// adapter rejects true because flow-log evidence is not collected yet.
-	EnableFlowLogInference bool `json:"-"`
+	// EnableFlowLogInference adds low-confidence network_flow edges between
+	// GKE workloads observed in VPC Flow Logs. Off by default because it
+	// reads Cloud Logging and needs flow logs enabled on the subnets.
+	EnableFlowLogInference bool `json:"include_flow_logs,omitempty"`
 	LookbackHours          int  `json:"lookback_hours,omitempty"` // trace/log lookback; default 168
 }
 

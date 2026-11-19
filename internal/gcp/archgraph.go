@@ -23,9 +23,6 @@ func (a *gcpAdapter) ExportArchitectureGraph(ctx context.Context, req models.Exp
 	if err := validateArchitectureGraphRequest(req); err != nil {
 		return models.ServerlessGraph{}, err
 	}
-	if req.EnableFlowLogInference {
-		return models.ServerlessGraph{}, fmt.Errorf("archgraph: flow-log inference is not implemented")
-	}
 	cacheKey := archGraphCacheKey(req)
 	if cached, ok := a.graphCache.get(cacheKey); ok {
 		return applyArchitectureGraphView(cached, req), nil
@@ -101,6 +98,7 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 		ingresses     []models.GKEIngressSummary
 		meshEdges     []models.GKEMeshEdge
 		traceEdges    []models.TraceDependencyEdge
+		flowEdges     []models.FlowLogEdge
 	)
 
 	addNode := func(n models.GraphNode) {
@@ -732,6 +730,26 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 		return nil
 	})
 
+	if req.EnableFlowLogInference {
+		b3.Go(func() error {
+			sample, err := a.collectFlowLogEdges(b3ctx, req.ProjectID, lookbackHours, time.Now())
+			if err != nil {
+				collectErr("logging.entries.list.vpc_flows", err)
+				return nil
+			}
+			switch {
+			case sample.records == 0:
+				collectErr("logging.entries.list.vpc_flows", fmt.Errorf("no VPC Flow Log records with GKE workload details in the last %s; enable flow logs on the GKE subnets to infer network_flow edges", sample.window))
+			case sample.truncated:
+				collectErr("logging.entries.list.vpc_flows", fmt.Errorf("flow-log inference used a sample of the newest %d records over the last %s; some connections may be missing", sample.records, sample.window))
+			}
+			mu.Lock()
+			flowEdges = sample.edges
+			mu.Unlock()
+			return nil
+		})
+	}
+
 	for _, cl := range clusters {
 		cl := cl
 		b3.Go(func() error {
@@ -787,6 +805,7 @@ func (a *gcpAdapter) collectArchitectureGraph(ctx context.Context, req models.Ex
 		Topics:          topics,
 		MeshEdges:       meshEdges,
 		TraceEdges:      traceEdges,
+		FlowEdges:       flowEdges,
 		IncludeExternal: true,
 	})
 
@@ -897,6 +916,9 @@ func archGraphCacheKey(req models.ExportArchitectureGraphRequest) string {
 		lookback = 168
 	}
 	key := fmt.Sprintf("%s:lookback=%d", req.ProjectID, lookback)
+	if req.EnableFlowLogInference {
+		key += ":flowlogs"
+	}
 	for _, r := range regions {
 		key += ":" + r
 	}

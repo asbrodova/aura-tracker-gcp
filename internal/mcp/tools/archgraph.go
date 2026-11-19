@@ -127,7 +127,7 @@ func (t *ArchGraphTools) ExportArchitectureGraph() server.ServerTool {
 			"Export a full project-wide architecture graph fusing serverless and event-driven resources "+
 				"with GKE workloads, networking, data stores, supply chain, and observability resources. "+
 				"Runs a 3-batch parallel fan-out across all GCP listers, infers service-to-service edges via "+
-				"the resolution engine (K8s selectors, mesh telemetry, and Cloud Trace spans), "+
+				"the resolution engine (K8s selectors, mesh telemetry, Cloud Trace spans, and optionally VPC Flow Logs), "+
 				"and returns a single diagram-ready JSON with nodes, edges, and groups. "+
 				"Results are cached for 5 minutes per project+region combination. "+
 				"WARNING: full scans of large projects (5+ clusters, 50+ services) may take 40–60 seconds.",
@@ -150,6 +150,9 @@ func (t *ArchGraphTools) ExportArchitectureGraph() server.ServerTool {
 			mcp.Min(1),
 			mcp.Max(720),
 		),
+		mcp.WithBoolean("include_flow_logs",
+			mcp.Description("Also infer low-confidence network_flow edges between GKE workloads from VPC Flow Logs (default: false). Reads at most the newest 5,000 records from the last 24 hours (or lookback_hours if shorter); needs flow logs on the GKE subnets."),
+		),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Export Architecture Graph",
 			ReadOnlyHint:    boolPtr(true),
@@ -167,6 +170,7 @@ func (t *ArchGraphTools) ExportArchitectureGraph() server.ServerTool {
 				"max_depth", args.MaxDepth,
 				"max_nodes", args.MaxNodes,
 				"lookback_hours", args.LookbackHours,
+				"include_flow_logs", args.EnableFlowLogInference,
 			)
 			resp, err := t.svc.ExportArchitectureGraph(ctx, args)
 			if err != nil {

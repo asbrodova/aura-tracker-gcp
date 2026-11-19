@@ -2,6 +2,7 @@ package resolution
 
 import (
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
@@ -361,7 +362,69 @@ func runPass4(c *resolveCtx) {
 	}
 }
 
-// ─── Pass 5: Log / VPC flow log (opt-in, low confidence) ─────────────────────
+// ─── Pass 5: VPC Flow Logs (opt-in, low confidence) ──────────────────────────
+
+// Flow-log edges prove that packets moved between two endpoints, not which
+// application call made them, so they stay below the default diagram
+// threshold (0.65) unless traffic is sustained: 0.45 plus up to 0.15 as the
+// number of observed flow records approaches 50.
+const (
+	flowEdgeBaseConfidence  = 0.45
+	flowEdgeBonusConfidence = 0.15
+	flowEdgeFullRecords     = 50.0
+)
+
+func runPass5(c *resolveCtx) {
+	for _, flow := range c.in.FlowEdges {
+		src, dst := flow.Source, flow.Destination
+		if src.Workload == "" {
+			continue
+		}
+		sourceID := c.lookupScoped(src.Workload, src.Namespace, src.Cluster, src.Location, gkeCallableKinds...)
+		targetID := ""
+		if dst.Service != "" {
+			targetID = c.lookupScoped(dst.Service, dst.Namespace, dst.Cluster, dst.Location, models.KindGKEService)
+		}
+		if targetID == "" && dst.Workload != "" {
+			targetID = c.lookupScoped(dst.Workload, dst.Namespace, dst.Cluster, dst.Location, gkeCallableKinds...)
+		}
+		if sourceID == "" || targetID == "" || sourceID == targetID {
+			continue
+		}
+		conf := flowEdgeBaseConfidence + flowEdgeBonusConfidence*math.Min(1.0, float64(flow.Records)/flowEdgeFullRecords)
+		meta := map[string]string{"flow_records": strconv.Itoa(flow.Records)}
+		if flow.Port > 0 {
+			meta["port"] = strconv.Itoa(flow.Port)
+		}
+		if protocol := ipProtocolName(flow.Protocol); protocol != "" {
+			meta["protocol"] = protocol
+		}
+		if flow.Bytes > 0 {
+			meta["bytes"] = strconv.FormatInt(flow.Bytes, 10)
+		}
+		c.emit(models.GraphEdge{
+			Source:     sourceID,
+			Target:     targetID,
+			Type:       models.EdgeNetworkFlow,
+			Evidence:   models.EvidenceVPCFlowLog,
+			Confidence: conf,
+			Metadata:   meta,
+		})
+	}
+}
+
+func ipProtocolName(number int) string {
+	switch number {
+	case 6:
+		return "tcp"
+	case 17:
+		return "udp"
+	case 0:
+		return ""
+	default:
+		return strconv.Itoa(number)
+	}
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@
 // architecture graph. It is a pure function package: no GCP API calls,
 // no global state, and fully deterministic given the same input.
 //
-// The engine runs four ordered passes over the raw resource inventory
+// The engine runs five ordered passes over the raw resource inventory
 // assembled by the architecture graph fan-out, then deduplicates and sorts the
 // resulting edge set.
 //
@@ -10,6 +10,7 @@
 // Pass 2 — IAM bindings   (confidence 0.65–0.75)
 // Pass 3 — Mesh telemetry (confidence 0.85)
 // Pass 4 — Cloud Trace    (confidence ≤ 0.90)
+// Pass 5 — VPC Flow Logs  (confidence 0.45–0.60, opt-in)
 package resolution
 
 import (
@@ -40,6 +41,7 @@ func Resolve(in models.ResolutionInput) models.ResolutionOutput {
 	runPass2(ctx)
 	runPass3(ctx)
 	runPass4(ctx)
+	runPass5(ctx)
 	return ctx.collect()
 }
 

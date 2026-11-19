@@ -111,8 +111,8 @@ func TestArchGraphCacheKeyIncludesCollectionOptionsOnly(t *testing.T) {
 
 	withFlowLogs := base
 	withFlowLogs.EnableFlowLogInference = true
-	if got, want := archGraphCacheKey(withFlowLogs), archGraphCacheKey(base); got != want {
-		t.Fatalf("unsupported flow-log flag changed cache key: got %q want %q", got, want)
+	if archGraphCacheKey(withFlowLogs) == archGraphCacheKey(base) {
+		t.Fatal("flow-log inference collects extra evidence, so it must change the cache key")
 	}
 
 	withLookback := base
