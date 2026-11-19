@@ -79,19 +79,26 @@ Homebrew is the fastest path on macOS and Linux:
 brew install --cask asbrodova/tap/aura-tracker-gcp
 ```
 
-You can also download a binary from the [latest release](https://github.com/asbrodova/aura-tracker-gcp/releases/latest), install with Go, or build a local image from the repository `Dockerfile`.
+You can also download a binary from the [latest release](https://github.com/asbrodova/aura-tracker-gcp/releases/latest), install with Go, or run the official container image.
 
 ```bash
 go install github.com/asbrodova/aura-tracker-gcp/cmd/aura-tracker-gcp@latest
 ```
 
 ```bash
-git clone https://github.com/asbrodova/aura-tracker-gcp.git
-cd aura-tracker-gcp
-docker build -t aura-tracker-gcp:local .
+docker pull ghcr.io/asbrodova/aura-tracker-gcp:latest   # linux/amd64 and linux/arm64
 ```
 
-Aura does not currently publish an official container image.
+Each release image is signed with cosign (keyless), carries an SBOM and a build-provenance attestation, and is tagged `X.Y.Z`, `X.Y` and `latest`. Pin a digest in production and verify it:
+
+```bash
+gh attestation verify oci://ghcr.io/asbrodova/aura-tracker-gcp:latest --owner asbrodova
+cosign verify ghcr.io/asbrodova/aura-tracker-gcp:latest \
+  --certificate-identity-regexp '^https://github.com/asbrodova/aura-tracker-gcp/\.github/workflows/release\.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+To build the image yourself instead, run `docker build -t aura-tracker-gcp:local .` in a clone of this repository.
 
 ### 2. Authenticate
 
