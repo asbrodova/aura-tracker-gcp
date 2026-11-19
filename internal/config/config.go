@@ -75,8 +75,11 @@ type EnvironmentConfig struct {
 
 // Config holds user-level defaults read from ~/.aura-tracker.yaml.
 type Config struct {
-	ProjectID         string                    `yaml:"project_id"`
-	Environments      []EnvironmentConfig       `yaml:"environments"`
+	ProjectID    string              `yaml:"project_id"`
+	Environments []EnvironmentConfig `yaml:"environments"`
+	// MutationsEnabled registers the tools that change GCP resources. Off by
+	// default: the server is read-only. MUTATIONS_ENABLED overrides it.
+	MutationsEnabled  bool                      `yaml:"mutations_enabled"`
 	RecommenderExport RecommenderBQExportConfig `yaml:"recommender_export"`
 	CostReasoning     CostReasoningConfig       `yaml:"cost_reasoning"`
 	SecurityAudit     SecurityAuditConfig       `yaml:"security_audit"`

@@ -36,23 +36,50 @@ type exportRecommendationsPlan struct {
 // confirm flow for all mutation methods. Construct with NewSafetyDecorator.
 // Safe for concurrent use.
 type SafetyDecorator struct {
-	inner ports.GCPService
-	store *PlanStore
-	log   *slog.Logger
+	inner             ports.GCPService
+	store             *PlanStore
+	log               *slog.Logger
+	mutationsDisabled bool
+}
+
+// Option configures a SafetyDecorator.
+type Option func(*SafetyDecorator)
+
+// WithMutationsDisabled refuses every mutation method, preview included,
+// without calling the inner service. It backs MUTATIONS_ENABLED=false, where
+// the mutation tools are not registered at all.
+func WithMutationsDisabled() Option {
+	return func(d *SafetyDecorator) { d.mutationsDisabled = true }
+}
+
+// errMutationsDisabled is returned by every mutation method when mutations
+// are disabled.
+func errMutationsDisabled(op string) error {
+	return &ports.ConfirmationRequiredError{
+		Op:      op,
+		Message: "this server is read-only: changes are disabled (MUTATIONS_ENABLED=false)",
+	}
 }
 
 // Compile-time check: SafetyDecorator must implement ports.GCPService.
 var _ ports.GCPService = (*SafetyDecorator)(nil)
 
 // NewSafetyDecorator wraps inner with safety enforcement.
-func NewSafetyDecorator(inner ports.GCPService, log *slog.Logger) *SafetyDecorator {
-	return &SafetyDecorator{inner: inner, store: NewPlanStore(), log: log}
+func NewSafetyDecorator(inner ports.GCPService, log *slog.Logger, opts ...Option) *SafetyDecorator {
+	d := &SafetyDecorator{inner: inner, store: NewPlanStore(), log: log}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
 }
 
 // --- Mutation methods ---
 
 func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
 	const op = "safety.ScaleDeployment"
+	if d.mutationsDisabled {
+		return models.ScaleDeploymentResponse{}, errMutationsDisabled(op)
+	}
 
 	// Path 1: dry-run — delegate to inner, store a plan, inject plan_id.
 	if req.DryRun {
@@ -133,6 +160,9 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 
 func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
 	const op = "safety.UpdateTraffic"
+	if d.mutationsDisabled {
+		return models.UpdateTrafficResponse{}, errMutationsDisabled(op)
+	}
 
 	if req.DryRun {
 		preview, err := d.inner.UpdateTraffic(ctx, req)
@@ -208,6 +238,9 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 
 func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
 	const op = "safety.ExportRecommendationsToBQ"
+	if d.mutationsDisabled {
+		return models.ExportRecommendationsToBQResponse{}, errMutationsDisabled(op)
+	}
 	if req.DryRun {
 		preview, err := d.inner.ExportRecommendationsToBQ(ctx, req)
 		if err != nil {

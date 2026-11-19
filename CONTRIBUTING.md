@@ -80,12 +80,13 @@ Avoid returning raw GCP SDK errors to the MCP layer — the LLM cannot act on gR
 
 ## Mutation tools
 
-The three mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`) execute only after the user approves them in the MCP client. `SafetyDecorator` stores the previewed plan; the tool handler asks the user through MCP elicitation. Any new mutation tool must:
+The three mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`) exist only when the server runs with `MUTATIONS_ENABLED=true`, and execute only after the user approves them in the MCP client. `SafetyDecorator` stores the previewed plan; the tool handler asks the user through MCP elicitation. Any new mutation tool must:
 
 1. Have a request type with `DryRun` and `ConfirmPlanID` fields; the decorator guard test treats any request with `DryRun` as a mutation
 2. Implement the decorator's preview → stored plan → confirm flow, replaying the stored request with a state guard so a resource that changed since the preview is refused
 3. Return `no_change_needed: true` when the resource is already at the requested state
 4. Route its handler through `runMutation` (`internal/mcp/tools/approval.go`), keep `confirm_plan_id` out of the tool schema, and describe the change in the approval prompt clearly enough for a person to decide
+5. Set `ReadOnlyHint: false` (that is what keeps it off in read-only mode), add it to `knownMutationTools` in `internal/mcp/mutations_switch_test.go`, and put its write permissions in `mutationPermissions`
 
 ## Submitting a PR
 

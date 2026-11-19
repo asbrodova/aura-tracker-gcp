@@ -114,3 +114,29 @@ func recordingFakeService() (*testutil.FakeGCPService, func() []string) {
 		return append([]string(nil), calls...)
 	}
 }
+
+func TestWithMutationsDisabledRefusesEveryMutation(t *testing.T) {
+	port := reflect.TypeOf((*ports.GCPService)(nil)).Elem()
+	for i := range port.NumMethod() {
+		method := port.Method(i)
+		reqType := method.Type.In(1)
+		if field, ok := reqType.FieldByName("DryRun"); !ok || field.Type.Kind() != reflect.Bool {
+			continue
+		}
+		t.Run(method.Name, func(t *testing.T) {
+			inner, calls := recordingFakeService()
+			decorator := reflect.ValueOf(NewSafetyDecorator(inner, slog.New(slog.DiscardHandler), WithMutationsDisabled())).MethodByName(method.Name)
+			req := reflect.New(reqType).Elem()
+			req.FieldByName("DryRun").SetBool(true)
+			out := decorator.Call([]reflect.Value{reflect.ValueOf(context.Background()), req})
+			err, _ := out[len(out)-1].Interface().(error)
+			var refused *ports.ConfirmationRequiredError
+			if !errors.As(err, &refused) {
+				t.Fatalf("error = %v, want ConfirmationRequiredError", err)
+			}
+			if got := calls(); len(got) != 0 {
+				t.Fatalf("inner service was called with mutations disabled: %v", got)
+			}
+		})
+	}
+}

@@ -222,7 +222,7 @@ func (m *mockSvc) ListMemorystoreInstances(_ context.Context, _ models.ListMemor
 }
 
 func TestServerRegistersAllTools(t *testing.T) {
-	s := New(&mockSvc{}, slog.Default(), "test")
+	s := New(&mockSvc{}, slog.Default(), "test", WithMutations())
 
 	expected := []string{
 		"gcp_gke_list_clusters",
@@ -421,6 +421,7 @@ func TestResourceContentsSafetyLimit(t *testing.T) {
 func TestFilteredRegistration(t *testing.T) {
 	s := New(&mockSvc{}, slog.Default(), "test",
 		WithModules(map[string]bool{"gke": true}),
+		WithMutations(),
 	)
 
 	registered := s.ListTools()

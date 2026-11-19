@@ -352,7 +352,8 @@ if [[ "$SERVICE_HEALTH_ENABLED" == "true" ]]; then
 fi
 
 # Mutation roles (opt-in) — required only for gcp_gke_scale_deployment and
-# gcp_cloudrun_update_traffic. Both tools use two-step confirmation when safety is enabled.
+# gcp_cloudrun_update_traffic. The server registers those tools only with
+# MUTATIONS_ENABLED=true, and each change still needs the user's approval.
 if [[ "$MUTATION_ROLES" == "true" ]]; then
   echo "Reconciling mutation roles (container.admin, run.admin)..."
   for role in roles/container.admin roles/run.admin; do

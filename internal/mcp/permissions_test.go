@@ -22,7 +22,7 @@ func TestEverySelectableModuleDeclaresPermissions(t *testing.T) {
 }
 
 func TestPermissionsForModulesAreScopedAndIncludeResources(t *testing.T) {
-	permissions := permissionsForModules(map[string]bool{ModuleMonitoring: true})
+	permissions := permissionsForModules(map[string]bool{ModuleMonitoring: true}, false)
 	set := make(map[string]bool, len(permissions))
 	for _, permission := range permissions {
 		if set[permission] {

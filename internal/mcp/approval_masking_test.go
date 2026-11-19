@@ -19,6 +19,7 @@ func TestApprovalPromptShowsAliasNotProjectID(t *testing.T) {
 	s := New(safety.NewSafetyDecorator(&mockSvc{}, log), log, "test",
 		WithModules(map[string]bool{ModuleGKE: true}),
 		WithEnvironments(testEnvironmentRegistry(t)),
+		WithMutations(),
 	)
 	tool := s.GetTool("gcp_gke_scale_deployment")
 	if tool == nil {

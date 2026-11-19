@@ -68,7 +68,8 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 | `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
 | `ANONYMIZE_PROJECT_ID` | No | Masks an unaliased project as `[GCP_PROJECT_ID]`. Configured aliases are always enforced on MCP output. |
 | `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Enriches Aura Scores with idle/overprovisioned signals; 12h cache prevents quota exhaustion. |
-| `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default. |
+| `MUTATIONS_ENABLED` | No | Default `false`: read-only server; mutation tools are not registered and write permissions are left out of the permission catalog. `true` registers them (each change still needs the user's approval). YAML: `mutations_enabled`. |
+| `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default; also needs `MUTATIONS_ENABLED=true`. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name for the recommendations export (overrides `recommender_export.dataset` in YAML). |
 | `COST_REASONING_ENABLED` | No | Set `true` to register the read-only `gcp_cost_explain` tool. Off by default. |
 | `COST_REASONING_SOURCES_JSON` | No | Strict JSON array mapping configured environments to query/export projects and billing datasets. Mutually exclusive with YAML `sources` and legacy source settings. |
@@ -198,7 +199,7 @@ Stage README changes in the same commit as the code that required them.
 
 ## Mutation Tools (Human Approval)
 
-Three tools change state: `gcp_gke_scale_deployment` (resizes a GKE **node pool**), `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`. The model cannot execute any of them on its own:
+Three tools change state: `gcp_gke_scale_deployment` (resizes a GKE **node pool**), `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`. They are registered only with `MUTATIONS_ENABLED=true` (`mcpserver.WithMutations`); otherwise the server is read-only, and `safety.WithMutationsDisabled` also refuses them at the port boundary. A tool counts as a mutation when its `ReadOnlyHint` is false; `mutations_switch_test.go` pins the list. When enabled, the model still cannot execute any of them on its own:
 
 1. The tool handler (`runMutation` in `internal/mcp/tools/approval.go`) previews the change through `SafetyDecorator`, which stores a plan: TTL 10 minutes, bound to the caller identity and session, single-use. A request already at the target state returns `no_change_needed: true` with no plan.
 2. The handler returns an MCP elicitation (`server.NewInputRequestBuilder`) asking the **user** to approve, with the plan ID as opaque request state. Clients on protocol 2026-07-28 retry the call with the answer; for older clients mcp-go sends `elicitation/create` and re-invokes the handler.

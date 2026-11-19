@@ -61,6 +61,16 @@ type serverOptions struct {
 	costReasoningConfig      costreasoning.Config
 	securityAuditConfig      securityaudit.Config
 	skipMutationApproval     bool
+	mutationsEnabled         bool
+}
+
+// WithMutations registers the tools that change GCP resources
+// (gcp_gke_scale_deployment, gcp_cloudrun_update_traffic and, when also
+// configured, gcp_export_recommendations_to_bq). Without it the server is
+// read-only: those tools are not registered and their write permissions are
+// left out of the permission catalog. MUTATIONS_ENABLED=true sets it.
+func WithMutations() Option {
+	return func(o *serverOptions) { o.mutationsEnabled = true }
 }
 
 // WithoutMutationApproval lets mutation tools execute without asking the user
@@ -376,7 +386,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewSecurityTools(securityaudit.New(svc, log, securityaudit.WithConfig(o.securityAuditConfig)), log),
 		tools.NewDriftTools(drift.New(drift.NewGCPCollector(svc), log), log),
 	}
-	if o.enableRecommenderExport {
+	if o.enableRecommenderExport && o.mutationsEnabled {
 		exportTools := tools.NewRecommenderExportTools(svc, log, o.recommenderExportDataset)
 		if o.skipMutationApproval {
 			exportTools.DisableMutationApproval()
@@ -388,9 +398,12 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 	}
 	// One capability catalog backs both gcp_iam_test_permissions (when the caller
 	// omits "permissions") and the gcp://{project}/iam/my-permissions resource.
-	permissionCatalog := permissionsForModules(activeModuleSet(allModules, o.enabledModules))
+	permissionCatalog := permissionsForModules(activeModuleSet(allModules, o.enabledModules), o.mutationsEnabled)
 	iamTools.SetDefaultPermissions(permissionCatalog)
 	registeredTools := FilteredRegistry(allModules, o.enabledModules)
+	if !o.mutationsEnabled {
+		registeredTools = withoutMutationTools(registeredTools)
+	}
 	protocolGuard.addTools(registeredTools)
 	for _, t := range registeredTools {
 		s.AddTools(wrap(t))
@@ -594,4 +607,21 @@ func maskInputRequests(result *mcp.CallToolResult, mask func(string) string) *mc
 		out.InputRequests[id] = request
 	}
 	return &out
+}
+
+// isMutationTool reports whether a tool changes resources. Every tool declares
+// ReadOnlyHint; mutation tools set it to false (a guard test checks both).
+func isMutationTool(tool server.ServerTool) bool {
+	hint := tool.Tool.Annotations.ReadOnlyHint
+	return hint != nil && !*hint
+}
+
+func withoutMutationTools(registered []server.ServerTool) []server.ServerTool {
+	readOnly := make([]server.ServerTool, 0, len(registered))
+	for _, tool := range registered {
+		if !isMutationTool(tool) {
+			readOnly = append(readOnly, tool)
+		}
+	}
+	return readOnly
 }

@@ -150,6 +150,15 @@ For automation, use an attached service account, Workload Identity, or service-a
 	if v := os.Getenv("RECOMMENDER_BQ_EXPORT_DATASET"); v != "" {
 		userCfg.RecommenderExport.Dataset = v
 	}
+	// MUTATIONS_ENABLED overrides yaml config. Off by default: read-only.
+	if strings.TrimSpace(os.Getenv("MUTATIONS_ENABLED")) != "" {
+		enabled, err := readBoolEnv("MUTATIONS_ENABLED", false, os.Getenv)
+		if err != nil {
+			return err
+		}
+		userCfg.MutationsEnabled = enabled
+	}
+	mutationsEnabled := userCfg.MutationsEnabled
 	if tb := os.Getenv("TRACE_BACKEND"); tb != "" {
 		tb = strings.ToLower(strings.TrimSpace(tb))
 		if tb != "trace" && tb != "monitoring" {
@@ -198,16 +207,28 @@ For automation, use an attached service account, Workload Identity, or service-a
 		return errors.New("SAFETY_ENABLED=false is not allowed with MCP_TRANSPORT=sse")
 	}
 	if safetyEnabled {
-		gcpSvc = safety.NewSafetyDecorator(svc, log)
+		var safetyOpts []safety.Option
+		if !mutationsEnabled {
+			safetyOpts = append(safetyOpts, safety.WithMutationsDisabled())
+		}
+		gcpSvc = safety.NewSafetyDecorator(svc, log, safetyOpts...)
 		log.Info("safety enforcement enabled", "plan_ttl", safety.PlanTTL)
 	} else {
 		log.Warn("safety enforcement DISABLED via SAFETY_ENABLED=false")
+	}
+	if mutationsEnabled {
+		log.Warn("mutation tools ENABLED via MUTATIONS_ENABLED: changes still require the user's approval unless SAFETY_ENABLED=false")
+	} else {
+		log.Info("read-only mode: mutation tools are not registered (set MUTATIONS_ENABLED=true to enable them)")
 	}
 
 	mcpOpts := []mcpserver.Option{
 		mcpserver.WithAnonymizer(anon),
 		mcpserver.WithModules(enabledModules),
 		mcpserver.WithEnvironments(environmentRegistry),
+	}
+	if mutationsEnabled {
+		mcpOpts = append(mcpOpts, mcpserver.WithMutations())
 	}
 	if !safetyEnabled {
 		mcpOpts = append(mcpOpts, mcpserver.WithoutMutationApproval())
@@ -233,7 +254,9 @@ For automation, use an attached service account, Workload Identity, or service-a
 	if len(projectIDReplacements) > 0 {
 		mcpOpts = append(mcpOpts, mcpserver.WithProjectIDReplacements(projectIDReplacements))
 	}
-	if userCfg.RecommenderExport.Enabled {
+	if userCfg.RecommenderExport.Enabled && !mutationsEnabled {
+		log.Warn("recommender BigQuery export is configured but writes to BigQuery; it stays off until MUTATIONS_ENABLED=true")
+	} else if userCfg.RecommenderExport.Enabled {
 		mcpOpts = append(mcpOpts, mcpserver.WithRecommenderExport(userCfg.RecommenderExport.Dataset))
 		log.Info("recommender BigQuery export enabled", "dataset", userCfg.RecommenderExport.Dataset)
 	}
