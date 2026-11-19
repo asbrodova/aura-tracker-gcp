@@ -3,6 +3,7 @@ package drift
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/asbrodova/aura-tracker-gcp/internal/testutil"
@@ -84,10 +85,14 @@ func TestCloudSQLDriftComparesAdvancedSettings(t *testing.T) {
 }
 
 func TestWorkflowsDriftComparesSourceHashAndRequestsIt(t *testing.T) {
-	requested := false
+	// Both environments are collected concurrently, so count the calls
+	// that asked for the source hash instead of sharing a plain bool.
+	var requested atomic.Int32
 	fake := &testutil.FakeGCPService{
 		ListWorkflowsFunc: func(_ context.Context, req models.ListWorkflowsRequest) (models.ListWorkflowsResponse, error) {
-			requested = req.RequireSourceHash
+			if req.RequireSourceHash {
+				requested.Add(1)
+			}
 			hash := "aaaa"
 			if req.ProjectID == "prod-project" {
 				hash = "bbbb"
@@ -99,8 +104,8 @@ func TestWorkflowsDriftComparesSourceHashAndRequestsIt(t *testing.T) {
 		},
 	}
 	paths := driftPaths(compareComponentWith(t, fake, "workflows"))
-	if !requested {
-		t.Fatal("the drift collector did not ask for the workflow source hash")
+	if requested.Load() != 2 {
+		t.Fatalf("%d of 2 workflow list calls asked for the source hash", requested.Load())
 	}
 	if !strings.Contains(paths, "/source_sha256") {
 		t.Fatalf("source drift not reported: %s", paths)
