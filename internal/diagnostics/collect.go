@@ -29,6 +29,9 @@ type serviceData struct {
 	coverage     []models.IncidentCoverageCheck
 	warnings     []string
 	symptoms     models.IncidentServiceSymptoms
+	// GKE workloads only.
+	workload      *models.IncidentWorkloadState
+	workloadKnown bool
 }
 
 type indexedServiceData struct {

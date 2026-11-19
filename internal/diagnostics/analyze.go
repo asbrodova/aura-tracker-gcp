@@ -66,6 +66,7 @@ func analyzeSymptoms(d *serviceData, now time.Time, req models.DiagnoseIncidentR
 	if currentErrorRate >= 0.10 && metrics.currentTotal >= 20 || len(currentLogs) >= 50 {
 		status = "critical"
 	}
+	status = workloadStatus(d, status)
 
 	return models.IncidentServiceSymptoms{
 		ServiceName: d.target.ServiceName,
@@ -89,7 +90,43 @@ func analyzeSymptoms(d *serviceData, now time.Time, req models.DiagnoseIncidentR
 		},
 		ErrorLogs:     len(currentLogs),
 		ErrorPatterns: errorPatterns(currentLogs, 5),
+		Workload:      d.workload,
 	}
+}
+
+// workloadStatus raises a GKE workload's status for unavailable replicas,
+// repeated container restarts and blocking Kubernetes warning events, which
+// have no request metrics to show up in.
+func workloadStatus(d *serviceData, status string) string {
+	state := d.workload
+	if state == nil {
+		return status
+	}
+	raise := func(to string) {
+		if to == "critical" || status == "healthy" {
+			status = to
+		}
+	}
+	if d.workloadKnown && state.DesiredReplicas > 0 {
+		switch {
+		case state.ReadyReplicas == 0:
+			raise("critical")
+		case state.ReadyReplicas < state.DesiredReplicas:
+			raise("degraded")
+		}
+	}
+	switch {
+	case state.Restarts >= 10 && state.Restarts >= state.BaselineRestarts*2:
+		raise("critical")
+	case state.Restarts >= 3 && state.Restarts >= state.BaselineRestarts*2:
+		raise("degraded")
+	}
+	for _, reason := range []string{"BackOff", "CrashLoopBackOff", "OOMKilling", "FailedScheduling", "ImagePullBackOff", "ErrImagePull"} {
+		if state.WarningEvents[reason] > 0 {
+			raise("degraded")
+		}
+	}
+	return status
 }
 
 func splitRequestMetrics(response models.GetMetricsResponse, currentStart time.Time) metricWindow {

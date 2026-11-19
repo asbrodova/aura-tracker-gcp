@@ -36,6 +36,9 @@ type DataSource interface {
 	ListSQLInstances(context.Context, models.ListSQLInstancesRequest) (models.ListSQLInstancesResponse, error)
 	ListVPCConnectors(context.Context, models.ListVPCConnectorsRequest) (models.ListVPCConnectorsResponse, error)
 	InspectTopicHealth(context.Context, models.InspectTopicHealthRequest) (models.TopicHealthReport, error)
+	ListFunctions(context.Context, models.ListFunctionsRequest) (models.ListFunctionsResponse, error)
+	GetFunctionDetails(context.Context, models.GetFunctionDetailsRequest) (models.FunctionDetails, error)
+	GetGKEWorkloadDetails(context.Context, models.GetGKEWorkloadDetailsRequest) (models.GKEWorkloadDetails, error)
 }
 
 // Option configures an Engine.
@@ -131,7 +134,7 @@ func (e *Engine) Diagnose(ctx context.Context, req models.DiagnoseIncidentReques
 				results <- indexedServiceData{index: index, data: serviceData{target: target, warnings: []string{ctx.Err().Error()}}}
 				return
 			}
-			results <- indexedServiceData{index: index, data: e.collectService(ctx, req, target, now)}
+			results <- indexedServiceData{index: index, data: e.collectTarget(ctx, req, target, now)}
 		}(i, target)
 	}
 	for range scope.Targets {
@@ -198,6 +201,9 @@ func normalizeRequest(req *models.DiagnoseIncidentRequest) error {
 	if req.DetailLevel == "" {
 		req.DetailLevel = "standard"
 	}
+	if err := normalizeResourceType(req); err != nil {
+		return err
+	}
 	if req.LookbackMinutes < 5 || req.LookbackMinutes > 720 {
 		return errors.New("lookback_minutes must be between 5 and 720")
 	}
@@ -226,6 +232,12 @@ func (e *Engine) resolveScope(ctx context.Context, req models.DiagnoseIncidentRe
 		ProjectID: req.ProjectID, Environment: req.Environment,
 		Targets: []models.IncidentTarget{}, Candidates: []models.IncidentTarget{},
 		Confidence: "high",
+	}
+	switch req.ResourceType {
+	case resourceFunction:
+		return e.resolveFunctionScope(ctx, req, scope)
+	case resourceGKEWorkload:
+		return gkeScope(req, scope), "", nil
 	}
 	if req.ServiceName != "" && req.Region != "" {
 		scope.Targets = append(scope.Targets, models.IncidentTarget{ServiceName: req.ServiceName, Region: req.Region})
@@ -331,7 +343,7 @@ func environmentMatches(labels map[string]string, wanted string) bool {
 }
 
 func diagnosisID(now time.Time, req models.DiagnoseIncidentRequest) string {
-	input := fmt.Sprintf("%s|%s|%s|%s|%s", now.Format(time.RFC3339Nano), req.ProjectID, req.ServiceName, req.Region, req.Environment)
+	input := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s", now.Format(time.RFC3339Nano), req.ProjectID, req.ResourceType, req.ServiceName, req.Region, req.Environment, req.ClusterName, req.Namespace)
 	sum := sha256.Sum256([]byte(input))
 	return "diag-" + hex.EncodeToString(sum[:6])
 }

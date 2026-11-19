@@ -196,7 +196,7 @@ for role in roles/browser roles/bigquery.metadataViewer roles/storage.objectView
   add_required_role "$role"
 done
 
-if any_module_enabled gke gke_workloads aura archgraph security drift; then
+if any_module_enabled gke gke_workloads aura archgraph security drift incident; then
   add_required_api container.googleapis.com
   add_required_role roles/container.viewer
 fi
@@ -220,7 +220,7 @@ if any_module_enabled iam archgraph security drift; then
   add_required_api iam.googleapis.com
   add_required_role roles/iam.serviceAccountViewer
 fi
-if any_module_enabled functions serverlessgraph archgraph security drift; then
+if any_module_enabled functions serverlessgraph archgraph security drift incident; then
   add_required_api cloudfunctions.googleapis.com
   add_required_role roles/cloudfunctions.viewer
 fi
