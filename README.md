@@ -3,8 +3,12 @@
 [![CI](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml/badge.svg)](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml)
 [![Latest release](https://img.shields.io/github/v/release/asbrodova/aura-tracker-gcp)](https://github.com/asbrodova/aura-tracker-gcp/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![GCP access: read-only by default](https://img.shields.io/badge/GCP%20access-read--only%20by%20default-brightgreen)](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default)
 
 **The open-source intelligence layer for Google Cloud.**
+
+> [!TIP]
+> **Read-only by default.** Out of the box Aura can only read your GCP projects: it cannot create, change, or delete anything, and it never reads secret values. Changes are off until you set `MUTATIONS_ENABLED=true`, and even then each one waits for your approval. [Why it's safe →](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default)
 
 Ask a question in plain English. Aura investigates live GCP inventory, metrics, logs, IAM, topology, recommendations, and billing data—then returns a prioritized answer with evidence.
 
@@ -346,7 +350,7 @@ See the [scoring model and signal weights](https://github.com/asbrodova/aura-tra
 
 Approval uses MCP elicitation: the server asks the user directly through the client, and only an accepted prompt executes the stored, single-use plan (10-minute expiry, bound to the caller and session, refused if the resource changed since the preview). Approved executions are audit-logged. Clients or transports that cannot show the prompt are refused rather than allowed to proceed; `dry_run: true` still previews any change.
 
-Read the full [security model](https://github.com/asbrodova/aura-tracker-gcp/wiki/Security-and-Safety) and [safety and cost safeguards](https://github.com/asbrodova/aura-tracker-gcp/wiki/Safety-and-Cost-Safeguards).
+Start with [Read-Only by Default](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default), then read the full [security model](https://github.com/asbrodova/aura-tracker-gcp/wiki/Security-and-Safety) and [safety and cost safeguards](https://github.com/asbrodova/aura-tracker-gcp/wiki/Safety-and-Cost-Safeguards).
 
 ## Run only what you need
 
@@ -392,6 +396,7 @@ If you would use a managed Aura experience, [open an issue and describe your wor
 
 | Start here | Guide |
 |---|---|
+| Why Aura is safe to connect | [Read-Only by Default](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default) |
 | Install, authenticate, and configure IAM | [Getting Started](https://github.com/asbrodova/aura-tracker-gcp/wiki/Getting-Started) |
 | Configure one or many environments | [Configure Your Environment](https://github.com/asbrodova/aura-tracker-gcp/wiki/Configure-Your-Environment) |
 | Understand every module | [Module Reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/Module-Reference) |

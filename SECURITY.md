@@ -36,6 +36,7 @@ Examples of issues that should be reported privately include:
 - Exposure of credentials, tokens, secrets, billing data, or project identifiers
 - Cross-environment data leakage between configured project aliases
 - Bypassing the user-approval safeguard for infrastructure mutations (executing a change without an accepted approval prompt)
+- Changing resources while the server is read-only (`MUTATIONS_ENABLED` not set), for example a mutation tool that is still registered or callable
 - Injection through tool inputs, outputs, prompts, diagrams, or rendered SVG
 - Access to Secret Manager secret values
 - Commands or GCP operations executed outside the documented scope
