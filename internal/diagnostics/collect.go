@@ -151,7 +151,7 @@ func (e *Engine) collectService(ctx context.Context, req models.DiagnoseIncident
 	if req.MaxDependencies > 0 {
 		run("dependency_topology", func(ctx context.Context) (string, error) {
 			value, err := e.source.GetServiceTopology(ctx, models.GetServiceTopologyRequest{
-				Project: req.ProjectID, Region: target.Region, ServiceName: target.ServiceName, Depth: 1,
+				ProjectID: req.ProjectID, Region: target.Region, ServiceName: target.ServiceName, Depth: 1,
 			})
 			if err == nil {
 				mu.Lock()

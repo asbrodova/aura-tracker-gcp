@@ -46,7 +46,11 @@ func (t *GKEMeshTools) GetMeshTopology() server.ServerTool {
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone of the cluster")),
-		mcp.WithNumber("lookback_hours", mcp.Description("Lookback window in hours (default 24, max 168)")),
+		mcp.WithNumber("lookback_hours",
+			mcp.Description("Lookback window in hours (1–168). Default: 24."),
+			mcp.Min(1),
+			mcp.Max(168),
+		),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Get GKE Service Mesh Topology",
 			ReadOnlyHint:    boolPtr(true),

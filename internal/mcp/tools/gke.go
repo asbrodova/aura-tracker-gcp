@@ -111,7 +111,7 @@ func (t *GKETools) GetClusterBottlenecks() server.ServerTool {
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithNumber("lookback_minutes",
-			mcp.Description("How far back to fetch metrics and logs (1–1440). Default: 30."),
+			mcp.Description("How far back to fetch metrics and logs, in minutes (1–1440). Default: 30."),
 			mcp.Min(1),
 			mcp.Max(1440),
 		),

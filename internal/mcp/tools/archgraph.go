@@ -56,7 +56,7 @@ func (t *ArchGraphTools) GenerateArchitectureDiagram() server.ServerTool {
 		mcp.WithNumber("max_nodes", mcp.Description("Maximum nodes rendered (default: 80, hard maximum: 200)."), mcp.Min(1), mcp.Max(200)),
 		mcp.WithNumber("min_confidence", mcp.Description("Minimum inferred-edge confidence from 0 to 1 (default: 0.65)."), mcp.Min(0), mcp.Max(1)),
 		mcp.WithBoolean("include_external", mcp.Description("Include inferred external endpoints (default: false).")),
-		mcp.WithNumber("lookback_hours", mcp.Description("Trace and mesh lookback window (default: 168, maximum: 720)."), mcp.Min(1), mcp.Max(720)),
+		mcp.WithNumber("lookback_hours", mcp.Description("Trace and mesh lookback window in hours (1–720). Default: 168 (7 days)."), mcp.Min(1), mcp.Max(720)),
 		mcp.WithOutputSchema[models.ArchitectureDiagramResponse](),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Generate Architecture Diagram",

@@ -34,7 +34,8 @@ func (t *TopologyTools) GetServiceTopology() server.ServerTool {
 			"Infer Cloud Run service dependencies from Cloud SQL annotations, VPC connector, env vars, "+
 				"Secret Manager refs, and Pub/Sub subscriptions. depth=2 resolves transitive deps.",
 		),
-		mcp.WithString("project", mcp.Description("GCP project ID. Omit to use the server default.")),
+		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
+		mcp.WithString("project", mcp.Description("Deprecated: use project_id. Accepted for older clients; must name the same project as project_id when both are set.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("Cloud Run region, e.g. us-central1")),
 		mcp.WithString("service_name", mcp.Required(), mcp.Description("Cloud Run service name")),
 		mcp.WithNumber("depth",
@@ -57,8 +58,13 @@ func (t *TopologyTools) GetServiceTopology() server.ServerTool {
 }
 
 func (t *TopologyTools) getServiceTopologyHandler(ctx context.Context, _ mcp.CallToolRequest, args models.GetServiceTopologyRequest) (*mcp.CallToolResult, error) {
+	if args.ProjectID != "" && args.Project != "" && args.ProjectID != args.Project {
+		return mcp.NewToolResultError("gcp_get_service_topology: project_id and the deprecated project argument name different projects; pass only project_id"), nil
+	}
+	args.ProjectID = args.EffectiveProjectID()
+	args.Project = args.ProjectID
 	t.log.InfoContext(ctx, "gcp_get_service_topology",
-		"project", args.Project,
+		"project_id", args.ProjectID,
 		"region", args.Region,
 		"service", args.ServiceName,
 		"depth", args.Depth,

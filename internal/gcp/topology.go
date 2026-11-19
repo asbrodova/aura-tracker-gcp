@@ -40,8 +40,9 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 		depth = 2
 	}
 
+	projectID := req.EffectiveProjectID()
 	rootID := "cloudrun:" + req.ServiceName
-	svcName := fmt.Sprintf("projects/%s/locations/%s/services/%s", req.Project, req.Region, req.ServiceName)
+	svcName := fmt.Sprintf("projects/%s/locations/%s/services/%s", projectID, req.Region, req.ServiceName)
 
 	svc, err := a.runSvc.GetService(ctx, &runpb.GetServiceRequest{Name: svcName})
 	if err != nil {
@@ -56,7 +57,7 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 		URL:    svc.Uri,
 	}}
 
-	direct := inferFromServiceSpec(svc, rootID, req.Project)
+	direct := inferFromServiceSpec(svc, rootID, projectID)
 	nodes = append(nodes, direct.nodes...)
 	edges := append([]models.TopologyEdge(nil), direct.edges...)
 	var warns []string
@@ -65,7 +66,7 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 	var subscriptions []*pubsubpb.Subscription
 	var subscriptionsErr error
 	g.Go(func() error {
-		subscriptions, subscriptionsErr = a.listTopologySubscriptions(gctx, req.Project)
+		subscriptions, subscriptionsErr = a.listTopologySubscriptions(gctx, projectID)
 		return nil
 	})
 
@@ -73,7 +74,7 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 	var serviceInventoryErr error
 	if depth == 2 {
 		g.Go(func() error {
-			serviceInventory, serviceInventoryErr = a.ListServices(gctx, models.ListServicesRequest{ProjectID: req.Project})
+			serviceInventory, serviceInventoryErr = a.ListServices(gctx, models.ListServicesRequest{ProjectID: projectID})
 			return nil
 		})
 	}
@@ -107,7 +108,8 @@ func (a *gcpAdapter) GetServiceTopology(ctx context.Context, req models.GetServi
 	edges = dedupTopologyEdges(edges)
 	report := models.ServiceTopologyReport{
 		RootService:   req.ServiceName,
-		Project:       req.Project,
+		ProjectID:     projectID,
+		Project:       projectID,
 		Depth:         depth,
 		Nodes:         deduped,
 		Edges:         edges,
