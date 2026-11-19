@@ -33,7 +33,7 @@ make test-cover   # coverage.out + coverage.html
 go list -deps ./internal/mcp/... | grep cloud.google.com
 ```
 
-The Go version is the one in `go.mod`; the Dockerfile builder must match its major.minor and be pinned by `@sha256` digest (CI enforces both).
+The Go version is the one in `go.mod`; the Dockerfile builder must match its major.minor and be pinned by `@sha256` digest (CI enforces both). `Dockerfile.release` (the GoReleaser image published to `ghcr.io/asbrodova/aura-tracker-gcp`) copies prebuilt binaries and must use the same pinned runtime base as `Dockerfile`; CI builds it and compares the two.
 
 ## Architecture
 

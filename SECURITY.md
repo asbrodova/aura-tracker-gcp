@@ -11,6 +11,17 @@ Aura Tracker GCP is an actively evolving open-source project. Security fixes are
 
 Before reporting a vulnerability, please confirm that it is reproducible with the latest release.
 
+## Verifying Releases
+
+Release archives are listed in `checksums.txt` with a GitHub build-provenance attestation and SBOMs. The container image `ghcr.io/asbrodova/aura-tracker-gcp` is built by the release workflow from the same binaries, signed keylessly with cosign, and carries an SBOM and a provenance attestation:
+
+```bash
+gh attestation verify oci://ghcr.io/asbrodova/aura-tracker-gcp:X.Y.Z --owner asbrodova
+cosign verify ghcr.io/asbrodova/aura-tracker-gcp:X.Y.Z \
+  --certificate-identity-regexp '^https://github.com/asbrodova/aura-tracker-gcp/\.github/workflows/release\.yaml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ## Reporting a Vulnerability
 
 Please do **not** open a public GitHub issue for a suspected security vulnerability.

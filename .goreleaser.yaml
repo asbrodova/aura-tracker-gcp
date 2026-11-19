@@ -46,6 +46,35 @@ sboms:
     artifacts: archive
     disable: false
 
+# Multi-arch image on GitHub Container Registry, built with docker buildx from
+# the binaries above. The release workflow logs in to ghcr.io, then signs the
+# pushed digest with cosign and attests its build provenance.
+dockers_v2:
+  - id: ghcr
+    ids:
+      - aura-tracker-gcp
+    dockerfile: Dockerfile.release
+    images:
+      - ghcr.io/asbrodova/aura-tracker-gcp
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    sbom: true
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.description: "Self-hosted GCP intelligence engine for incidents, security, architecture, drift, and cost."
+      org.opencontainers.image.source: https://github.com/asbrodova/aura-tracker-gcp
+      org.opencontainers.image.url: https://github.com/asbrodova/aura-tracker-gcp
+      org.opencontainers.image.documentation: https://github.com/asbrodova/aura-tracker-gcp/wiki
+      org.opencontainers.image.licenses: Apache-2.0
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+
 release:
   github:
     owner: asbrodova

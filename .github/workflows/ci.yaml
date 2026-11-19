@@ -95,6 +95,34 @@ jobs:
       - name: Build local image
         run: docker build --tag aura-tracker-gcp:ci .
 
+      - name: Check the release image uses the same runtime base
+        run: |
+          runtime="$(grep -E '^FROM alpine:' Dockerfile)"
+          release="$(grep -E '^FROM ' Dockerfile.release)"
+          if ! grep -Eq '^FROM alpine:[0-9.]+@sha256:[0-9a-f]{64}$' <<<"$release"; then
+            echo "::error file=Dockerfile.release::runtime image must be pinned as alpine:<version>@sha256:<64 hex digits>"
+            exit 1
+          fi
+          if [ "$runtime" != "$release" ]; then
+            echo "::error file=Dockerfile.release::base '${release}' differs from the Dockerfile runtime '${runtime}'"
+            exit 1
+          fi
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Same layout GoReleaser uses for dockers_v2: <platform>/<binary>.
+      - name: Build the release image from a prebuilt binary
+        run: |
+          context="$(mktemp -d)"
+          mkdir -p "${context}/linux/amd64"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o "${context}/linux/amd64/aura-tracker-gcp" ./cmd/aura-tracker-gcp
+          docker buildx build --platform linux/amd64 --load --tag aura-tracker-gcp:release-ci --file Dockerfile.release "$context"
+          test "$(docker inspect --format '{{.Config.User}}' aura-tracker-gcp:release-ci)" = "65532:65532"
+          docker run --rm --entrypoint sh aura-tracker-gcp:release-ci -c 'test -x /aura-tracker-gcp && dot -V'
+
   security:
     name: Vulnerability and secret scan
     runs-on: ubuntu-latest
