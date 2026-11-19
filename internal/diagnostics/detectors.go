@@ -206,7 +206,7 @@ func detectDependencyFailure(d *serviceData, req models.DiagnoseIncidentRequest,
 	}
 	candidate.cause.SuggestedInvestigation = []models.IncidentInvestigation{
 		investigation(1, "Validate the unhealthy dependency directly and correlate its state with application errors.", "gcp_get_service_topology", map[string]any{
-			"project": req.ProjectID, "region": d.target.Region, "service_name": d.target.ServiceName, "depth": 1,
+			"project_id": req.ProjectID, "region": d.target.Region, "service_name": d.target.ServiceName, "depth": 1,
 		}, "The failing resource should be on the service's active dependency path."),
 		investigation(2, "Search for connection, timeout, and upstream errors around symptom onset.", "gcp_logging_query_recent", map[string]any{
 			"project_id": req.ProjectID, "resource_type": "cloud_run_revision", "resource_labels": map[string]string{"service_name": d.target.ServiceName}, "min_severity": "ERROR", "lookback_minutes": req.LookbackMinutes, "max_entries": 100,

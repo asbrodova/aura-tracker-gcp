@@ -40,7 +40,7 @@ Use this client-neutral checklist. See the [architecture and contributing guide]
 3. Implement the method on `gcpAdapter` in `internal/gcp/<domain>.go`. Return `errClientNotInitialized` when the SDK client is nil, and start goroutines only through `internal/safego`
 4. Add the method to `SafetyDecorator` in `internal/safety/decorator.go`: a one-line pass-through for reads, the full plan flow for mutations
 5. Add a `<Method>Func` field to `internal/testutil/FakeGCPService` and call it from the fake method
-6. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`
+6. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`. Select the project with a `project_id` parameter, and name every duration with its unit (`lookback_minutes`, `lookback_hours`, `_seconds`, `_days`) and state the unit and range in its description; `internal/mcp/parameter_conventions_test.go` checks both
 7. Register it in `GetTools()` on the domain's `*Tools` struct
 8. Add focused tests for the adapter, handler, schema, routing, and error behavior that changed
 

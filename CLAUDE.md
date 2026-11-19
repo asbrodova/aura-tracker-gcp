@@ -171,6 +171,7 @@ Stage README changes in the same commit as the code that required them.
    - `mcp.NewTypedToolHandler(t.handlerFunc)` for typed argument binding;
    - declare `mcp.Required()` parameters before optional ones (mcp-go keeps declaration order in the JSON Schema, so required fields come first in the model's context);
    - put bounds in the schema and re-validate in the adapter; set `ReadOnlyHint` / `DestructiveHint` / `IdempotentHint`;
+   - parameter names: select the project with `project_id` (the environment wrapper resolves aliases on it); name every duration with its unit (`lookback_minutes` for windows up to a day, `lookback_hours` beyond, `_seconds`/`_days` where natural) and repeat the unit and range in the description. `parameter_conventions_test.go` enforces both;
    - on error `return handleServiceError(toolName, err)`; return structured JSON.
 7. **Register**: add it to `GetTools()` on the domain's `*Tools` struct.
 8. **New domain only**: `internal/gcp/modules.go` (`moduleClientDeps`: every module needs an entry, or `--modules=<name>` starts without its clients), `internal/mcp/registry.go` (constant + `AllModules`), `internal/mcp/server.go` (`allModules`), `internal/mcp/permissions.go` (`modulePermissions`), `scripts/setup-iam.sh` and `setup-iam_test.sh`. Consider whether `archgraph`, `drift` or `security` should collect it.

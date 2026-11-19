@@ -2,6 +2,9 @@ package models
 
 // GetServiceTopologyRequest specifies which Cloud Run service to trace.
 type GetServiceTopologyRequest struct {
+	ProjectID string `json:"project_id"`
+	// Project is the deprecated name of ProjectID, still accepted from
+	// clients written before project_id. ProjectID wins when both are set.
 	Project     string `json:"project"`
 	Region      string `json:"region"`
 	ServiceName string `json:"service_name"`
@@ -31,14 +34,24 @@ type TopologyEdge struct {
 
 // ServiceTopologyReport is the complete discovery result for a single root service.
 type ServiceTopologyReport struct {
-	RootService string         `json:"root_service"`
-	Project     string         `json:"project"`
-	Depth       int            `json:"depth"`
-	Nodes       []TopologyNode `json:"nodes"`
-	Edges       []TopologyEdge `json:"edges"`
+	RootService string `json:"root_service"`
+	ProjectID   string `json:"project_id"`
+	// Project repeats ProjectID for clients that read the pre-project_id field.
+	Project string         `json:"project"`
+	Depth   int            `json:"depth"`
+	Nodes   []TopologyNode `json:"nodes"`
+	Edges   []TopologyEdge `json:"edges"`
 	// Relationships is a flat list of human-readable dependency statements,
 	// optimised for LLM reasoning. Each entry has the form:
 	//   "<from> -[<rel>]-> <to> (evidence: <e>, confidence: <c>)"
 	Relationships []string `json:"relationships"`
 	Warnings      []string `json:"warnings,omitempty"`
+}
+
+// EffectiveProjectID returns ProjectID, falling back to the deprecated Project.
+func (r GetServiceTopologyRequest) EffectiveProjectID() string {
+	if r.ProjectID != "" {
+		return r.ProjectID
+	}
+	return r.Project
 }

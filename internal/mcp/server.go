@@ -227,6 +227,14 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 					if o.projectIDPlaceholder != "" && selector == o.projectIDPlaceholder {
 						selector = ""
 					}
+					// A tool may accept a project under two names (project_id
+					// and a deprecated alias). An omitted selector must not pick
+					// the default environment when the other one names a
+					// project, so single-project tools resolve only the
+					// selectors the caller supplied.
+					if !multiEnvironmentComparison && strings.TrimSpace(selector) == "" {
+						continue
+					}
 					environment, err := o.environments.Resolve(selector)
 					if err != nil {
 						return mcp.NewToolResultError(environmentSelectionError(o.environments)), nil
@@ -238,6 +246,18 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 						resolvedProject = environment.ProjectID
 					} else if resolvedProject != environment.ProjectID {
 						return mcp.NewToolResultError("all project selectors in one request must resolve to the same configured environment"), nil
+					}
+				}
+				if !multiEnvironmentComparison {
+					if resolvedProject == "" {
+						environment, err := o.environments.Resolve("")
+						if err != nil {
+							return mcp.NewToolResultError(environmentSelectionError(o.environments)), nil
+						}
+						resolvedProject = environment.ProjectID
+					}
+					for _, key := range projectKeys {
+						args[key] = resolvedProject
 					}
 				}
 				var validationErr error
