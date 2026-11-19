@@ -35,6 +35,10 @@ type ResolutionInput struct {
 	// Trace dependency edges from gcp_trace_list_dependency_edges — used by Pass 4.
 	TraceEdges []TraceDependencyEdge
 
+	// Aggregated VPC Flow Log connections between GKE endpoints — used by
+	// Pass 5 (opt-in, low confidence).
+	FlowEdges []FlowLogEdge
+
 	// IAM bindings keyed by resource URN — used by Pass 2.
 	// Map: resource URN → []IAMBinding
 	IAMBindingsByResource map[string][]IAMBinding
@@ -57,4 +61,26 @@ type ResolutionOutput struct {
 	// are not present in ResolutionInput.Nodes. Callers should append these to
 	// their node list before emitting the final graph.
 	MintedNodes []GraphNode
+}
+
+// FlowEndpoint is one side of a VPC Flow Log connection, as GKE annotates it.
+// Workload is the pod's controller (for example a Deployment); Service is set
+// when the destination was reached through a Kubernetes Service.
+type FlowEndpoint struct {
+	Cluster   string `json:"cluster,omitempty"`
+	Location  string `json:"location,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+	Workload  string `json:"workload,omitempty"`
+	Service   string `json:"service,omitempty"`
+}
+
+// FlowLogEdge aggregates the VPC Flow Log records between two endpoints on
+// one destination port and protocol.
+type FlowLogEdge struct {
+	Source      FlowEndpoint `json:"source"`
+	Destination FlowEndpoint `json:"destination"`
+	Port        int          `json:"port,omitempty"`
+	Protocol    int          `json:"protocol,omitempty"` // IANA number: 6 TCP, 17 UDP
+	Records     int          `json:"records"`
+	Bytes       int64        `json:"bytes,omitempty"`
 }
