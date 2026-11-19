@@ -141,13 +141,28 @@ type ScaleDeploymentRequest struct {
 }
 
 type ScaleDeploymentResponse struct {
-	DryRun         bool   `json:"dry_run"`
-	NodePoolName   string `json:"node_pool_name"`
-	PreviousCount  int32  `json:"previous_count"`
-	RequestedCount int32  `json:"requested_count"`
-	NoChangeNeeded bool   `json:"no_change_needed"`
-	Description    string `json:"description"`
-	PlanID         string `json:"plan_id,omitempty"`
-	ExpiresIn      string `json:"expires_in,omitempty"`
-	OperationName  string `json:"operation_name,omitempty"`
+	DryRun       bool   `json:"dry_run"`
+	NodePoolName string `json:"node_pool_name"`
+	// PreviousCount and RequestedCount are per-zone node counts, the unit
+	// GKE's SetNodePoolSize uses.
+	PreviousCount  int32 `json:"previous_count"`
+	RequestedCount int32 `json:"requested_count"`
+	// Zones is the number of zones the node pool runs in.
+	Zones int `json:"zones,omitempty"`
+	// CurrentTotalNodes is the pool's size summed over all zones.
+	CurrentTotalNodes int32 `json:"current_total_nodes,omitempty"`
+	// ZoneSizes holds the current size per zone when it could be read from
+	// the pool's managed instance groups.
+	ZoneSizes map[string]int32 `json:"zone_sizes,omitempty"`
+	// SizeSource is "instance_groups" (the current size) or "initial_node_count"
+	// (the size the pool was created with, used when the current size could not
+	// be read).
+	SizeSource         string   `json:"size_source,omitempty"`
+	AutoscalingEnabled bool     `json:"autoscaling_enabled,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	NoChangeNeeded     bool     `json:"no_change_needed"`
+	Description        string   `json:"description"`
+	PlanID             string   `json:"plan_id,omitempty"`
+	ExpiresIn          string   `json:"expires_in,omitempty"`
+	OperationName      string   `json:"operation_name,omitempty"`
 }

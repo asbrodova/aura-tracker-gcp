@@ -36,23 +36,50 @@ type exportRecommendationsPlan struct {
 // confirm flow for all mutation methods. Construct with NewSafetyDecorator.
 // Safe for concurrent use.
 type SafetyDecorator struct {
-	inner ports.GCPService
-	store *PlanStore
-	log   *slog.Logger
+	inner             ports.GCPService
+	store             *PlanStore
+	log               *slog.Logger
+	mutationsDisabled bool
+}
+
+// Option configures a SafetyDecorator.
+type Option func(*SafetyDecorator)
+
+// WithMutationsDisabled refuses every mutation method, preview included,
+// without calling the inner service. It backs MUTATIONS_ENABLED=false, where
+// the mutation tools are not registered at all.
+func WithMutationsDisabled() Option {
+	return func(d *SafetyDecorator) { d.mutationsDisabled = true }
+}
+
+// errMutationsDisabled is returned by every mutation method when mutations
+// are disabled.
+func errMutationsDisabled(op string) error {
+	return &ports.ConfirmationRequiredError{
+		Op:      op,
+		Message: "this server is read-only: changes are disabled (MUTATIONS_ENABLED=false)",
+	}
 }
 
 // Compile-time check: SafetyDecorator must implement ports.GCPService.
 var _ ports.GCPService = (*SafetyDecorator)(nil)
 
 // NewSafetyDecorator wraps inner with safety enforcement.
-func NewSafetyDecorator(inner ports.GCPService, log *slog.Logger) *SafetyDecorator {
-	return &SafetyDecorator{inner: inner, store: NewPlanStore(), log: log}
+func NewSafetyDecorator(inner ports.GCPService, log *slog.Logger, opts ...Option) *SafetyDecorator {
+	d := &SafetyDecorator{inner: inner, store: NewPlanStore(), log: log}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
 }
 
 // --- Mutation methods ---
 
 func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleDeploymentRequest) (models.ScaleDeploymentResponse, error) {
 	const op = "safety.ScaleDeployment"
+	if d.mutationsDisabled {
+		return models.ScaleDeploymentResponse{}, errMutationsDisabled(op)
+	}
 
 	// Path 1: dry-run — delegate to inner, store a plan, inject plan_id.
 	if req.DryRun {
@@ -68,9 +95,9 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 		preview.PlanID = planID
 		preview.ExpiresIn = ttl.String()
 		preview.Description = fmt.Sprintf(
-			"DRY RUN: would resize node pool %q from %d to %d nodes. "+
-				"Confirm with confirm_plan_id=%q within %s.",
-			req.NodePoolName, preview.PreviousCount, req.NodeCount, planID, ttl,
+			"DRY RUN: would resize node pool %q from %d to %d nodes per zone. "+
+				"Awaiting the user's approval; the plan expires in %s.",
+			req.NodePoolName, preview.PreviousCount, req.NodeCount, ttl,
 		)
 		d.log.InfoContext(ctx, "safety: plan created", auditArgs(ctx,
 			"op", "ScaleDeployment",
@@ -90,7 +117,7 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 			return models.ScaleDeploymentResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
 				Message: fmt.Sprintf(
-					"plan_id %q not found or expired (TTL=%s). Run with dry_run=true first.",
+					"approval plan %q was not found, has expired (TTL=%s), was already used, or belongs to another caller or session. Request the change again.",
 					req.ConfirmPlanID, PlanTTL,
 				),
 			}
@@ -126,18 +153,16 @@ func (d *SafetyDecorator) ScaleDeployment(ctx context.Context, req models.ScaleD
 
 	// Path 3: neither flag — block with actionable instructions.
 	return models.ScaleDeploymentResponse{}, &ports.ConfirmationRequiredError{
-		Op: op,
-		Message: fmt.Sprintf(
-			"mutations require two-step confirmation. "+
-				"Step 1: call gcp_gke_scale_deployment with dry_run=true to receive a plan_id. "+
-				"Step 2: call again with confirm_plan_id=<plan_id> (within %s).",
-			PlanTTL,
-		),
+		Op:      op,
+		Message: "mutations require the user's approval: gcp_gke_scale_deployment previews the change and asks the user to approve it in the MCP client.",
 	}
 }
 
 func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTrafficRequest) (models.UpdateTrafficResponse, error) {
 	const op = "safety.UpdateTraffic"
+	if d.mutationsDisabled {
+		return models.UpdateTrafficResponse{}, errMutationsDisabled(op)
+	}
 
 	if req.DryRun {
 		preview, err := d.inner.UpdateTraffic(ctx, req)
@@ -153,8 +178,8 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 		preview.ExpiresIn = ttl.String()
 		preview.Description = fmt.Sprintf(
 			"DRY RUN: would update traffic split for service %q. "+
-				"Confirm with confirm_plan_id=%q within %s.",
-			req.ServiceName, planID, ttl,
+				"Awaiting the user's approval; the plan expires in %s.",
+			req.ServiceName, ttl,
 		)
 		d.log.InfoContext(ctx, "safety: plan created", auditArgs(ctx,
 			"op", "UpdateTraffic",
@@ -173,7 +198,7 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 			return models.UpdateTrafficResponse{}, &ports.ConfirmationRequiredError{
 				Op: op,
 				Message: fmt.Sprintf(
-					"plan_id %q not found or expired (TTL=%s). Run with dry_run=true first.",
+					"approval plan %q was not found, has expired (TTL=%s), was already used, or belongs to another caller or session. Request the change again.",
 					req.ConfirmPlanID, PlanTTL,
 				),
 			}
@@ -206,18 +231,16 @@ func (d *SafetyDecorator) UpdateTraffic(ctx context.Context, req models.UpdateTr
 	}
 
 	return models.UpdateTrafficResponse{}, &ports.ConfirmationRequiredError{
-		Op: op,
-		Message: fmt.Sprintf(
-			"mutations require two-step confirmation. "+
-				"Step 1: call gcp_cloudrun_update_traffic with dry_run=true to receive a plan_id. "+
-				"Step 2: call again with confirm_plan_id=<plan_id> (within %s).",
-			PlanTTL,
-		),
+		Op:      op,
+		Message: "mutations require the user's approval: gcp_cloudrun_update_traffic previews the change and asks the user to approve it in the MCP client.",
 	}
 }
 
 func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req models.ExportRecommendationsToBQRequest) (models.ExportRecommendationsToBQResponse, error) {
 	const op = "safety.ExportRecommendationsToBQ"
+	if d.mutationsDisabled {
+		return models.ExportRecommendationsToBQResponse{}, errMutationsDisabled(op)
+	}
 	if req.DryRun {
 		preview, err := d.inner.ExportRecommendationsToBQ(ctx, req)
 		if err != nil {
@@ -230,7 +253,7 @@ func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req mod
 		ttl := d.store.expiresIn(planID)
 		preview.PlanID = planID
 		preview.ExpiresIn = ttl.String()
-		preview.Description = fmt.Sprintf("DRY RUN: would export %d active recommendations to %q. Confirm with confirm_plan_id=%q within %s.", preview.RowsPlanned, preview.Table, planID, ttl)
+		preview.Description = fmt.Sprintf("DRY RUN: would export %d active recommendations to %q. Awaiting the user's approval; the plan expires in %s.", preview.RowsPlanned, preview.Table, ttl)
 		d.log.InfoContext(ctx, "safety: plan created", auditArgs(ctx,
 			"op", "ExportRecommendationsToBQ", "plan_id", planID, "target", preview.Table,
 			"rows_planned", preview.RowsPlanned, "expires_in", ttl,
@@ -240,7 +263,7 @@ func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req mod
 	if req.ConfirmPlanID != "" {
 		raw, ok := d.store.claim(req.ConfirmPlanID, mutationOwner(ctx), planKindExportRecommendations)
 		if !ok {
-			return models.ExportRecommendationsToBQResponse{}, &ports.ConfirmationRequiredError{Op: op, Message: fmt.Sprintf("plan_id %q not found, expired, in use, or owned by another caller. Run with dry_run=true first.", req.ConfirmPlanID)}
+			return models.ExportRecommendationsToBQResponse{}, &ports.ConfirmationRequiredError{Op: op, Message: fmt.Sprintf("approval plan %q was not found, has expired, is in use, or belongs to another caller or session. Request the change again.", req.ConfirmPlanID)}
 		}
 		plan, ok := raw.(exportRecommendationsPlan)
 		if !ok {
@@ -265,7 +288,7 @@ func (d *SafetyDecorator) ExportRecommendationsToBQ(ctx context.Context, req mod
 	}
 	return models.ExportRecommendationsToBQResponse{}, &ports.ConfirmationRequiredError{
 		Op:      op,
-		Message: fmt.Sprintf("mutations require two-step confirmation. Step 1: call gcp_export_recommendations_to_bq with dry_run=true. Step 2: call again with confirm_plan_id=<plan_id> within %s.", PlanTTL),
+		Message: "mutations require the user's approval: gcp_export_recommendations_to_bq previews the export and asks the user to approve it in the MCP client.",
 	}
 }
 

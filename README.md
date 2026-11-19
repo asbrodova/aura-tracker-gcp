@@ -3,8 +3,12 @@
 [![CI](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml/badge.svg)](https://github.com/asbrodova/aura-tracker-gcp/actions/workflows/ci.yaml)
 [![Latest release](https://img.shields.io/github/v/release/asbrodova/aura-tracker-gcp)](https://github.com/asbrodova/aura-tracker-gcp/releases/latest)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![GCP access: read-only by default](https://img.shields.io/badge/GCP%20access-read--only%20by%20default-brightgreen)](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default)
 
 **The open-source intelligence layer for Google Cloud.**
+
+> [!TIP]
+> **Read-only by default.** Out of the box Aura can only read your GCP projects: it cannot create, change, or delete anything, and it never reads secret values. Changes are off until you set `MUTATIONS_ENABLED=true`, and even then each one waits for your approval. [Why it's safe →](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default)
 
 Ask a question in plain English. Aura investigates live GCP inventory, metrics, logs, IAM, topology, recommendations, and billing data—then returns a prioritized answer with evidence.
 
@@ -12,7 +16,7 @@ Aura is an open-source, model-agnostic GCP intelligence engine. It combines live
 
 Codex, Claude Desktop, Claude Code, Cowork, and other AI clients connect to Aura through [Model Context Protocol (MCP)](https://modelcontextprotocol.io).
 
-**73 zero-configuration tools · 29 immediately active tool modules · 10 context-resource definitions · multi-environment routing · preview-before-change safety**
+**71 zero-configuration read-only tools · 29 immediately active tool modules · 10 context-resource definitions · multi-environment routing · opt-in, user-approved changes**
 
 ![Aura Tracker GCP diagnoses failing scheduled Cloud Run jobs from one natural-language question](docs/aura-cloud-run-diagnosis.gif)
 
@@ -59,7 +63,7 @@ The opt-in cost engine compares complete calendar windows, reconciles cost delta
 
 ### It is safe to explore
 
-71 of the 73 default tools are read-only. The two infrastructure-changing tools—GKE node-pool scaling and Cloud Run traffic updates—use expiring, single-use preview plans when safety is enabled. Secret Manager integration reads metadata only; secret values are never accessed.
+Out of the box, all 71 registered tools are read-only. The two infrastructure-changing tools—GKE node-pool scaling and Cloud Run traffic updates—are registered only with `MUTATIONS_ENABLED=true`, and even then run only after you approve the previewed change in your MCP client. Secret Manager integration reads metadata only; secret values are never accessed.
 
 ### It stays yours
 
@@ -311,9 +315,9 @@ See [Cost Reasoning](https://github.com/asbrodova/aura-tracker-gcp/wiki/Cost-Rea
 | **Cost** | Recommender signals, composite health/efficiency scores, detailed billing-export reasoning, new-resource confirmation, traffic correlation, and BigQuery optimization prompts |
 | **Environment control** | Aliases, default routing, project-ID masking, symmetric drift detection, and per-environment cost-source routing |
 | **Platform inventory** | Cloud Functions, Eventarc, Scheduler, Workflows, Tasks, Pub/Sub, Cloud SQL, Storage, Spanner, AlloyDB, Firestore, Memorystore, Artifact Registry, Cloud Build, and Service Directory |
-| **Safe changes** | Preview-and-confirm GKE node-pool scaling and Cloud Run traffic updates |
+| **Safe changes** | GKE node-pool scaling and Cloud Run traffic updates that run only after you approve the preview |
 
-The zero-configuration server exposes 73 tools across 29 immediately active tool modules. Cost reasoning is the 30th selectable module and adds a 74th tool only when its billing-export prerequisites are configured; the separately opt-in recommendation export can add a 75th tool. Four static resources per environment and six URI templates expose BigQuery schemas, Cloud Run snapshots, Storage metadata, and IAM permissions before the model chooses a tool.
+The zero-configuration server exposes 71 read-only tools across 29 immediately active tool modules. `MUTATIONS_ENABLED=true` adds the 2 mutation tools (73). Cost reasoning is the 30th selectable module and adds one more read-only tool only when its billing-export prerequisites are configured; the separately opt-in recommendation export, which writes to BigQuery, can add one more when mutations are enabled. Four static resources per environment and six URI templates expose BigQuery schemas, Cloud Run snapshots, Storage metadata, and IAM permissions before the model chooses a tool.
 
 Browse the complete [module reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/Module-Reference), [resource reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/MCP-Resources-Reference), and [built-in workflows](https://github.com/asbrodova/aura-tracker-gcp/wiki/Built-in-Prompts-and-Workflows).
 
@@ -335,17 +339,18 @@ See the [scoring model and signal weights](https://github.com/asbrodova/aura-tra
 
 | Control | Default | Behavior |
 |---|---|---|
-| Read-only tools | 71 of 73 base tools | Inventory, investigation, audits, diagrams, drift, and recommendations do not mutate infrastructure |
-| Mutation safety | On | Dry-run returns an immutable plan; confirmation requires its expiring, single-use `plan_id` |
+| Read-only tools | All 71 base tools | Inventory, investigation, audits, diagrams, drift, and recommendations do not mutate infrastructure |
+| Mutation tools | Off | `MUTATIONS_ENABLED=true` registers GKE node-pool scaling, Cloud Run traffic updates and (if configured) the recommendation export; without it they do not exist on the server |
+| Mutation safety | On | Every change is previewed and executed only after the user approves it in the MCP client; the model cannot confirm on its own |
 | Recommender runtime integration | On | The Google API and `roles/recommender.viewer` must still be enabled per project |
 | Cost reasoning | Off | Must be explicitly enabled and configured with billing-export sources |
 | PII and credential scrubbing | Off | Optional local anonymization can scrub every tool, resource, prompt, error, and diagram response |
 | Secret values | Never accessed | Secret Manager exposes metadata only and never calls the versions-access API |
 | Remote SSE access | Authenticated | Public endpoints require HTTPS, Google identity tokens, and an email allowlist unless explicitly broadened |
 
-Mutation plans expire after 10 minutes and are single-use. Confirmed executions are audit-logged. The protocol enforces a separate preview and confirmation call; whether a distinct human approves the second call depends on the MCP client and deployment policy.
+Approval uses MCP elicitation: the server asks the user directly through the client, and only an accepted prompt executes the stored, single-use plan (10-minute expiry, bound to the caller and session, refused if the resource changed since the preview). Approved executions are audit-logged. Clients or transports that cannot show the prompt are refused rather than allowed to proceed; `dry_run: true` still previews any change.
 
-Read the full [security model](https://github.com/asbrodova/aura-tracker-gcp/wiki/Security-and-Safety) and [safety and cost safeguards](https://github.com/asbrodova/aura-tracker-gcp/wiki/Safety-and-Cost-Safeguards).
+Start with [Read-Only by Default](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default), then read the full [security model](https://github.com/asbrodova/aura-tracker-gcp/wiki/Security-and-Safety) and [safety and cost safeguards](https://github.com/asbrodova/aura-tracker-gcp/wiki/Safety-and-Cost-Safeguards).
 
 ## Run only what you need
 
@@ -391,6 +396,7 @@ If you would use a managed Aura experience, [open an issue and describe your wor
 
 | Start here | Guide |
 |---|---|
+| Why Aura is safe to connect | [Read-Only by Default](https://github.com/asbrodova/aura-tracker-gcp/wiki/Read-Only-by-Default) |
 | Install, authenticate, and configure IAM | [Getting Started](https://github.com/asbrodova/aura-tracker-gcp/wiki/Getting-Started) |
 | Configure one or many environments | [Configure Your Environment](https://github.com/asbrodova/aura-tracker-gcp/wiki/Configure-Your-Environment) |
 | Understand every module | [Module Reference](https://github.com/asbrodova/aura-tracker-gcp/wiki/Module-Reference) |

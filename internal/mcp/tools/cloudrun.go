@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -14,9 +15,15 @@ import (
 
 // CloudRunTools provides MCP tool definitions and handlers for Cloud Run operations.
 type CloudRunTools struct {
-	svc ports.CloudRunService
-	log *slog.Logger
+	svc          ports.CloudRunService
+	log          *slog.Logger
+	skipApproval bool
 }
+
+// DisableMutationApproval makes the mutation tool execute without asking the
+// user. Only for SAFETY_ENABLED=false (local stdio), where svc is the raw
+// adapter without the safety decorator.
+func (t *CloudRunTools) DisableMutationApproval() { t.skipApproval = true }
 
 func NewCloudRunTools(svc ports.CloudRunService, log *slog.Logger) *CloudRunTools {
 	return &CloudRunTools{svc: svc, log: log}
@@ -104,7 +111,8 @@ func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 	tool := mcp.NewTool("gcp_cloudrun_update_traffic",
 		mcp.WithDescription(
 			"Update the traffic split for a Cloud Run service. "+
-				"Mutation: dry_run=true → plan_id + before/after preview; confirm_plan_id=<id> executes (TTL 10 min).",
+				"Mutation: the server previews the before/after split and asks the user to approve it in the MCP client; "+
+				"nothing changes unless the user accepts. dry_run=true only previews.",
 		),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("region", mcp.Required(), mcp.Description("GCP region")),
@@ -112,7 +120,7 @@ func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 		mcp.WithArray("traffic",
 			mcp.MinItems(1),
 			mcp.MaxItems(100),
-			mcp.Description("Desired traffic targets for dry_run. Percentages must be positive and sum to 100; omitted when confirming a stored plan."),
+			mcp.Description("Desired traffic targets. Percentages must be positive and sum to 100."),
 			mcp.Items(map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -125,11 +133,8 @@ func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 			}),
 		),
 		mcp.WithBoolean("dry_run",
-			mcp.Description("Step 1: return a plan_id and before/after preview without executing. Default: false."),
+			mcp.Description("Only preview the before/after split; never asks for approval and never executes. Default: false."),
 			mcp.DefaultBool(false),
-		),
-		mcp.WithString("confirm_plan_id",
-			mcp.Description("Step 2: plan_id from a prior dry_run call. Providing this executes the traffic split change."),
 		),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Update Cloud Run Traffic Split",
@@ -145,21 +150,62 @@ func (t *CloudRunTools) UpdateTraffic() server.ServerTool {
 	}
 }
 
-func (t *CloudRunTools) updateTrafficHandler(ctx context.Context, _ mcp.CallToolRequest, args models.UpdateTrafficRequest) (*mcp.CallToolResult, error) {
+func (t *CloudRunTools) updateTrafficHandler(ctx context.Context, req mcp.CallToolRequest, args models.UpdateTrafficRequest) (*mcp.CallToolResult, error) {
 	t.log.InfoContext(ctx, "gcp_cloudrun_update_traffic",
 		"project", args.ProjectID,
 		"service", args.ServiceName,
 		"dry_run", args.DryRun,
 	)
-	resp, err := t.svc.UpdateTraffic(ctx, args)
-	if err != nil {
-		return handleServiceError("gcp_cloudrun_update_traffic", err)
+	return runMutation(ctx, req, mutation[models.UpdateTrafficResponse]{
+		tool:          "gcp_cloudrun_update_traffic",
+		previewOnly:   args.DryRun,
+		confirmPlanID: args.ConfirmPlanID,
+		skipApproval:  t.skipApproval,
+		preview: func(ctx context.Context) (models.UpdateTrafficResponse, error) {
+			r := args
+			r.DryRun, r.ConfirmPlanID = true, ""
+			return t.svc.UpdateTraffic(ctx, r)
+		},
+		confirm: func(ctx context.Context, planID string) (models.UpdateTrafficResponse, error) {
+			return t.svc.UpdateTraffic(ctx, models.UpdateTrafficRequest{ConfirmPlanID: planID})
+		},
+		execute: func(ctx context.Context) (models.UpdateTrafficResponse, error) {
+			r := args
+			r.DryRun, r.ConfirmPlanID = false, ""
+			return t.svc.UpdateTraffic(ctx, r)
+		},
+		plan: func(r models.UpdateTrafficResponse) (string, bool) { return r.PlanID, r.NoChangeNeeded },
+		strip: func(r *models.UpdateTrafficResponse) {
+			r.PlanID, r.ExpiresIn = "", ""
+			r.Description = "PREVIEW ONLY: " + trafficPreviewText(args, *r)
+		},
+		prompt: func(r models.UpdateTrafficResponse) string {
+			return "Approve this Cloud Run change? " + trafficPreviewText(args, r)
+		},
+	})
+}
+
+// trafficPreviewText describes a traffic change for the user approving it.
+// Project IDs in it are replaced by environment aliases before it leaves the
+// server.
+func trafficPreviewText(args models.UpdateTrafficRequest, r models.UpdateTrafficResponse) string {
+	return fmt.Sprintf("Change the traffic split of Cloud Run service %q (%s, project %s) from %s to %s.",
+		args.ServiceName, args.Region, args.ProjectID, formatTrafficSplit(r.Before), formatTrafficSplit(r.After))
+}
+
+func formatTrafficSplit(targets []models.TrafficTarget) string {
+	if len(targets) == 0 {
+		return "(none)"
 	}
-	result, err := mcp.NewToolResultJSON(resp)
-	if err != nil {
-		return nil, fmt.Errorf("gcp_cloudrun_update_traffic: marshal: %w", err)
+	parts := make([]string, 0, len(targets))
+	for _, target := range targets {
+		part := fmt.Sprintf("%d%% %s", target.Percent, target.Revision)
+		if target.Tag != "" {
+			part += " (tag " + target.Tag + ")"
+		}
+		parts = append(parts, part)
 	}
-	return result, nil
+	return strings.Join(parts, ", ")
 }
 
 func (t *CloudRunTools) ListJobs() server.ServerTool {

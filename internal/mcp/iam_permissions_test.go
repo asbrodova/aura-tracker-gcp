@@ -37,7 +37,7 @@ func TestIAMTestPermissionsDefaultsToEnabledModuleCatalog(t *testing.T) {
 		t.Fatalf("TestPermissions calls = %d, want 1; response=%s", len(svc.requests), response)
 	}
 	got := svc.requests[0].Permissions
-	if want := permissionsForModules(enabled); !slices.Equal(got, want) {
+	if want := permissionsForModules(enabled, false); !slices.Equal(got, want) {
 		t.Fatalf("default probe = %v\nwant catalog %v", got, want)
 	}
 	for _, required := range []string{"cloudfunctions.functions.list", "iam.serviceAccounts.list", "storage.buckets.list"} {

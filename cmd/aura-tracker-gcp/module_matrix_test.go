@@ -56,7 +56,7 @@ func TestModuleMatrixEveryToolRunsWithOnlyItsModule(t *testing.T) {
 				t.Fatalf("gcp adapter with --modules=%s: %v", module, err)
 			}
 			t.Cleanup(func() { _ = adapter.Close() })
-			s := mcpserver.New(safety.NewSafetyDecorator(adapter, discard), discard, "matrix", mcpserver.WithModules(enabled))
+			s := mcpserver.New(safety.NewSafetyDecorator(adapter, discard), discard, "matrix", mcpserver.WithModules(enabled), mcpserver.WithMutations())
 
 			tools := matrixListTools(t, s)
 			if len(tools) == 0 {

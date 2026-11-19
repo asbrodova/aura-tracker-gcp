@@ -19,11 +19,11 @@ var resourcePermissions = []string{
 
 var (
 	permissionsGKE = []string{
-		"container.clusters.get", "container.clusters.list", "container.clusters.update",
+		"container.clusters.get", "container.clusters.list",
 	}
 	permissionsRun = []string{
 		"run.executions.list", "run.jobs.get", "run.jobs.list", "run.revisions.list",
-		"run.services.get", "run.services.list", "run.services.update",
+		"run.services.get", "run.services.list",
 	}
 	permissionsPubSub = []string{
 		"pubsub.subscriptions.get", "pubsub.subscriptions.list",
@@ -132,10 +132,22 @@ func recommenderPermissions() []string {
 	}
 }
 
-func permissionsForModules(enabled map[string]bool) []string {
+// mutationPermissions are the write permissions of each module's mutation
+// tool. They are part of the catalog only when mutations are enabled, so a
+// read-only deployment is not shown misleading "denied" write permissions.
+// The recommender_export module is registered only with mutations enabled.
+var mutationPermissions = map[string][]string{
+	ModuleGKE:      {"container.clusters.update", "compute.instanceGroupManagers.get"},
+	ModuleCloudRun: {"run.services.update"},
+}
+
+func permissionsForModules(enabled map[string]bool, mutations bool) []string {
 	lists := [][]string{resourcePermissions}
 	for module := range enabled {
 		lists = append(lists, modulePermissions[module])
+		if mutations {
+			lists = append(lists, mutationPermissions[module])
+		}
 	}
 	// Aura and cost analysis optionally consume recommendations; probing these
 	// permissions makes that degraded coverage visible without claiming it is

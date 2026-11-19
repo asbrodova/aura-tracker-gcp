@@ -63,11 +63,15 @@ func (fakeRecommendationExportService) ExportRecommendationsToBQ(context.Context
 	return models.ExportRecommendationsToBQResponse{}, nil
 }
 
-func TestRecommendationExportSchemaRequiresConfirmationFlow(t *testing.T) {
+func TestRecommendationExportSchemaUsesApprovalFlow(t *testing.T) {
 	tool := NewRecommenderExportTools(fakeRecommendationExportService{}, slog.Default()).ExportRecommendationsToBQ().Tool
-	for _, property := range []string{"project_id", "dataset", "table", "dry_run", "confirm_plan_id"} {
+	for _, property := range []string{"project_id", "dataset", "table", "dry_run"} {
 		if _, exists := tool.InputSchema.Properties[property]; !exists {
 			t.Errorf("schema missing %q", property)
 		}
+	}
+	// Approval comes from the user through the client, never from the model.
+	if _, exists := tool.InputSchema.Properties["confirm_plan_id"]; exists {
+		t.Error("schema still exposes confirm_plan_id")
 	}
 }

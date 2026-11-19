@@ -14,9 +14,15 @@ import (
 
 // GKETools provides MCP tool definitions and handlers for GKE operations.
 type GKETools struct {
-	svc ports.GKEService
-	log *slog.Logger
+	svc          ports.GKEService
+	log          *slog.Logger
+	skipApproval bool
 }
+
+// DisableMutationApproval makes the mutation tool execute without asking the
+// user. Only for SAFETY_ENABLED=false (local stdio), where svc is the raw
+// adapter without the safety decorator.
+func (t *GKETools) DisableMutationApproval() { t.skipApproval = true }
 
 func NewGKETools(svc ports.GKEService, log *slog.Logger) *GKETools {
 	return &GKETools{svc: svc, log: log}
@@ -143,22 +149,20 @@ func (t *GKETools) getClusterBottlenecksHandler(ctx context.Context, _ mcp.CallT
 func (t *GKETools) ScaleDeployment() server.ServerTool {
 	tool := mcp.NewTool("gcp_gke_scale_deployment",
 		mcp.WithDescription(
-			"Resize a GKE node pool to node_count nodes. "+
+			"Resize a GKE node pool to node_count nodes per zone. "+
 				"Despite the tool name, this does not change Kubernetes Deployment replica counts. "+
-				"Mutation: dry_run=true → plan_id preview; confirm_plan_id=<id> executes (TTL 10 min). "+
-				"Idempotent: same count → no_change_needed=true.",
+				"Mutation: the server previews the change and asks the user to approve it in the MCP client; "+
+				"nothing changes unless the user accepts. dry_run=true only previews. "+
+				"Same count → no_change_needed=true.",
 		),
 		mcp.WithString("project_id", mcp.Description("GCP project ID. Omit to use the server default.")),
 		mcp.WithString("location", mcp.Required(), mcp.Description("GCP region or zone")),
 		mcp.WithString("cluster_name", mcp.Required(), mcp.Description("GKE cluster name")),
 		mcp.WithString("node_pool_name", mcp.Required(), mcp.Description("Node pool name to resize")),
-		mcp.WithNumber("node_count", mcp.Required(), mcp.Description("Desired node count"), mcp.Min(0), mcp.Max(1000)),
+		mcp.WithNumber("node_count", mcp.Required(), mcp.Description("Desired node count per zone"), mcp.Min(0), mcp.Max(1000)),
 		mcp.WithBoolean("dry_run",
-			mcp.Description("Step 1: return a plan_id and preview without executing. Default: false."),
+			mcp.Description("Only preview the change; never asks for approval and never executes. Default: false."),
 			mcp.DefaultBool(false),
-		),
-		mcp.WithString("confirm_plan_id",
-			mcp.Description("Step 2: plan_id from a prior dry_run call. Providing this executes the change."),
 		),
 		mcp.WithToolAnnotation(mcp.ToolAnnotation{
 			Title:           "Scale GKE Node Pool",
@@ -174,7 +178,7 @@ func (t *GKETools) ScaleDeployment() server.ServerTool {
 	}
 }
 
-func (t *GKETools) scaleDeploymentHandler(ctx context.Context, _ mcp.CallToolRequest, args models.ScaleDeploymentRequest) (*mcp.CallToolResult, error) {
+func (t *GKETools) scaleDeploymentHandler(ctx context.Context, req mcp.CallToolRequest, args models.ScaleDeploymentRequest) (*mcp.CallToolResult, error) {
 	t.log.InfoContext(ctx, "gcp_gke_scale_deployment",
 		"project", args.ProjectID,
 		"cluster", args.ClusterName,
@@ -182,13 +186,47 @@ func (t *GKETools) scaleDeploymentHandler(ctx context.Context, _ mcp.CallToolReq
 		"node_count", args.NodeCount,
 		"dry_run", args.DryRun,
 	)
-	resp, err := t.svc.ScaleDeployment(ctx, args)
-	if err != nil {
-		return handleServiceError("gcp_gke_scale_deployment", err)
+	return runMutation(ctx, req, mutation[models.ScaleDeploymentResponse]{
+		tool:          "gcp_gke_scale_deployment",
+		previewOnly:   args.DryRun,
+		confirmPlanID: args.ConfirmPlanID,
+		skipApproval:  t.skipApproval,
+		preview: func(ctx context.Context) (models.ScaleDeploymentResponse, error) {
+			r := args
+			r.DryRun, r.ConfirmPlanID = true, ""
+			return t.svc.ScaleDeployment(ctx, r)
+		},
+		confirm: func(ctx context.Context, planID string) (models.ScaleDeploymentResponse, error) {
+			return t.svc.ScaleDeployment(ctx, models.ScaleDeploymentRequest{ConfirmPlanID: planID})
+		},
+		execute: func(ctx context.Context) (models.ScaleDeploymentResponse, error) {
+			r := args
+			r.DryRun, r.ConfirmPlanID = false, ""
+			return t.svc.ScaleDeployment(ctx, r)
+		},
+		plan: func(r models.ScaleDeploymentResponse) (string, bool) { return r.PlanID, r.NoChangeNeeded },
+		strip: func(r *models.ScaleDeploymentResponse) {
+			r.PlanID, r.ExpiresIn = "", ""
+			r.Description = "PREVIEW ONLY: " + scalePreviewText(args, *r)
+		},
+		prompt: func(r models.ScaleDeploymentResponse) string {
+			return "Approve this GKE change? " + scalePreviewText(args, r)
+		},
+	})
+}
+
+// scalePreviewText describes a node-pool resize for the user approving it.
+// Project IDs in it are replaced by environment aliases before it leaves the
+// server.
+func scalePreviewText(args models.ScaleDeploymentRequest, r models.ScaleDeploymentResponse) string {
+	text := fmt.Sprintf("Resize node pool %q in cluster %q (%s, project %s) from %d to %d nodes per zone",
+		args.NodePoolName, args.ClusterName, args.Location, args.ProjectID, r.PreviousCount, r.RequestedCount)
+	if r.Zones > 1 {
+		text += fmt.Sprintf(" across %d zones (%d → %d nodes in total)", r.Zones, r.CurrentTotalNodes, r.RequestedCount*int32(r.Zones))
 	}
-	result, err := mcp.NewToolResultJSON(resp)
-	if err != nil {
-		return nil, fmt.Errorf("gcp_gke_scale_deployment: marshal: %w", err)
+	text += "."
+	for _, warning := range r.Warnings {
+		text += " Warning: " + warning
 	}
-	return result, nil
+	return text
 }

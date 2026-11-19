@@ -50,7 +50,7 @@ internal/mcp/  NEVER imports internal/gcp/
 
 Application-layer engines live between MCP and the port: `internal/diagnostics` for incidents, `internal/costreasoning` for cost explanations, `internal/securityaudit` for deterministic security posture findings and scoring, `internal/diagram` for architecture scoping and deterministic rendering, and `internal/drift` for symmetric cross-environment configuration comparison. They depend on narrow interfaces satisfied by `ports.GCPService` and never import GCP SDK packages.
 
-`cmd/` wraps the adapter in `internal/safety.SafetyDecorator` (the dry-run → confirm gate for mutations) before handing it to the MCP server. The repository's wiki is a separate git repo, checked out at `wiki/` and git-ignored here.
+`cmd/` wraps the adapter in `internal/safety.SafetyDecorator` (the plan store behind mutation approval) before handing it to the MCP server. The repository's wiki is a separate git repo, checked out at `wiki/` and git-ignored here.
 
 ### Panic containment
 
@@ -68,7 +68,8 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 | `ANONYMIZE_CONFIG_PATH` | No | Path to YAML config file for the anonymization engine |
 | `ANONYMIZE_PROJECT_ID` | No | Masks an unaliased project as `[GCP_PROJECT_ID]`. Configured aliases are always enforced on MCP output. |
 | `RECOMMENDER_ENABLED` | No | Set `false` to disable Cloud Recommender API integration. **On by default.** Enriches Aura Scores with idle/overprovisioned signals; 12h cache prevents quota exhaustion. |
-| `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default. |
+| `MUTATIONS_ENABLED` | No | Default `false`: read-only server; mutation tools are not registered and write permissions are left out of the permission catalog. `true` registers them (each change still needs the user's approval). YAML: `mutations_enabled`. |
+| `RECOMMENDER_BQ_EXPORT_ENABLED` | No | Set `true` to enable the `gcp_export_recommendations_to_bq` MCP tool. Off by default; also needs `MUTATIONS_ENABLED=true`. |
 | `RECOMMENDER_BQ_EXPORT_DATASET` | No | BigQuery dataset name for the recommendations export (overrides `recommender_export.dataset` in YAML). |
 | `COST_REASONING_ENABLED` | No | Set `true` to register the read-only `gcp_cost_explain` tool. Off by default. |
 | `COST_REASONING_SOURCES_JSON` | No | Strict JSON array mapping configured environments to query/export projects and billing datasets. Mutually exclusive with YAML `sources` and legacy source settings. |
@@ -80,7 +81,7 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 | `COST_REASONING_HISTORY_DAYS` | No | Billing history window, 14–366 days. Default 90. |
 | `COST_QUERY_MAX_BYTES` | No | Per-statement BigQuery bytes-billed ceiling. Default 5 GiB. |
 | `GRAPHVIZ_DOT_PATH` | No | Path to Graphviz `dot` for SVG architecture diagrams. Mermaid and Graphviz DOT source do not require it. |
-| `SAFETY_ENABLED` | No | Default `true`: mutations require dry-run → confirm. `false` is rejected when `MCP_TRANSPORT=sse`. |
+| `SAFETY_ENABLED` | No | Default `true`: mutations run only after the user approves them in the MCP client. `false` executes them without asking and is rejected when `MCP_TRANSPORT=sse`. |
 | `TRACE_BACKEND` | No | `trace` (default) or `monitoring`: source for trace-based dependency edges. |
 | `GRAPH_TIMEOUT_SECONDS` | No | Budget for architecture/serverless graph collection, 1–3600. Default 120. |
 | `MCP_TRANSPORT` | No | Empty for stdio (default) or `sse` for the HTTP/SSE server. |
@@ -164,7 +165,7 @@ Stage README changes in the same commit as the code that required them.
    - exhaust pagination or expose an opaque `next_page_token`; bound fan-out and report partial coverage explicitly;
    - fan out with `safego.WithContext`, never a bare `errgroup` or `go func()`;
    - wrap errors with `wrapGCPError("domain.Method", err)`.
-4. **Safety decorator**: add the method to `internal/safety/decorator.go`. Reads are one-line pass-throughs; a request with a `DryRun` field is a mutation and needs the full preview/confirm logic (`decorator_guard_test.go` enforces both).
+4. **Safety decorator**: add the method to `internal/safety/decorator.go`. Reads are one-line pass-throughs; a request with a `DryRun` field is a mutation and needs the full plan logic (`decorator_guard_test.go` enforces both), and its tool handler must go through `runMutation` so the user approves it.
 5. **Test fake**: add `<Method>Func` to `internal/testutil/FakeGCPService` and have the method call it (`fake_gcp_service_test.go` enforces this); update `internal/mcp/tools/mock_test.go` if handler tests use it.
 6. **MCP tool**: definition and handler in `internal/mcp/tools/<domain>.go`:
    - `mcp.NewTypedToolHandler(t.handlerFunc)` for typed argument binding;
@@ -186,7 +187,7 @@ Stage README changes in the same commit as the code that required them.
 | `*RecommenderQuotaExhaustedError` | `IsError: true` + `ToolError` JSON, `retriable: true`, `retry_at` |
 | `*RetriableError` (REST 408/429/5xx, transient gRPC) | `IsError: true` + `ToolError` JSON, `retriable: true` |
 | `*NotFoundError` | `IsError: true` + message |
-| `*ConfirmationRequiredError` (safety decorator) | `IsError: true` + how to dry-run/confirm |
+| `*ConfirmationRequiredError` (safety decorator) | `IsError: true` + why the plan was refused (expired, used, other session, resource changed) |
 | `*CostSourceNotConfiguredError` | `IsError: true` + message |
 | Any other error | JSON-RPC -32603, message passed through the project-ID masker |
 
@@ -196,15 +197,17 @@ Stage README changes in the same commit as the code that required them.
 - It is enforced on every outgoing request, not per adapter method: `internal/gcp/transport.go` wraps the shared HTTP client (`rateLimitedRoundTripper`) and adds unary and stream gRPC interceptors, so pagination, retries and nested collectors each count. `a.rateWait` only checks for a cancelled context.
 - Call timeout: 30s per adapter method via `a.withTimeout(ctx)`. Graph collection has its own budget (`GRAPH_TIMEOUT_SECONDS`, default 120s).
 
-## Mutation Tools (Safe-Apply Pattern)
+## Mutation Tools (Human Approval)
 
-Three tools change state: `gcp_gke_scale_deployment` (resizes a GKE **node pool**), `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`. `SafetyDecorator` enforces, for each:
+Three tools change state: `gcp_gke_scale_deployment` (resizes a GKE **node pool**), `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`. They are registered only with `MUTATIONS_ENABLED=true` (`mcpserver.WithMutations`); otherwise the server is read-only, and `safety.WithMutationsDisabled` also refuses them at the port boundary. A tool counts as a mutation when its `ReadOnlyHint` is false; `mutations_switch_test.go` pins the list. When enabled, the model still cannot execute any of them on its own:
 
-1. `dry_run: true` returns a preview and a `plan_id` (TTL 10 minutes). An operation already at the requested state returns `no_change_needed: true` and no plan.
-2. `confirm_plan_id: <id>` executes the stored dry-run request, not the confirm call's arguments. The plan is bound to the caller identity and session, and leased so only one confirm can run it at a time. Scale and traffic changes carry a state guard (the previewed node count or the service ETag), so a resource that changed since the preview is refused; exports carry the plan ID as their execution ID.
-3. Neither flag returns `ConfirmationRequiredError` without calling GCP.
+1. The tool handler (`runMutation` in `internal/mcp/tools/approval.go`) previews the change through `SafetyDecorator`, which stores a plan: TTL 10 minutes, bound to the caller identity and session, single-use. A request already at the target state returns `no_change_needed: true` with no plan.
+2. The handler returns an MCP elicitation (`server.NewInputRequestBuilder`) asking the **user** to approve, with the plan ID as opaque request state. Clients on protocol 2026-07-28 retry the call with the answer; for older clients mcp-go sends `elicitation/create` and re-invokes the handler.
+3. Only an `accept` answer (without `approve: false`) executes the stored plan, not the retry's arguments. Scale and traffic changes carry a state guard (the previewed per-zone node count or the service ETag), so a resource that changed since the preview is refused; exports carry the plan ID as their execution ID.
+4. `confirm_plan_id` is not in the tool schemas and is refused if the model sends it. `dry_run: true` only previews (no plan ID, no prompt).
+5. Fail closed: a client without elicitation support, or a legacy session on mcp-go's SSE transport (which cannot send server-initiated requests), is refused.
 
-`SAFETY_ENABLED=false` removes the gate for local stdio use only.
+Approval prompts pass through the project-ID masker (`maskInputRequests` in `server.go`). `SAFETY_ENABLED=false` (local stdio only) executes without a prompt.
 
 ## Anonymization Engine
 
