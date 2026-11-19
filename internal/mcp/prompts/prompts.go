@@ -156,15 +156,27 @@ Return a prioritised table ordered by estimated monthly savings (highest first).
 func (p *GCPPrompts) IncidentResponseHelper() server.ServerPrompt {
 	return server.ServerPrompt{
 		Prompt: mcp.NewPrompt("incident-response-helper",
-			mcp.WithPromptDescription("Correlate deployments, metrics, revisions, IAM changes, logs, dependencies, and platform health for an active production incident"),
+			mcp.WithPromptDescription("Correlate deployments, metrics, revisions, IAM changes, logs, dependencies, and platform health for an active production incident on a Cloud Run service, Cloud Function, or GKE workload"),
 			mcp.WithArgument("project_id",
 				mcp.ArgumentDescription(p.projectArgumentDescription()),
 			),
+			mcp.WithArgument("resource_type",
+				mcp.ArgumentDescription("cloud_run_service (default), cloud_function, or gke_workload"),
+			),
 			mcp.WithArgument("service_name",
-				mcp.ArgumentDescription("Cloud Run service name (optional; production services are inferred from labels when omitted)"),
+				mcp.ArgumentDescription("Cloud Run service, function, or GKE workload name (optional for Cloud Run: production services are inferred from labels when omitted)"),
 			),
 			mcp.WithArgument("region",
-				mcp.ArgumentDescription("Cloud Run region (optional; discovered when omitted)"),
+				mcp.ArgumentDescription("Region (optional; discovered when omitted), or the cluster location for a GKE workload"),
+			),
+			mcp.WithArgument("cluster_name",
+				mcp.ArgumentDescription("GKE cluster (gke_workload only)"),
+			),
+			mcp.WithArgument("namespace",
+				mcp.ArgumentDescription("Kubernetes namespace (gke_workload only; default: default)"),
+			),
+			mcp.WithArgument("workload_kind",
+				mcp.ArgumentDescription("Deployment (default), StatefulSet, or DaemonSet (gke_workload only)"),
 			),
 			mcp.WithArgument("environment",
 				mcp.ArgumentDescription("Environment label to infer (default: production)"),
@@ -182,23 +194,36 @@ func (p *GCPPrompts) incidentResponseHelperHandler(_ context.Context, req mcp.Ge
 	service := req.Params.Arguments["service_name"]
 	region := req.Params.Arguments["region"]
 	environment := req.Params.Arguments["environment"]
+	resourceType := req.Params.Arguments["resource_type"]
 
 	if environment == "" {
 		environment = "production"
+	}
+	if resourceType == "" {
+		resourceType = "cloud_run_service"
+	}
+	// GKE arguments appear only when given, so Cloud Run and function
+	// diagnoses do not pass arguments the tool rejects for them.
+	gkeArguments := ""
+	for _, name := range []string{"cluster_name", "namespace", "workload_kind"} {
+		if value := req.Params.Arguments[name]; value != "" {
+			gkeArguments += fmt.Sprintf("\n  %s=%q", name, value)
+		}
 	}
 
 	instructions := fmt.Sprintf(`You are the incident commander for GCP project %q.
 
 Call gcp_incident_diagnose exactly once with:
   project_id=%q
+  resource_type=%q
   environment=%q
   service_name=%q
-  region=%q
+  region=%q%s
   lookback_minutes=60
   baseline_minutes=240
   include_platform_health=true
 
-If service_name or region is empty, omit that argument. The tool will discover a safely labelled production scope; if it returns needs_scope, show the candidates and ask the operator to select one.
+If service_name or region is empty, omit that argument. For a Cloud Run service the tool will then discover a safely labelled production scope; if it returns needs_scope, show the candidates and ask the operator to select one. A cloud_function needs service_name (the function name); a gke_workload needs service_name (the workload name), cluster_name and region (the cluster location). If those are missing, ask the operator for them before calling the tool.
 
 Present the tool result as:
 1. Status and scope
@@ -208,7 +233,7 @@ Present the tool result as:
 5. Suggested investigation in priority order
 6. Coverage gaps and warnings
 
-Do not describe a hypothesis as confirmed unless the evidence says so. Do not execute mutations or rollbacks; the diagnosis and its suggested investigations are read-only.`, project, project, environment, service, region)
+Do not describe a hypothesis as confirmed unless the evidence says so. Do not execute mutations or rollbacks; the diagnosis and its suggested investigations are read-only.`, project, project, resourceType, environment, service, region, gkeArguments)
 
 	return &mcp.GetPromptResult{
 		Description: fmt.Sprintf("Production incident diagnosis for project %q", project),
