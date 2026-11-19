@@ -22,7 +22,7 @@ func newResponse(req models.ExplainCostRequest, w analysisWindows, facts models.
 	}
 	totals.PercentChange = percentChange(totals.CurrentNetCost, totals.BaselineNetCost)
 	totals.PercentChangeDefined = math.Abs(totals.BaselineNetCost) >= 1e-9
-	analysisRaw := fmt.Sprintf("%s|%s|%s|%s", req.ProjectID, w.currentStart, w.currentEnd, reasoningVersion)
+	analysisRaw := fmt.Sprintf("%s|%s|%s|%s|%s|%s", req.ProjectID, w.currentStart, w.currentEnd, w.baselineStart, w.baselineEnd, reasoningVersion)
 	sum := sha256.Sum256([]byte(analysisRaw))
 	response := models.ExplainCostResponse{
 		AnalysisID: hex.EncodeToString(sum[:8]), GeneratedAt: now.Format(time.RFC3339), Status: "complete",
@@ -270,7 +270,7 @@ func buildDrivers(facts models.BillingCostFacts, newResources []models.NewCostRe
 			Dimension: "resource", Key: resource.Resource, CurrentCost: resource.Current.NetCost,
 			BaselineCost: resource.Baseline.NetCost, Delta: delta, Category: "unattributed",
 			Title: "Resource cost changed", Confidence: "medium",
-			Evidence: []models.CostEvidence{costEvidence("billing_export", "resource_cost", "Resource net cost changed between equal periods", resource.Current.NetCost, resource.Baseline.NetCost, facts.Currency)},
+			Evidence: []models.CostEvidence{costEvidence("billing_export", "resource_cost", "Resource net cost changed between the compared periods", resource.Current.NetCost, resource.Baseline.NetCost, facts.Currency)},
 		}
 		if newResource, ok := newByResource[resource.Resource]; ok {
 			driver.Category = newResource.Classification

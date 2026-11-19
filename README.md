@@ -59,7 +59,7 @@ Configure aliases such as `dev`, `preprod`, and `prod`, choose one default, and 
 
 ### It explains spend—not only totals
 
-The opt-in cost engine compares complete calendar windows, reconciles cost deltas, finds new billable resources, separates usage and rate effects, checks traffic evidence, and adds idle-resource recommendations. Each environment can route to its own billing export and BigQuery query project.
+The opt-in cost engine compares complete calendar windows with the previous period, the same period last year, or a custom baseline, reconciles cost deltas, finds new billable resources, separates usage and rate effects, checks traffic evidence, and adds idle-resource recommendations. Each environment can route to its own billing export and BigQuery query project.
 
 ### It is safe to explore
 
@@ -216,6 +216,8 @@ Copy one into your connected AI client, or use it as the beginning of a deeper i
 > Why did GCP costs increase in preprod during the last seven complete days? Show the biggest drivers and evidence.
 
 > Which resources appeared for the first time this month, and how much did they cost?
+
+> How does this month to date compare with the same days last year?
 
 > Find idle or over-provisioned resources and estimate the available monthly savings.
 

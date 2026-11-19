@@ -136,8 +136,11 @@ func (e *Engine) explainUncached(ctx context.Context, req models.ExplainCostRequ
 	if facts.CurrencyCount > 1 {
 		facts.Currency = "MULTIPLE"
 	}
+	baselineObserved := baselineHasRows(facts)
+	scaleBaseline(&facts, windows.baselineScale())
 
 	response := newResponse(req, windows, facts, now)
+	addBaselineCoverage(&response, req, windows, baselineObserved)
 	type assetResult struct {
 		response models.ListCreatedAssetsResponse
 		err      error
@@ -255,6 +258,8 @@ func normalizeRequest(req *models.ExplainCostRequest, defaultTimezone string) er
 	req.Comparison = strings.ToLower(strings.TrimSpace(req.Comparison))
 	req.StartDate = strings.TrimSpace(req.StartDate)
 	req.EndDate = strings.TrimSpace(req.EndDate)
+	req.BaselineStartDate = strings.TrimSpace(req.BaselineStartDate)
+	req.BaselineEndDate = strings.TrimSpace(req.BaselineEndDate)
 	req.Timezone = strings.TrimSpace(req.Timezone)
 	req.DetailLevel = strings.ToLower(strings.TrimSpace(req.DetailLevel))
 	if req.ProjectID == "" {
@@ -264,10 +269,15 @@ func normalizeRequest(req *models.ExplainCostRequest, defaultTimezone string) er
 		req.Period = "last_7_complete_days"
 	}
 	if req.Comparison == "" {
-		req.Comparison = "previous_period"
+		req.Comparison = comparisonPreviousPeriod
 	}
-	if req.Comparison != "previous_period" {
-		return errors.New("comparison must be previous_period")
+	switch req.Comparison {
+	case comparisonPreviousPeriod, comparisonYearOverYear, comparisonCustom:
+	default:
+		return errors.New("comparison must be previous_period, year_over_year, or custom")
+	}
+	if req.Comparison != comparisonCustom && (req.BaselineStartDate != "" || req.BaselineEndDate != "") {
+		return errors.New("baseline_start_date and baseline_end_date are only accepted with comparison=custom")
 	}
 	if req.Timezone == "" {
 		req.Timezone = defaultTimezone
@@ -300,7 +310,8 @@ func boolValue(value *bool, fallback bool) bool {
 }
 
 func responseCacheKey(req models.ExplainCostRequest, w analysisWindows) string {
-	raw := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%t|%t", req.ProjectID, w.currentStart, w.currentEnd,
+	raw := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s|%s|%d|%t|%t", req.ProjectID, w.currentStart, w.currentEnd,
+		req.Comparison, w.baselineStart, w.baselineEnd,
 		req.Timezone, req.DetailLevel, req.MaxResults, boolValue(req.IncludeIdle, true), boolValue(req.IncludeTraffic, true))
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
@@ -375,4 +386,66 @@ func uniqueSorted(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// baselineHasRows reports whether the billing export returned any baseline
+// usage, before scaling. An empty baseline usually means the export does not
+// reach back that far, which matters most for year-over-year comparisons.
+func baselineHasRows(facts models.BillingCostFacts) bool {
+	for _, fact := range facts.Facts {
+		if fact.Baseline.GrossCost != 0 || fact.Baseline.Credits != 0 || fact.Baseline.NetCost != 0 || fact.Baseline.Usage != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// scaleBaseline multiplies every baseline measure by factor so a baseline of
+// a different length is compared as the same daily rate over the current
+// period's length.
+func scaleBaseline(facts *models.BillingCostFacts, factor float64) {
+	if factor == 1 || factor <= 0 {
+		return
+	}
+	for i := range facts.Facts {
+		baseline := &facts.Facts[i].Baseline
+		baseline.GrossCost *= factor
+		baseline.Credits *= factor
+		baseline.NetCost *= factor
+		baseline.Usage *= factor
+	}
+}
+
+func addBaselineCoverage(response *models.ExplainCostResponse, req models.ExplainCostRequest, w analysisWindows, observed bool) {
+	response.Scope.CurrentDays = w.currentDays
+	response.Scope.BaselineDays = w.baselineDays
+	if scale := w.baselineScale(); scale != 1 {
+		response.Scope.BaselineScale = scale
+		response.Warnings = append(response.Warnings, fmt.Sprintf(
+			"The baseline covers %d days and the current period %d; baseline costs and usage were scaled by %.4f to compare daily rates.",
+			w.baselineDays, w.currentDays, scale))
+	}
+	switch {
+	case observed:
+		response.Coverage.Checks = append(response.Coverage.Checks, models.CostCoverageCheck{Name: "baseline_window", Status: "complete"})
+	case req.Comparison == comparisonPreviousPeriod:
+		// An empty adjacent baseline is a genuinely new project or service;
+		// the history coverage check already reports a short export.
+		response.Coverage.Checks = append(response.Coverage.Checks, models.CostCoverageCheck{Name: "baseline_window", Status: "complete", Message: "No usage was billed in the baseline window."})
+	default:
+		response.Coverage.Checks = append(response.Coverage.Checks, models.CostCoverageCheck{Name: "baseline_window", Status: "partial", Message: "No billing rows matched the baseline window; the detailed export may not reach back that far."})
+		response.Warnings = append(response.Warnings, "No billing rows matched the baseline window. If the detailed billing export was enabled after it, the comparison is against zero and overstates the change.")
+	}
+}
+
+// comparisonLabel names the baseline in summaries.
+func comparisonLabel(comparison string) string {
+	switch comparison {
+	case comparisonYearOverYear:
+		return "the same period last year"
+	case comparisonCustom:
+		return "the custom baseline"
+	default:
+		return "the previous equal period"
+	}
 }

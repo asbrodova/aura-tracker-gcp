@@ -24,10 +24,12 @@ type fakeSource struct {
 	metricsFn  func(models.GetMetricsRequest) (models.GetMetricsResponse, error)
 	factCalls  int
 	recsCalls  int
+	factsReqs  []models.CollectCostFactsRequest
 }
 
-func (f *fakeSource) CollectCostFacts(_ context.Context, _ models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
+func (f *fakeSource) CollectCostFacts(_ context.Context, request models.CollectCostFactsRequest) (models.BillingCostFacts, error) {
 	f.factCalls++
+	f.factsReqs = append(f.factsReqs, request)
 	return f.facts, f.factsErr
 }
 func (f *fakeSource) ListCostRecommendations(_ context.Context, _ models.ListCostRecommendationsRequest) (models.ListCostRecommendationsResponse, error) {
