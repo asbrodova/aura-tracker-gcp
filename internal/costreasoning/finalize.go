@@ -81,18 +81,18 @@ func buildSummary(response *models.ExplainCostResponse) string {
 		direction = "decreased"
 	}
 	if response.Status == "no_material_change" {
-		return fmt.Sprintf("Net usage cost was %.2f %s with no material change from the previous equal period.", response.Totals.CurrentNetCost, currency)
+		return fmt.Sprintf("Net usage cost was %.2f %s with no material change from %s.", response.Totals.CurrentNetCost, currency, comparisonLabel(response.Scope.Comparison))
 	}
 	if response.Status == "no_data" {
 		return "No detailed billing export rows matched this project and analysis window."
 	}
 	summary := ""
 	if response.Totals.PercentChangeDefined {
-		summary = fmt.Sprintf("Net usage cost %s by %.2f %s (%.1f%%), from %.2f to %.2f.", direction,
-			math.Abs(response.Totals.Delta), currency, math.Abs(response.Totals.PercentChange), response.Totals.BaselineNetCost, response.Totals.CurrentNetCost)
+		summary = fmt.Sprintf("Net usage cost %s by %.2f %s (%.1f%%) compared with %s, from %.2f to %.2f.", direction,
+			math.Abs(response.Totals.Delta), currency, math.Abs(response.Totals.PercentChange), comparisonLabel(response.Scope.Comparison), response.Totals.BaselineNetCost, response.Totals.CurrentNetCost)
 	} else {
-		summary = fmt.Sprintf("Net usage cost %s by %.2f %s, from a zero baseline to %.2f; percentage change is undefined.", direction,
-			math.Abs(response.Totals.Delta), currency, response.Totals.CurrentNetCost)
+		summary = fmt.Sprintf("Net usage cost %s by %.2f %s compared with %s, from a zero baseline to %.2f; percentage change is undefined.", direction,
+			math.Abs(response.Totals.Delta), currency, comparisonLabel(response.Scope.Comparison), response.Totals.CurrentNetCost)
 	}
 	if len(response.Drivers) > 0 {
 		summary += " Leading measured driver: " + response.Drivers[0].Title + " (" + response.Drivers[0].Key + ")."

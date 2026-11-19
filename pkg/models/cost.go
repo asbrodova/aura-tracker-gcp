@@ -2,17 +2,21 @@ package models
 
 // ExplainCostRequest asks the cost reasoning engine to compare one usage-cost
 // window with a historical baseline. Dates are interpreted in Timezone.
+// Comparison is previous_period (default), year_over_year, or custom; a
+// custom baseline is given by BaselineStartDate and BaselineEndDate.
 type ExplainCostRequest struct {
-	ProjectID      string `json:"project_id"`
-	Period         string `json:"period,omitempty"`
-	Comparison     string `json:"comparison,omitempty"`
-	StartDate      string `json:"start_date,omitempty"`
-	EndDate        string `json:"end_date,omitempty"`
-	Timezone       string `json:"timezone,omitempty"`
-	DetailLevel    string `json:"detail_level,omitempty"`
-	MaxResults     int    `json:"max_results,omitempty"`
-	IncludeIdle    *bool  `json:"include_idle,omitempty"`
-	IncludeTraffic *bool  `json:"include_traffic,omitempty"`
+	ProjectID         string `json:"project_id"`
+	Period            string `json:"period,omitempty"`
+	Comparison        string `json:"comparison,omitempty"`
+	StartDate         string `json:"start_date,omitempty"`
+	EndDate           string `json:"end_date,omitempty"`
+	BaselineStartDate string `json:"baseline_start_date,omitempty"`
+	BaselineEndDate   string `json:"baseline_end_date,omitempty"`
+	Timezone          string `json:"timezone,omitempty"`
+	DetailLevel       string `json:"detail_level,omitempty"`
+	MaxResults        int    `json:"max_results,omitempty"`
+	IncludeIdle       *bool  `json:"include_idle,omitempty"`
+	IncludeTraffic    *bool  `json:"include_traffic,omitempty"`
 }
 
 type CostWindow struct {
@@ -29,6 +33,12 @@ type CostScope struct {
 	Comparison      string     `json:"comparison"`
 	CostBasis       string     `json:"cost_basis"`
 	CurrentComplete bool       `json:"current_complete"`
+	CurrentDays     int        `json:"current_days,omitempty"`
+	BaselineDays    int        `json:"baseline_days,omitempty"`
+	// BaselineScale is current_days / baseline_days when the windows differ in
+	// length. Baseline costs and usage are multiplied by it, so the comparison
+	// is between daily rates. Omitted (1) when the windows have equal length.
+	BaselineScale float64 `json:"baseline_scale,omitempty"`
 }
 
 type CostMeasure struct {
@@ -131,6 +141,7 @@ type CostTrafficAnomaly struct {
 	CostDelta          float64 `json:"cost_delta"`
 	AnomalyScore       float64 `json:"anomaly_score,omitempty"`
 	MonitoringMetric   string  `json:"monitoring_metric,omitempty"`
+	MonitoringUnit     string  `json:"monitoring_unit,omitempty"`
 	MonitoringValue    float64 `json:"monitoring_value,omitempty"`
 	MonitoringBaseline float64 `json:"monitoring_baseline,omitempty"`
 	MonitoringChange   float64 `json:"monitoring_change,omitempty"`

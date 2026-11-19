@@ -112,12 +112,23 @@ func (a *gcpAdapter) CollectCostFacts(ctx context.Context, req models.CollectCos
 		{Name: "baseline_end", Value: baselineEnd},
 		{Name: "max_rows", Value: int64(req.MaxResults)},
 	}
+	contributorPartition := partitionPredicate
 	if partitionPredicate != "" {
 		contributorParams = append(contributorParams, bigquery.QueryParameter{Name: "partition_start", Value: baselineStart})
+		// A year-over-year or custom baseline can lie far before the current
+		// period. Skip the export partitions in between, keeping a margin for
+		// usage that is exported late.
+		if gapStart := baselineEnd.Add(costLateExportMargin); gapStart.Before(currentStart) {
+			contributorPartition = costPartitionGapPredicate(meta)
+			contributorParams = append(contributorParams,
+				bigquery.QueryParameter{Name: "partition_gap_start", Value: gapStart},
+				bigquery.QueryParameter{Name: "partition_gap_end", Value: currentStart},
+			)
+		}
 	}
 
 	facts := models.BillingCostFacts{DetailedExport: true, Daily: []models.HistoricalCost{}, Facts: []models.CostFact{}, FirstSeen: []models.ResourceFirstSeen{}, Warnings: []string{}}
-	contributorSQL := buildCostContributorSQL(tableRef, partitionPredicate)
+	contributorSQL := buildCostContributorSQL(tableRef, contributorPartition)
 	bytes, err := a.executeCostQuery(ctx, source, contributorSQL, contributorParams, func(it *bigquery.RowIterator) error {
 		for {
 			var row costContributorRow
@@ -219,6 +230,28 @@ func costPartitionPredicate(meta *bigquery.TableMetadata) string {
 	return fmt.Sprintf("AND DATE(`%s`) >= DATE(@partition_start)", field)
 }
 
+// costLateExportMargin is how long after a baseline window ends its usage rows
+// are still expected to arrive in the export, when partitions between a
+// distant baseline and the current period are skipped.
+const costLateExportMargin = 14 * 24 * time.Hour
+
+// costPartitionGapPredicate restricts the scan to the export partitions of a
+// distant baseline (from @partition_start until @partition_gap_start) and of
+// the current period (from @partition_gap_end), skipping the months between.
+func costPartitionGapPredicate(meta *bigquery.TableMetadata) string {
+	if meta == nil || meta.TimePartitioning == nil {
+		return ""
+	}
+	field := meta.TimePartitioning.Field
+	if field == "" {
+		return "AND ((_PARTITIONTIME >= TIMESTAMP(@partition_start) AND _PARTITIONTIME < TIMESTAMP(@partition_gap_start)) OR _PARTITIONTIME >= TIMESTAMP(@partition_gap_end))"
+	}
+	if !costFieldIDRE.MatchString(field) {
+		return ""
+	}
+	return fmt.Sprintf("AND ((DATE(`%[1]s`) >= DATE(@partition_start) AND DATE(`%[1]s`) < DATE(@partition_gap_start)) OR DATE(`%[1]s`) >= DATE(@partition_gap_end))", field)
+}
+
 func parseCostFactTimes(req models.CollectCostFactsRequest) (time.Time, time.Time, time.Time, time.Time, time.Time, error) {
 	values := []string{req.CurrentStart, req.CurrentEnd, req.BaselineStart, req.BaselineEnd, req.HistoryStart}
 	parsed := make([]time.Time, len(values))
@@ -229,8 +262,11 @@ func parseCostFactTimes(req models.CollectCostFactsRequest) (time.Time, time.Tim
 		}
 		parsed[i] = v
 	}
+	// The baseline must end before the current period starts. The daily
+	// history must start no later than the current period; it need not
+	// cover a year-over-year or custom baseline.
 	if !parsed[0].Before(parsed[1]) || !parsed[2].Before(parsed[3]) ||
-		parsed[4].After(parsed[2]) || parsed[3].After(parsed[0]) {
+		parsed[4].After(parsed[0]) || parsed[3].After(parsed[0]) {
 		return time.Time{}, time.Time{}, time.Time{}, time.Time{}, time.Time{}, errors.New("invalid or overlapping cost windows")
 	}
 	return parsed[0], parsed[1], parsed[2], parsed[3], parsed[4], nil
@@ -374,8 +410,10 @@ WITH source AS (
   FROM %s
   WHERE project.id = @project_id
     AND COALESCE(cost_type, 'regular') = 'regular'
-    AND usage_start_time >= @baseline_start
-    AND usage_start_time < @current_end
+    AND (
+      (usage_start_time >= @baseline_start AND usage_start_time < @baseline_end)
+      OR (usage_start_time >= @current_start AND usage_start_time < @current_end)
+    )
     %s
 ), expanded AS (
   SELECT d.*, gross_cost, credits, net_cost, period

@@ -181,3 +181,55 @@ func TestCostIdentifierValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestParseCostFactTimesAcceptsADistantBaselineWithShorterHistory(t *testing.T) {
+	t.Parallel()
+	request := models.CollectCostFactsRequest{
+		CurrentStart: "2026-08-01T00:00:00Z", CurrentEnd: "2026-08-08T00:00:00Z",
+		BaselineStart: "2025-08-01T00:00:00Z", BaselineEnd: "2025-08-08T00:00:00Z",
+		HistoryStart: "2026-05-10T00:00:00Z",
+	}
+	if _, _, _, _, _, err := parseCostFactTimes(request); err != nil {
+		t.Fatalf("year-over-year windows rejected: %v", err)
+	}
+	request.HistoryStart = "2026-08-02T00:00:00Z"
+	if _, _, _, _, _, err := parseCostFactTimes(request); err == nil {
+		t.Fatal("history that starts inside the current period was accepted")
+	}
+}
+
+func TestCostContributorQueryReadsOnlyTheTwoWindows(t *testing.T) {
+	t.Parallel()
+	query := buildCostContributorSQL("`p.d.t`", "")
+	for _, expected := range []string{
+		"usage_start_time >= @baseline_start AND usage_start_time < @baseline_end",
+		"usage_start_time >= @current_start AND usage_start_time < @current_end",
+	} {
+		if !strings.Contains(query, expected) {
+			t.Errorf("contributor query missing %q", expected)
+		}
+	}
+	if strings.Contains(query, "AND usage_start_time >= @baseline_start\n") {
+		t.Error("contributor query still scans everything between the baseline and the current period")
+	}
+}
+
+func TestCostPartitionGapPredicateSkipsThePartitionsBetweenWindows(t *testing.T) {
+	t.Parallel()
+	ingestion := costPartitionGapPredicate(&bigquery.TableMetadata{TimePartitioning: &bigquery.TimePartitioning{}})
+	for _, expected := range []string{"@partition_start", "@partition_gap_start", "@partition_gap_end", "_PARTITIONTIME"} {
+		if !strings.Contains(ingestion, expected) {
+			t.Errorf("ingestion gap predicate %q missing %q", ingestion, expected)
+		}
+	}
+	field := costPartitionGapPredicate(&bigquery.TableMetadata{TimePartitioning: &bigquery.TimePartitioning{Field: "export_time"}})
+	if !strings.Contains(field, "DATE(`export_time`) < DATE(@partition_gap_start)") || !strings.Contains(field, "DATE(`export_time`) >= DATE(@partition_gap_end)") {
+		t.Errorf("field gap predicate = %q", field)
+	}
+	if got := costPartitionGapPredicate(&bigquery.TableMetadata{TimePartitioning: &bigquery.TimePartitioning{Field: "bad`field"}}); got != "" {
+		t.Errorf("unsafe field gap predicate = %q", got)
+	}
+	if got := costPartitionGapPredicate(&bigquery.TableMetadata{}); got != "" {
+		t.Errorf("unpartitioned gap predicate = %q", got)
+	}
+}
