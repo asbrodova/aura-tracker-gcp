@@ -23,10 +23,12 @@ import (
 	"github.com/asbrodova/aura-tracker-gcp/pkg/models"
 )
 
-func must[T any](t *testing.T, value T, err error) T {
-	t.Helper()
+// must unwraps a (value, error) call in test setup. Go only lets a
+// multi-value call be the sole argument, so it cannot take *testing.T as
+// well; an unexpected error panics, which fails the test with the error.
+func must[T any](value T, err error) T {
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
 	return value
 }
@@ -45,7 +47,7 @@ func TestListSQLInstancesFollowsPagesAndMapsSettings(t *testing.T) {
 		}},
 	)
 	a := testAdapter()
-	a.sqlAdmin = must(t, sqladmin.NewService(context.Background(), fake.options()...))
+	a.sqlAdmin = must(sqladmin.NewService(context.Background(), fake.options()...))
 	response, err := a.ListSQLInstances(context.Background(), models.ListSQLInstancesRequest{ProjectID: "p"})
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +67,7 @@ func TestListSQLInstancesFollowsPagesAndMapsSettings(t *testing.T) {
 func TestListSQLInstancesMapsPermissionDenied(t *testing.T) {
 	fake := newRESTFake(t, restRoute{method: "GET", path: "/projects/p/instances", status: http.StatusForbidden, body: forbidden})
 	a := testAdapter()
-	a.sqlAdmin = must(t, sqladmin.NewService(context.Background(), fake.options()...))
+	a.sqlAdmin = must(sqladmin.NewService(context.Background(), fake.options()...))
 	_, err := a.ListSQLInstances(context.Background(), models.ListSQLInstancesRequest{ProjectID: "p"})
 	var denied *PermissionDeniedError
 	if !errors.As(err, &denied) {
@@ -110,24 +112,24 @@ func TestDatastoreListsMapResources(t *testing.T) {
 	)
 	ctx := context.Background()
 	a := testAdapter()
-	a.spannerSvc = must(t, spanner.NewService(ctx, fake.options()...))
-	a.alloydbSvc = must(t, alloydb.NewService(ctx, fake.options()...))
-	a.firestoreSvc = must(t, firestore.NewService(ctx, fake.options()...))
-	a.redisSvc = must(t, redis.NewService(ctx, fake.options()...))
+	a.spannerSvc = must(spanner.NewService(ctx, fake.options()...))
+	a.alloydbSvc = must(alloydb.NewService(ctx, fake.options()...))
+	a.firestoreSvc = must(firestore.NewService(ctx, fake.options()...))
+	a.redisSvc = must(redis.NewService(ctx, fake.options()...))
 
-	spannerInstances := must(t, a.ListSpannerInstances(ctx, models.ListSpannerInstancesRequest{ProjectID: "p"}))
+	spannerInstances := must(a.ListSpannerInstances(ctx, models.ListSpannerInstancesRequest{ProjectID: "p"}))
 	if len(spannerInstances.Instances) != 1 || spannerInstances.Instances[0].NodeCount != 3 || spannerInstances.Instances[0].DisplayName != "Main" {
 		t.Errorf("spanner = %+v", spannerInstances)
 	}
-	clusters := must(t, a.ListAlloyDBClusters(ctx, models.ListAlloyDBClustersRequest{ProjectID: "p"}))
+	clusters := must(a.ListAlloyDBClusters(ctx, models.ListAlloyDBClustersRequest{ProjectID: "p"}))
 	if len(clusters.Clusters) != 1 || clusters.Clusters[0].Location != "us-east1" {
 		t.Errorf("alloydb = %+v (an omitted location must list all with \"-\")", clusters)
 	}
-	databases := must(t, a.ListFirestoreDatabases(ctx, models.ListFirestoreDatabasesRequest{ProjectID: "p"}))
+	databases := must(a.ListFirestoreDatabases(ctx, models.ListFirestoreDatabasesRequest{ProjectID: "p"}))
 	if len(databases.Databases) != 1 || databases.Databases[0].LocationID != "nam5" {
 		t.Errorf("firestore = %+v", databases)
 	}
-	caches := must(t, a.ListMemorystoreInstances(ctx, models.ListMemorystoreInstancesRequest{ProjectID: "p", Location: "europe-west1"}))
+	caches := must(a.ListMemorystoreInstances(ctx, models.ListMemorystoreInstancesRequest{ProjectID: "p", Location: "europe-west1"}))
 	if len(caches.Instances) != 1 || caches.Instances[0].MemorySizeGb != 5 || caches.Instances[0].Tier != "STANDARD_HA" {
 		t.Errorf("redis = %+v", caches)
 	}
@@ -144,7 +146,7 @@ func TestListVPCConnectorsDiscoversRegionsAndKeepsPartialResults(t *testing.T) {
 		restRoute{method: "GET", path: "/projects/p/locations/europe-west1/connectors", status: http.StatusForbidden, body: forbidden},
 	)
 	a := testAdapter()
-	a.vpcAccess = must(t, vpcaccess.NewService(context.Background(), fake.options()...))
+	a.vpcAccess = must(vpcaccess.NewService(context.Background(), fake.options()...))
 	response, err := a.ListVPCConnectors(context.Background(), models.ListVPCConnectorsRequest{ProjectID: "p"})
 	if err != nil {
 		t.Fatal(err)
@@ -163,8 +165,8 @@ func TestListVPCConnectorsHonoursExplicitRegion(t *testing.T) {
 		restRoute{method: "GET", path: "/projects/p/locations/asia-east1/connectors", body: map[string]any{"connectors": []any{}}},
 	)
 	a := testAdapter()
-	a.vpcAccess = must(t, vpcaccess.NewService(context.Background(), fake.options()...))
-	response := must(t, a.ListVPCConnectors(context.Background(), models.ListVPCConnectorsRequest{ProjectID: "p", Region: "asia-east1"}))
+	a.vpcAccess = must(vpcaccess.NewService(context.Background(), fake.options()...))
+	response := must(a.ListVPCConnectors(context.Background(), models.ListVPCConnectorsRequest{ProjectID: "p", Region: "asia-east1"}))
 	if response.Connectors == nil || len(response.Connectors) != 0 || len(response.Errors) != 0 {
 		t.Fatalf("response = %+v", response)
 	}
@@ -189,8 +191,8 @@ func TestListTaggedResourcesFiltersAndPages(t *testing.T) {
 		}},
 	)
 	a := testAdapter()
-	a.crmV3Svc = must(t, crmv3.NewService(context.Background(), fake.options()...))
-	response := must(t, a.ListTaggedResources(context.Background(), models.ListTaggedResourcesRequest{ProjectID: "p", TagKey: "env", TagValue: "prod"}))
+	a.crmV3Svc = must(crmv3.NewService(context.Background(), fake.options()...))
+	response := must(a.ListTaggedResources(context.Background(), models.ListTaggedResourcesRequest{ProjectID: "p", TagKey: "env", TagValue: "prod"}))
 	if len(response.Resources) != 2 || response.Truncated {
 		t.Fatalf("resources = %+v", response)
 	}
@@ -214,14 +216,14 @@ func TestListServiceAccountsAndProjectBindings(t *testing.T) {
 	)
 	ctx := context.Background()
 	a := testAdapter()
-	a.iamAdminSvc = must(t, iam.NewService(ctx, fake.options()...))
-	a.crm = must(t, cloudresourcemanager.NewService(ctx, fake.options()...))
+	a.iamAdminSvc = must(iam.NewService(ctx, fake.options()...))
+	a.crm = must(cloudresourcemanager.NewService(ctx, fake.options()...))
 
-	accounts := must(t, a.ListServiceAccounts(ctx, models.ListServiceAccountsRequest{ProjectID: "p"}))
+	accounts := must(a.ListServiceAccounts(ctx, models.ListServiceAccountsRequest{ProjectID: "p"}))
 	if len(accounts.ServiceAccounts) != 1 || !accounts.ServiceAccounts[0].Disabled || accounts.ServiceAccounts[0].UniqueID != "42" || !accounts.Truncated || accounts.NextPageToken != "more" {
 		t.Fatalf("accounts = %+v", accounts)
 	}
-	bindings := must(t, a.GetResourceIAMBindings(ctx, models.GetResourceIAMBindingsRequest{ProjectID: "p", URN: "urn:gcp:project:global:p:p"}))
+	bindings := must(a.GetResourceIAMBindings(ctx, models.GetResourceIAMBindingsRequest{ProjectID: "p", URN: "urn:gcp:project:global:p:p"}))
 	if len(bindings.Bindings) != 1 || bindings.Bindings[0].Role != "roles/run.invoker" {
 		t.Fatalf("bindings = %+v", bindings)
 	}
@@ -252,12 +254,12 @@ func TestListVPCNetworksAndSubnets(t *testing.T) {
 	)
 	ctx := context.Background()
 	a := testAdapter()
-	a.computeSvc = must(t, compute.NewService(ctx, fake.options()...))
-	networks := must(t, a.ListVPCNetworks(ctx, models.ListVPCNetworksRequest{ProjectID: "p"}))
+	a.computeSvc = must(compute.NewService(ctx, fake.options()...))
+	networks := must(a.ListVPCNetworks(ctx, models.ListVPCNetworksRequest{ProjectID: "p"}))
 	if len(networks.Networks) != 1 || networks.Networks[0].SubnetCount != 2 || networks.Networks[0].PeeringCount != 1 || !networks.Networks[0].AutoCreateSubnets {
 		t.Fatalf("networks = %+v", networks)
 	}
-	subnets := must(t, a.ListVPCSubnets(ctx, models.ListVPCSubnetsRequest{ProjectID: "p", Region: "us-central1", Network: "default"}))
+	subnets := must(a.ListVPCSubnets(ctx, models.ListVPCSubnetsRequest{ProjectID: "p", Region: "us-central1", Network: "default"}))
 	if len(subnets.Subnets) != 1 || subnets.Subnets[0].Name != "app" || subnets.Subnets[0].Network != "default" || !subnets.Subnets[0].PrivateIPGoogleAccess {
 		t.Fatalf("subnets = %+v, want only the default network in us-central1", subnets)
 	}
@@ -284,18 +286,18 @@ func TestSupplyChainListsMapResources(t *testing.T) {
 	)
 	ctx := context.Background()
 	a := testAdapter()
-	a.artifactRegistrySvc = must(t, artifactregistry.NewService(ctx, fake.options()...))
-	a.cloudBuildSvc = must(t, cloudbuild.NewService(ctx, fake.options()...))
+	a.artifactRegistrySvc = must(artifactregistry.NewService(ctx, fake.options()...))
+	a.cloudBuildSvc = must(cloudbuild.NewService(ctx, fake.options()...))
 
-	repos := must(t, a.ListArtifactRegistryRepos(ctx, models.ListArtifactRegistryReposRequest{ProjectID: "p"}))
+	repos := must(a.ListArtifactRegistryRepos(ctx, models.ListArtifactRegistryReposRequest{ProjectID: "p"}))
 	if len(repos.Repositories) != 1 || repos.Repositories[0].Location != "us" || repos.Repositories[0].SizeBytes != 2048 {
 		t.Fatalf("repos = %+v", repos)
 	}
-	images := must(t, a.ListArtifactRegistryImages(ctx, models.ListArtifactRegistryImagesRequest{ProjectID: "p", Location: "us", Repository: "images"}))
+	images := must(a.ListArtifactRegistryImages(ctx, models.ListArtifactRegistryImagesRequest{ProjectID: "p", Location: "us", Repository: "images"}))
 	if len(images.Images) != 1 || images.Images[0].SizeBytes != 1024 || images.Images[0].Tags[0] != "v1" {
 		t.Fatalf("images = %+v", images)
 	}
-	triggers := must(t, a.ListCloudBuildTriggers(ctx, models.ListCloudBuildTriggersRequest{ProjectID: "p"}))
+	triggers := must(a.ListCloudBuildTriggers(ctx, models.ListCloudBuildTriggersRequest{ProjectID: "p"}))
 	if len(triggers.Triggers) != 3 {
 		t.Fatalf("triggers = %+v", triggers)
 	}
