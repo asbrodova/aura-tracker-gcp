@@ -42,7 +42,7 @@ Use this client-neutral checklist. See the [architecture and contributing guide]
 5. Add a `<Method>Func` field to `internal/testutil/FakeGCPService` and call it from the fake method
 6. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`. Select the project with a `project_id` parameter, and name every duration with its unit (`lookback_minutes`, `lookback_hours`, `_seconds`, `_days`) and state the unit and range in its description; `internal/mcp/parameter_conventions_test.go` checks both
 7. Register it in `GetTools()` on the domain's `*Tools` struct
-8. Add focused tests for the adapter, handler, schema, routing, and error behavior that changed
+8. Add focused tests for the adapter, handler, schema, routing, and error behavior that changed. For adapter methods on a `google.golang.org/api` REST client, serve canned JSON with `newRESTFake` (`internal/gcp/restfake_test.go`) and point the client at it with `fake.options()`; cover paging, mapping, and a permission error
 
 Guard tests fail if steps 3–5 are skipped: `internal/safety/decorator_guard_test.go`, `internal/testutil/fake_gcp_service_test.go`, `internal/safego/usage_test.go`, and the per-module matrix in `cmd/aura-tracker-gcp/module_matrix_test.go`.
 
