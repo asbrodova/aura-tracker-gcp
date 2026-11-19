@@ -38,7 +38,7 @@ Use this client-neutral checklist. See the [architecture and contributing guide]
 1. Add request/response structs to `pkg/models/<domain>.go`
 2. Add the method signature to `ports/gcp_service.go`
 3. Implement the method on `gcpAdapter` in `internal/gcp/<domain>.go`. Return `errClientNotInitialized` when the SDK client is nil, and start goroutines only through `internal/safego`
-4. Add the method to `SafetyDecorator` in `internal/safety/decorator.go`: a one-line pass-through for reads, the full dry-run/confirm flow for mutations
+4. Add the method to `SafetyDecorator` in `internal/safety/decorator.go`: a one-line pass-through for reads, the full plan flow for mutations
 5. Add a `<Method>Func` field to `internal/testutil/FakeGCPService` and call it from the fake method
 6. Create the tool definition + handler in `internal/mcp/tools/<domain>.go`
 7. Register it in `GetTools()` on the domain's `*Tools` struct
@@ -80,12 +80,12 @@ Avoid returning raw GCP SDK errors to the MCP layer — the LLM cannot act on gR
 
 ## Mutation tools
 
-The three mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`) use the two-step human-in-the-loop safety pattern enforced by `SafetyDecorator`. Any new mutation tool must:
+The three mutation tools (`gcp_gke_scale_deployment`, `gcp_cloudrun_update_traffic`, and the opt-in `gcp_export_recommendations_to_bq`) execute only after the user approves them in the MCP client. `SafetyDecorator` stores the previewed plan; the tool handler asks the user through MCP elicitation. Any new mutation tool must:
 
-1. Support `dry_run: true` that returns a preview and a `plan_id` without executing
-2. Execute only with `confirm_plan_id`, replaying the stored dry-run request with a state guard so a resource that changed since the preview is refused
+1. Have a request type with `DryRun` and `ConfirmPlanID` fields; the decorator guard test treats any request with `DryRun` as a mutation
+2. Implement the decorator's preview → stored plan → confirm flow, replaying the stored request with a state guard so a resource that changed since the preview is refused
 3. Return `no_change_needed: true` when the resource is already at the requested state
-4. Have a request type with `DryRun` and `ConfirmPlanID` fields; the decorator guard test treats any request with `DryRun` as a mutation
+4. Route its handler through `runMutation` (`internal/mcp/tools/approval.go`), keep `confirm_plan_id` out of the tool schema, and describe the change in the approval prompt clearly enough for a person to decide
 
 ## Submitting a PR
 

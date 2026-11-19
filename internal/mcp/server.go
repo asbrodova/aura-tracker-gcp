@@ -60,6 +60,14 @@ type serverOptions struct {
 	enableCostReasoning      bool
 	costReasoningConfig      costreasoning.Config
 	securityAuditConfig      securityaudit.Config
+	skipMutationApproval     bool
+}
+
+// WithoutMutationApproval lets mutation tools execute without asking the user
+// for approval. Use it only with SAFETY_ENABLED=false (local stdio), where the
+// service has no safety decorator to hold approval plans.
+func WithoutMutationApproval() Option {
+	return func(o *serverOptions) { o.skipMutationApproval = true }
 }
 
 // WithEnvironments configures the allowed project selectors, default project,
@@ -251,7 +259,7 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 			if err != nil {
 				return mcp.NewToolResultError("project identifier privacy filter failed; result withheld"), nil
 			}
-			return scrubbed, nil
+			return maskInputRequests(scrubbed, privacyMasker.ReplaceString), nil
 		}
 		wrapped := anonymize.WrapHandler(t, o.anonymizer)
 		wrappedHandler := wrapped.Handler
@@ -331,9 +339,15 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 
 	// --- Tools ---
 	iamTools := tools.NewIAMTools(svc, log)
+	gkeTools := tools.NewGKETools(svc, log)
+	cloudRunTools := tools.NewCloudRunTools(svc, log)
+	if o.skipMutationApproval {
+		gkeTools.DisableMutationApproval()
+		cloudRunTools.DisableMutationApproval()
+	}
 	allModules := []ToolModule{
-		tools.NewGKETools(svc, log),
-		tools.NewCloudRunTools(svc, log),
+		gkeTools,
+		cloudRunTools,
 		tools.NewPubSubTools(svc, log),
 		tools.NewLoggingTools(svc, log),
 		tools.NewMonitoringTools(svc, log),
@@ -363,7 +377,11 @@ func New(svc ports.GCPService, log *slog.Logger, version string, opts ...Option)
 		tools.NewDriftTools(drift.New(drift.NewGCPCollector(svc), log), log),
 	}
 	if o.enableRecommenderExport {
-		allModules = append(allModules, tools.NewRecommenderExportTools(svc, log, o.recommenderExportDataset))
+		exportTools := tools.NewRecommenderExportTools(svc, log, o.recommenderExportDataset)
+		if o.skipMutationApproval {
+			exportTools.DisableMutationApproval()
+		}
+		allModules = append(allModules, exportTools)
 	}
 	if o.enableCostReasoning {
 		allModules = append(allModules, tools.NewCostTools(costreasoning.New(svc, log, o.costReasoningConfig), log))
@@ -555,4 +573,25 @@ func environmentInstructions(registry *environments.Registry, placeholder string
 		"Configured environments: %s. When the user names an environment, pass that alias or configured project ID in the tool's project_id/project argument. Alias matching is case-insensitive. When no environment is named, omit the argument to use the default. For drift, diff, difference, parity, or comparison requests involving two environments, call gcp_compare_environments once with environment_a and environment_b; omit components to compare the whole environments or pass only the named components. Treat the comparison symmetrically. Present its summary first, group missing resources under headings that name the exact alias (for example, 'Missing in dev'), show changed fields with both alias-specific values, and put coverage gaps last. Never call either environment the baseline or target. Always refer to aliased projects by alias in answers and never reveal their project IDs.",
 		strings.Join(configured, ", "),
 	)
+}
+
+// maskInputRequests applies the project-ID masker to the text of approval
+// prompts. The result scrubbers only walk content and structured content, but
+// an input_required result carries its prompt in InputRequests, which the
+// client shows to the user and may also expose to the model.
+func maskInputRequests(result *mcp.CallToolResult, mask func(string) string) *mcp.CallToolResult {
+	if result == nil || len(result.InputRequests) == 0 {
+		return result
+	}
+	out := *result
+	out.InputRequests = make(mcp.InputRequests, len(result.InputRequests))
+	for id, request := range result.InputRequests {
+		if request.Elicitation != nil {
+			params := *request.Elicitation
+			params.Message = mask(params.Message)
+			request.Elicitation = &params
+		}
+		out.InputRequests[id] = request
+	}
+	return &out
 }

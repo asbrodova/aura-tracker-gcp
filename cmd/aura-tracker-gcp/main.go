@@ -209,6 +209,9 @@ For automation, use an attached service account, Workload Identity, or service-a
 		mcpserver.WithModules(enabledModules),
 		mcpserver.WithEnvironments(environmentRegistry),
 	}
+	if !safetyEnabled {
+		mcpOpts = append(mcpOpts, mcpserver.WithoutMutationApproval())
+	}
 	projectIDReplacements := costSourceProjectIDReplacements(costSources)
 	maskProjectID, err := readBoolEnv("ANONYMIZE_PROJECT_ID", false, os.Getenv)
 	if err != nil {

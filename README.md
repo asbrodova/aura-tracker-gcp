@@ -59,7 +59,7 @@ The opt-in cost engine compares complete calendar windows, reconciles cost delta
 
 ### It is safe to explore
 
-71 of the 73 default tools are read-only. The two infrastructure-changing tools—GKE node-pool scaling and Cloud Run traffic updates—use expiring, single-use preview plans when safety is enabled. Secret Manager integration reads metadata only; secret values are never accessed.
+71 of the 73 default tools are read-only. The two infrastructure-changing tools—GKE node-pool scaling and Cloud Run traffic updates—run only after you approve the previewed change in your MCP client. Secret Manager integration reads metadata only; secret values are never accessed.
 
 ### It stays yours
 
@@ -311,7 +311,7 @@ See [Cost Reasoning](https://github.com/asbrodova/aura-tracker-gcp/wiki/Cost-Rea
 | **Cost** | Recommender signals, composite health/efficiency scores, detailed billing-export reasoning, new-resource confirmation, traffic correlation, and BigQuery optimization prompts |
 | **Environment control** | Aliases, default routing, project-ID masking, symmetric drift detection, and per-environment cost-source routing |
 | **Platform inventory** | Cloud Functions, Eventarc, Scheduler, Workflows, Tasks, Pub/Sub, Cloud SQL, Storage, Spanner, AlloyDB, Firestore, Memorystore, Artifact Registry, Cloud Build, and Service Directory |
-| **Safe changes** | Preview-and-confirm GKE node-pool scaling and Cloud Run traffic updates |
+| **Safe changes** | GKE node-pool scaling and Cloud Run traffic updates that run only after you approve the preview |
 
 The zero-configuration server exposes 73 tools across 29 immediately active tool modules. Cost reasoning is the 30th selectable module and adds a 74th tool only when its billing-export prerequisites are configured; the separately opt-in recommendation export can add a 75th tool. Four static resources per environment and six URI templates expose BigQuery schemas, Cloud Run snapshots, Storage metadata, and IAM permissions before the model chooses a tool.
 
@@ -336,14 +336,14 @@ See the [scoring model and signal weights](https://github.com/asbrodova/aura-tra
 | Control | Default | Behavior |
 |---|---|---|
 | Read-only tools | 71 of 73 base tools | Inventory, investigation, audits, diagrams, drift, and recommendations do not mutate infrastructure |
-| Mutation safety | On | Dry-run returns an immutable plan; confirmation requires its expiring, single-use `plan_id` |
+| Mutation safety | On | Every change is previewed and executed only after the user approves it in the MCP client; the model cannot confirm on its own |
 | Recommender runtime integration | On | The Google API and `roles/recommender.viewer` must still be enabled per project |
 | Cost reasoning | Off | Must be explicitly enabled and configured with billing-export sources |
 | PII and credential scrubbing | Off | Optional local anonymization can scrub every tool, resource, prompt, error, and diagram response |
 | Secret values | Never accessed | Secret Manager exposes metadata only and never calls the versions-access API |
 | Remote SSE access | Authenticated | Public endpoints require HTTPS, Google identity tokens, and an email allowlist unless explicitly broadened |
 
-Mutation plans expire after 10 minutes and are single-use. Confirmed executions are audit-logged. The protocol enforces a separate preview and confirmation call; whether a distinct human approves the second call depends on the MCP client and deployment policy.
+Approval uses MCP elicitation: the server asks the user directly through the client, and only an accepted prompt executes the stored, single-use plan (10-minute expiry, bound to the caller and session, refused if the resource changed since the preview). Approved executions are audit-logged. Clients or transports that cannot show the prompt are refused rather than allowed to proceed; `dry_run: true` still previews any change.
 
 Read the full [security model](https://github.com/asbrodova/aura-tracker-gcp/wiki/Security-and-Safety) and [safety and cost safeguards](https://github.com/asbrodova/aura-tracker-gcp/wiki/Safety-and-Cost-Safeguards).
 

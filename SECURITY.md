@@ -35,7 +35,7 @@ Examples of issues that should be reported privately include:
 - Authentication or authorization bypass in remote SSE deployments
 - Exposure of credentials, tokens, secrets, billing data, or project identifiers
 - Cross-environment data leakage between configured project aliases
-- Bypassing preview-and-confirm safeguards for infrastructure mutations
+- Bypassing the user-approval safeguard for infrastructure mutations (executing a change without an accepted approval prompt)
 - Injection through tool inputs, outputs, prompts, diagrams, or rendered SVG
 - Access to Secret Manager secret values
 - Commands or GCP operations executed outside the documented scope
