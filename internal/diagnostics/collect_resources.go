@@ -338,7 +338,7 @@ func eventReason(message string) string {
 	switch {
 	case strings.Contains(lower, "back-off restarting failed container"):
 		return "BackOff"
-	case strings.Contains(lower, "oom"):
+	case strings.Contains(lower, "oom") || strings.Contains(lower, "out of memory"):
 		return "OOMKilling"
 	case strings.Contains(lower, "probe failed"):
 		return "Unhealthy"

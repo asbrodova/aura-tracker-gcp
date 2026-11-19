@@ -99,7 +99,7 @@ func TestDiagnoseGKEWorkloadWithUnschedulableAndCrashingPods(t *testing.T) {
 			t.Errorf("causes %s are missing %s", codes, want)
 		}
 	}
-	workload := response.ServiceSymptoms[0].Workload
+	workload := response.Symptoms[0].Workload
 	if workload == nil || workload.Restarts != 8 || workload.BaselineRestarts != 1 || workload.WarningEvents["FailedScheduling"] != 1 {
 		t.Fatalf("workload symptoms = %+v (the other workload's restarts must not count)", workload)
 	}
@@ -156,7 +156,7 @@ func TestDiagnoseGen1FunctionUsesExecutionMetrics(t *testing.T) {
 	if len(response.Scope.Targets) != 1 || response.Scope.Targets[0].Region != "us-central1" || response.Scope.Targets[0].Generation != 1 {
 		t.Fatalf("scope = %+v", response.Scope)
 	}
-	if rate := response.ServiceSymptoms[0].ErrorRate.Current; rate < 0.29 || rate > 0.31 {
+	if rate := response.Symptoms[0].ErrorRate.Current; rate < 0.29 || rate > 0.31 {
 		t.Fatalf("error rate = %v, want 0.3 (30 crashed of 100 executions)", rate)
 	}
 	codes := causeCodes(response)
