@@ -72,10 +72,12 @@ validate_project_id() {
   fi
 }
 
+# The length is checked separately: macOS ships bash 3.2, whose regex engine
+# rejects repeat counts above 255 (RE_DUP_MAX), so {1,1024} never matches.
 validate_dataset() {
   local value="$1"
-  if [[ ! "$value" =~ ^[A-Za-z0-9_]{1,1024}$ ]]; then
-    echo "ERROR: dataset '${value}' must contain only letters, digits, and underscores." >&2
+  if [[ ! "$value" =~ ^[A-Za-z0-9_]+$ ]] || [[ "${#value}" -gt 1024 ]]; then
+    echo "ERROR: dataset '${value}' must be 1-1024 letters, digits, and underscores." >&2
     exit 2
   fi
 }

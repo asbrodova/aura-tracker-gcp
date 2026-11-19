@@ -301,6 +301,7 @@ test_cost_sources_validation() {
 		"COST_REASONING_ENABLED=true COST_SOURCES=finops-eu-1::billing_eu BILLING_EXPORT_DATASET=cloud_billing" \
 		"COST_REASONING_ENABLED=true COST_SOURCES=finops-eu-1" \
 		"COST_REASONING_ENABLED=true COST_SOURCES=finops-eu-1::bad-dataset" \
+		"COST_REASONING_ENABLED=true COST_SOURCES=finops-eu-1::$(printf 'd%.0s' {1..1025})" \
 		"COST_REASONING_ENABLED=true BILLING_EXPORT_DATASET=cloud_billing BILLING_DATASET_ACCESS=table"; do
 		set +e
 		# shellcheck disable=SC2086
