@@ -92,6 +92,8 @@ Application-layer engines live between MCP and the port: `internal/diagnostics` 
 | `MCP_AUTH_ALLOWED_EMAILS` | SSE only | Comma-separated allowlist of verified caller emails. A public URL needs this or `MCP_AUTH_ALLOW_ANY_VALID_TOKEN=true`. |
 | `MCP_AUTH_ALLOW_ANY_VALID_TOKEN` | SSE only | `true` accepts any valid Google ID token for the audience. Explicit opt-in. |
 
+An SSE server is single-instance: live streams, approval plans, rate limiters, quota gates and caches are process memory, and session-signing keys are generated per process. Deploy with one instance and session affinity (`deploy/cloud-run-sse.yaml.tmpl`; Cloud Run `--max-instances=1 --session-affinity --timeout=3600`). Startup logs this, as a warning when `K_SERVICE` shows it runs on Cloud Run. Do not add per-instance state that assumes otherwise without moving it out of the process.
+
 ## User Config File
 
 Optional per-user defaults in `~/.aura-tracker.yaml`. Legacy scalar settings are overridden by their environment variables; environment lists must use exactly one configuration source.

@@ -347,6 +347,7 @@ See the [scoring model and signal weights](https://github.com/asbrodova/aura-tra
 | PII and credential scrubbing | Off | Optional local anonymization can scrub every tool, resource, prompt, error, and diagram response |
 | Secret values | Never accessed | Secret Manager exposes metadata only and never calls the versions-access API |
 | Remote SSE access | Authenticated | Public endpoints require HTTPS, Google identity tokens, and an email allowlist unless explicitly broadened |
+| SSE deployment | One instance | Sessions and approval plans live in the server process, so a team service runs as a single instance with session affinity ([deployment recipe](https://github.com/asbrodova/aura-tracker-gcp/wiki/Configure-Your-Environment#run-exactly-one-instance)) |
 
 Approval uses MCP elicitation: the server asks the user directly through the client, and only an accepted prompt executes the stored, single-use plan (10-minute expiry, bound to the caller and session, refused if the resource changed since the preview). Approved executions are audit-logged. Clients or transports that cannot show the prompt are refused rather than allowed to proceed; `dry_run: true` still previews any change.
 

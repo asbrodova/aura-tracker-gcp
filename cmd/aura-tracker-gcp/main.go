@@ -311,6 +311,8 @@ For automation, use an attached service account, Workload Identity, or service-a
 		)
 		httpServer.Handler = http.MaxBytesHandler(authenticatedMCPHandler(sseServer, googleIdentityTokenValidator{}, authCfg, log, sessionBinding), 2<<20)
 		log.Info("aura-tracker-gcp starting", "transport", "sse", "version", version, "addr", listenAddr, "base_url", baseURL, "auth_mode", authCfg.Mode)
+		noticeLevel, notice, noticeAttrs := sseStateNotice(os.Getenv)
+		log.Log(context.Background(), noticeLevel, notice, noticeAttrs...)
 
 		sigCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
