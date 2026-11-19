@@ -1,0 +1,62 @@
+# Single-instance Cloud Run service for Aura over SSE.
+#
+# Aura keeps live SSE streams, approval plans, rate limiters, quota gates and
+# caches in process memory. A second instance would not see a session's stream
+# or its pending approvals, so this recipe pins the service to ONE instance and
+# keeps each client on it:
+#   - autoscaling.knative.dev/maxScale "1"   never scale out
+#   - run.googleapis.com/sessionAffinity     send a client back to the instance
+#   - timeoutSeconds 3600                    let an SSE stream stay open for an hour
+# A new revision briefly overlaps the old one during a deploy; sessions on the
+# old revision end and clients reconnect.
+#
+# Replace the AURA_* placeholders, then deploy:
+#   gcloud run services replace deploy/cloud-run-sse.yaml --region AURA_REGION --project AURA_HOST_PROJECT
+# The first deploy assigns the service URL. Put it in MCP_BASE_URL and
+# MCP_AUTH_AUDIENCE and deploy again. Grant callers roles/run.invoker, or use a
+# load balancer with your own domain.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: aura-tracker-gcp
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/maxScale: "1"
+        autoscaling.knative.dev/minScale: "0"
+        run.googleapis.com/sessionAffinity: "true"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      serviceAccountName: AURA_SERVICE_ACCOUNT_EMAIL
+      timeoutSeconds: 3600
+      containerConcurrency: 80
+      containers:
+        # Copy ghcr.io/asbrodova/aura-tracker-gcp:X.Y.Z into Artifact Registry
+        # first (Cloud Run does not pull from ghcr.io); pin the version.
+        - image: AURA_REGION-docker.pkg.dev/AURA_HOST_PROJECT/aura/aura-tracker-gcp:X.Y.Z
+          ports:
+            - containerPort: 8080
+          env:
+            - name: MCP_TRANSPORT
+              value: sse
+            - name: MCP_BASE_URL
+              value: https://AURA_SERVICE_URL
+            - name: MCP_AUTH_MODE
+              value: required
+            - name: MCP_AUTH_AUDIENCE
+              value: https://AURA_SERVICE_URL
+            - name: MCP_AUTH_ALLOWED_EMAILS
+              value: AURA_ALLOWED_EMAILS
+            - name: GCP_ENVIRONMENTS_JSON
+              value: '[{"project_id":"AURA_WORKLOAD_PROJECT","alias":"prod","default":true}]'
+            # Read-only by default. Set to "true" only if this deployment must
+            # change resources; every change still needs the user's approval.
+            - name: MUTATIONS_ENABLED
+              value: "false"
+          resources:
+            limits:
+              cpu: "1"
+              memory: 1Gi
