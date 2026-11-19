@@ -128,4 +128,18 @@ func TestPromptOptionalArguments(t *testing.T) {
 	if text := promptText(t, p.IncidentResponseHelper(), map[string]string{"environment": "staging"}); !strings.Contains(text, `environment="staging"`) {
 		t.Errorf("incident prompt ignored environment=staging")
 	}
+	if strings.Contains(incident, "cluster_name=") || !strings.Contains(incident, `resource_type="cloud_run_service"`) {
+		t.Errorf("Cloud Run incident prompt should default the resource type and omit GKE arguments:\n%s", incident)
+	}
+	gke := promptText(t, p.IncidentResponseHelper(), map[string]string{
+		"resource_type": "gke_workload", "service_name": "checkout", "region": "us-central1", "cluster_name": "prod", "namespace": "shop",
+	})
+	for _, want := range []string{`resource_type="gke_workload"`, `cluster_name="prod"`, `namespace="shop"`, `service_name="checkout"`} {
+		if !strings.Contains(gke, want) {
+			t.Errorf("GKE incident prompt missing %s:\n%s", want, gke)
+		}
+	}
+	if strings.Contains(gke, "workload_kind=") {
+		t.Errorf("an omitted workload_kind was passed to the tool:\n%s", gke)
+	}
 }
